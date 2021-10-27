@@ -657,18 +657,8 @@ create_empty_production() -> Production*
 auto
 create_new_rule() -> Production*
 {
-    if (grammar.rule_count >= grammar.rule_max_count - 1) {
-        grammar.rule_max_count *= 2;
-        HYY_EXPAND(&grammar.rules, grammar.rule_max_count);
-        // printf("grammar.rule_max_count expanded to %d\n",
-        //        grammar.rule_max_count);
-    }
-
-    // printf("--new rule:");
-    grammar.rules[grammar.rule_count] = create_empty_production();
-    grammar.rule_count++;
-
-    return grammar.rules[grammar.rule_count - 1];
+    grammar.rules.push_back(create_empty_production());
+    return grammar.rules.back();
 }
 
 /*
@@ -688,7 +678,7 @@ insert_mid_prod_rule(int ct)
     create_new_rule();
 
     // switch the postion of the last two rules.
-    int rule_id = grammar.rule_count - 1; // last rule's pointer.
+    int rule_id = grammar.rules.size() - 1; // last rule's pointer.
     p = grammar.rules[rule_id];
     grammar.rules[rule_id] = grammar.rules[rule_id - 1];
     grammar.rules[rule_id - 1] = p;
@@ -707,7 +697,7 @@ void
 add_lhs_symbol(SymbolTblNode* symbol)
 {
     // printf("\n==add LHS symbol: %s\n", symbol);
-    Production* p = grammar.rules[grammar.rule_count - 1];
+    Production* p = grammar.rules.back();
     p->nLHS = create_symbol_node(symbol);
 }
 
@@ -715,7 +705,7 @@ void
 add_rhs_symbol(SymbolTblNode* symbol)
 {
     // printf("\n==add RHS symbol: %s\n", symbol);
-    Production* p = grammar.rules[grammar.rule_count - 1];
+    Production* p = grammar.rules.back();
     p->RHS_count++;
 
     SymbolNode* s = create_symbol_node(symbol);
@@ -745,7 +735,7 @@ get_rhs_prec_symbol(char* symbol)
                                  to_string(n_col) + "]: %prec symbol " +
                                  symbol + " should be declared.");
     }
-    Production* p = grammar.rules[grammar.rule_count - 1];
+    Production* p = grammar.rules.back();
     if (n->TP != nullptr && n->TP->precedence > 0)
         p->lastTerminal = n;
 }
@@ -753,7 +743,7 @@ get_rhs_prec_symbol(char* symbol)
 void
 set_has_code()
 {
-    grammar.rules[grammar.rule_count - 1]->hasCode = 1;
+    grammar.rules.back()->hasCode = 1;
 }
 
 /////////////////////////////////////////////////////////////
@@ -822,18 +812,18 @@ get_vanish_symbols(Grammar* g)
     g->vanish_symbol_count = 0;
 
     // find vanish symbols that occur in epsilon-productions.
-    for (int i = 0; i < g->rule_count; i++) {
-        if (flag_y(g->rules[i]) == true) {
+    for (auto& rule : g->rules) {
+        if (flag_y(rule)) {
 
             if (tail == nullptr) {
                 tail = g->vanish_symbol_list =
-                  create_symbol_node(g->rules[i]->nLHS->snode);
+                  create_symbol_node(rule->nLHS->snode);
             } else {
-                tail->next = create_symbol_node(g->rules[i]->nLHS->snode);
+                tail->next = create_symbol_node(rule->nLHS->snode);
                 tail = tail->next;
             }
 
-            g->rules[i]->nLHS->snode->vanishable = 1; // 12-6-2008
+            rule->nLHS->snode->vanishable = true;
             g->vanish_symbol_count++;
         }
     }
@@ -845,22 +835,21 @@ get_vanish_symbols(Grammar* g)
 
     while (true) {
         bool new_vanish_symbol_found = false;
-        for (int i = 0; i < g->rule_count; i++) {
-            if (is_in_vanish_symbol_list(g->rules[i]->nLHS->snode) == false) {
+        for (auto& rule : g->rules) {
+            if (is_in_vanish_symbol_list(rule->nLHS->snode) == false) {
                 // y is not yet a vanish symbol, then:
-                if (flag_y(g->rules[i]) == true) {
-
+                if (flag_y(rule)) {
                     // we know tail != nullptr
-                    tail->next = create_symbol_node(g->rules[i]->nLHS->snode);
+                    tail->next = create_symbol_node(rule->nLHS->snode);
                     tail = tail->next;
 
-                    g->rules[i]->nLHS->snode->vanishable = 1; // 12-6-2008
+                    rule->nLHS->snode->vanishable = 1; // 12-6-2008
 
                     g->vanish_symbol_count++;
                     new_vanish_symbol_found = true;
-                } // end if
-            }     // end if
-        }         // end for
+                }
+            }
+        }
         if (!new_vanish_symbol_found)
             break;
     } // end while
@@ -881,16 +870,15 @@ get_non_terminals(Grammar* g)
     g->non_terminal_count = 0;
 
     // First scan LHS of all rules.
-    for (int i = 0; i < g->rule_count; i++) {
-        if (find_in_symbol_list(g->non_terminal_list,
-                                g->rules[i]->nLHS->snode) != nullptr)
+    for (const auto& rule : g->rules) {
+        if (find_in_symbol_list(g->non_terminal_list, rule->nLHS->snode) !=
+            nullptr) {
             continue;
-
+        }
         if (tail == nullptr) {
-            tail = g->non_terminal_list =
-              create_symbol_node(g->rules[i]->nLHS->snode);
+            tail = g->non_terminal_list = create_symbol_node(rule->nLHS->snode);
         } else {
-            tail->next = create_symbol_node(g->rules[i]->nLHS->snode);
+            tail->next = create_symbol_node(rule->nLHS->snode);
             tail = tail->next;
         }
 
@@ -904,9 +892,8 @@ get_non_terminals(Grammar* g)
     // Next scan RHS of all rules.
     // no extra non-terminal should appear, since otherwise
     // it's not used as the LHS of any rule.
-    for (int i = 0; i < g->rule_count; i++) {
-        for (tail = g->rules[i]->nRHS_head; tail != nullptr;
-             tail = tail->next) {
+    for (const auto& rule : g->rules) {
+        for (tail = rule->nRHS_head; tail != nullptr; tail = tail->next) {
             if (tail->snode->type != symbol_type::NONTERMINAL)
                 continue;
 
@@ -920,7 +907,7 @@ get_non_terminals(Grammar* g)
             }
         }
     }
-    // if (has_error == true) exit(1);
+    // if (has_error ) exit(1);
 }
 
 /*
@@ -934,9 +921,9 @@ get_terminals(Grammar* g)
     SymbolNode* tail = nullptr;
     g->terminal_count = 0;
 
-    for (int i = 0; i < g->rule_count; i++) {
-        SymbolNode* s = g->rules[i]->nRHS_head;
-        for (int j = 0; j < g->rules[i]->RHS_count; j++) {
+    for (const auto& rule : g->rules) {
+        SymbolNode* s = rule->nRHS_head;
+        for (int j = 0; j < rule->RHS_count; j++) {
             if (j > 0)
                 s = s->next; // s: g->rules[i]->RHS[j].
             char* symbol = s->snode->symbol;
@@ -1143,7 +1130,7 @@ get_symbol_rule_id_list(Grammar* g)
     for (SymbolNode* a = g->non_terminal_list; a != nullptr; a = a->next) {
         SymbolTblNode* n = a->snode;
         RuleIDNode* tail = nullptr;
-        for (int i = 0; i < g->rule_count; i++) {
+        for (int i = 0; i < g->rules.size(); i++) {
             if (n == g->rules[i]->nLHS->snode) {
                 RuleIDNode* r = create_rule_id_node(i);
                 if (tail == nullptr) {
@@ -1161,7 +1148,7 @@ get_symbol_rule_id_list(Grammar* g)
 void
 get_grammar_unit_productions(Grammar* g)
 {
-    for (int i = 0; i < g->rule_count; i++) {
+    for (int i = 0; i < g->rules.size(); i++) {
         if (grammar.rules[i]->RHS_count == 1 &&
             strlen(grammar.rules[i]->nRHS_head->snode->symbol) > 0) {
             g->rules[i]->isUnitProduction = true;
@@ -1388,7 +1375,7 @@ process_yacc_file_input_section2()
                         output_nonterminal(RHS); // OUTPUT NEXT RHS SYMBOL.
                     }
                     yacc_sec2_state = TERMINAL;
-                    if (end_of_code == true) { // for mid-prod action.
+                    if (end_of_code) { // for mid-prod action.
                         mid_prod_code_ct++;
                         insert_mid_prod_rule(mid_prod_code_ct);
                         end_of_code = false;
@@ -1440,7 +1427,7 @@ process_yacc_file_input_section2()
                 } else if (c == ':') {
                     my_perror("A ';' is missed in the last rule?", c);
                 } else {
-                    if (end_of_code == true) { // for mid-prod action.
+                    if (end_of_code) { // for mid-prod action.
                         mid_prod_code_ct++;
                         insert_mid_prod_rule(mid_prod_code_ct);
                         end_of_code = false;
@@ -1531,7 +1518,7 @@ process_yacc_file_input_section2()
 void
 get_goal_rule_rhs()
 {
-    if (grammar.rule_count > 1) {
+    if (grammar.rules.size() > 1) {
         if (start_symbol != nullptr) {
             grammar.rules[0]->nRHS_head = grammar.rules[0]->nRHS_tail =
               create_symbol_node(start_symbol);
@@ -1568,18 +1555,18 @@ post_modification(Grammar* g)
     // printf("calling post_modification\n");
     if (USE_REMOVE_UNIT_PRODUCTION == false)
         return;
-    if (PRESERVE_UNIT_PROD_WITH_CODE == true)
+    if (PRESERVE_UNIT_PROD_WITH_CODE)
         return;
 
     SymbolTblNode* n = hash_tbl_insert(strPlaceHolder);
     n->type = symbol_type::NONTERMINAL;
 
     int count = 0;
-    for (int i = 0; i < g->rule_count; i++) {
-        if (g->rules[i]->RHS_count == 1 && g->rules[i]->hasCode == 1) {
+    for (const auto& rule : g->rules) {
+        if (rule->RHS_count == 1 && rule->hasCode == 1u) {
             // printf("rule %d is a unit production with code\n", i);
             count++;
-            Production* p = g->rules[i];
+            Production* p = rule;
             p->RHS_count++;
             p->isUnitProduction = 0;
             // add one more symbol to the end of RHS:
@@ -1612,8 +1599,7 @@ get_yacc_grammar_init()
     n->type = symbol_type::TERMINAL;
     n->vanishable = 1;
 
-    grammar.rule_max_count = GRAMMAR_RULE_INIT_MAX_COUNT;
-    grammar.rules = new Production*[grammar.rule_max_count];
+    grammar.rules.reserve(GRAMMAR_RULE_INIT_MAX_COUNT);
 
     ysymbol_size = SYMBOL_INIT_SIZE;
     ysymbol = new char[ysymbol_size];
@@ -1660,7 +1646,7 @@ get_yacc_grammar(char* infile)
 
     get_grammar_params();
 
-    n_rule = grammar.rule_count;
+    n_rule = grammar.rules.size();
     n_symbol = grammar.terminal_count + grammar.non_terminal_count;
     n_rule_opt = grammar.get_opt_rule_count();
     // writeGrammar(& grammar); exit(0);

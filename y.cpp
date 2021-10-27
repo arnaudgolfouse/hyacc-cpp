@@ -239,7 +239,7 @@ StateList::clone() -> StateList*
 }
 
 void
-StateList::write()
+StateList::write() const
 {
     yyprintf("\n  parents_list(%d): ", this->state_list.size());
     for (int i = 0; i < this->state_list.size(); i++) {
@@ -255,7 +255,7 @@ StateList::write()
  */
 
 void
-Production::write(int marker)
+Production::write(int marker) const
 {
     yyprintf("%s ", this->nLHS->snode->symbol);
     yyprintf("-> ");
@@ -285,39 +285,40 @@ Production::write(int marker)
 }
 
 void
-Grammar::write_rules()
+Grammar::write_rules() const
 {
     int count = 0;
     yyprintf("Rules: \n");
-	int i = 0;
-    for (int i = 0; i < this->rule_count; i++) {
-        yyprintf("(%d) ", i);
-        this->rules[i]->write(-1);
+    for (const auto& rule : this->rules) {
+        yyprintf("(%d) ", count);
+        rule->write(-1);
         count++;
     }
     yyprintf("Number of Rules: %d\n", count);
 }
 
 void
-Grammar::write_rules_no_unit_prod()
+Grammar::write_rules_no_unit_prod() const
 {
     int count = 0;
+    int i = 0;
     yyprintf("Rules: \n");
-    for (int i = 0; i < this->rule_count; i++) {
+    for (const auto& rule : this->rules) {
         if ((is_unit_production(i) == false) || i == 0) {
             yyprintf("(%d) ", i);
-            this->rules[i]->write(-1);
+            rule->write(-1);
             count++;
         }
+        i++;
     }
     yyprintf("Number of Rules: %d\n", count);
 }
 
 auto
-Grammar::get_opt_rule_count() -> int
+Grammar::get_opt_rule_count() -> int const
 {
     int count = 0;
-    for (int i = 0; i < this->rule_count; i++) {
+    for (int i = 0; i < this->rules.size(); i++) {
         if (!is_unit_production(i) || i == 0)
             count++;
     }
@@ -325,7 +326,7 @@ Grammar::get_opt_rule_count() -> int
 }
 
 void
-Grammar::write_terminals()
+Grammar::write_terminals() const
 {
     yyprintf("Terminals (%d): \n", this->terminal_count);
 
@@ -340,7 +341,7 @@ Grammar::write_terminals()
 }
 
 void
-Grammar::write_non_terminals()
+Grammar::write_non_terminals() const
 {
     yyprintf("Non-terminals (%d): \n", this->non_terminal_count);
     SymbolNode* a = this->non_terminal_list;
@@ -354,7 +355,7 @@ Grammar::write_non_terminals()
 }
 
 void
-Grammar::write_vanish_symbols()
+Grammar::write_vanish_symbols() const
 {
     SymbolNode* a = nullptr;
     yyprintf("Vanish symbols (%d): \n", this->vanish_symbol_count);
@@ -368,7 +369,7 @@ Grammar::write_vanish_symbols()
 }
 
 void
-Grammar::write(bool before_rm_unit_prod)
+Grammar::write(bool before_rm_unit_prod) const
 {
     yyprintf("\n--Grammar--\n");
     this->write_terminals();
@@ -392,8 +393,8 @@ void
 free_vars()
 {
     // free dynamically allocated variables in grammar.
-    for (int i = 0; i < grammar.rule_count; i++) {
-        free_production(grammar.rules[i]);
+    for (auto& rule : grammar.rules) {
+        free_production(rule);
     }
 
     // free dynamically allocated variables in states_new.

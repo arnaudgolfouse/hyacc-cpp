@@ -425,28 +425,27 @@ insert_parent_child_relation(MRTreeNode* parent, MRTreeNode* child)
 void
 build_multirooted_tree()
 {
-    Grammar* g = &grammar;
-
     // initialization.
     all_parents = create_mr_parents();
     init_array_leaf_index_for_parent();
     create_mr_leaves_array();
 
-    for (int i = 1; i < g->rule_count; i++) {
+    for (int i = 1; i < grammar.rules.size(); i++) {
         if (is_unit_production(i) == true) {
-            MRTreeNode* lhs = find_node_in_forest(g->rules[i]->nLHS->snode);
+            MRTreeNode* lhs =
+              find_node_in_forest(grammar.rules[i]->nLHS->snode);
             MRTreeNode* rhs =
-              find_node_in_forest(g->rules[i]->nRHS_head->snode);
+              find_node_in_forest(grammar.rules[i]->nRHS_head->snode);
             if (lhs != nullptr && rhs == nullptr) {
                 // insert rhs as child of lhs.
-                insert_child(lhs, g->rules[i]->nRHS_head->snode);
+                insert_child(lhs, grammar.rules[i]->nRHS_head->snode);
             } else if (lhs == nullptr && rhs != nullptr) {
                 // insert lhs as parent of rhs.
-                insert_parent(rhs, g->rules[i]->nLHS->snode);
+                insert_parent(rhs, grammar.rules[i]->nLHS->snode);
             } else if (lhs == nullptr && rhs == nullptr) {
                 // insert as new tree.
-                insert_new_tree(g->rules[i]->nLHS->snode,
-                                g->rules[i]->nRHS_head->snode);
+                insert_new_tree(grammar.rules[i]->nLHS->snode,
+                                grammar.rules[i]->nRHS_head->snode);
             } else { // just add this relationship.
                 insert_parent_child_relation(lhs, rhs);
             } // end if

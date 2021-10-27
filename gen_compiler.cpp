@@ -225,7 +225,7 @@ find_full_rule(int rule_count) -> Production*
     SymbolNode* node = nullptr;
     SymbolTblNode* sym = nullptr;
 
-    for (int full_rule = rule_count; full_rule < grammar.rule_count;
+    for (int full_rule = rule_count; full_rule < grammar.rules.size();
          ++full_rule) {
 
         if ((rule = grammar.rules[full_rule]) && (node = rule->nLHS) &&
@@ -689,11 +689,11 @@ print_yyr1()
 
     if (USE_REMOVE_UNIT_PRODUCTION) {
         int index = 0;
-        for (int i = 1; i < grammar.rule_count; i++) {
+        for (int i = 1; i < grammar.rules.size(); i++) {
             // printf("rule %d lhs: %s\n", i, grammar.rules[i]->LHS);
             index = grammar.rules[i]->nLHS->snode->value;
             fprintf(fp, "%6d", index);
-            if (i < grammar.rule_count - 1)
+            if (i < grammar.rules.size() - 1)
                 fprintf(fp, ",");
             if ((i - 9) % 10 == 0)
                 fprintf(fp, "\n");
@@ -702,11 +702,11 @@ print_yyr1()
         return;
     }
 
-    for (int i = 1; i < grammar.rule_count; i++) {
+    for (int i = 1; i < grammar.rules.size(); i++) {
         fprintf(fp,
                 "%6d",
                 (-1) * get_non_terminal_index(grammar.rules[i]->nLHS->snode));
-        if (i < grammar.rule_count - 1)
+        if (i < grammar.rules.size() - 1)
             fprintf(fp, ",");
         if ((i - 9) % 10 == 0)
             fprintf(fp, "\n");
@@ -729,11 +729,11 @@ print_yyr2()
     int i = 0;
     fprintf(fp, "static YYCONST yytabelem yyr2[] = {\n");
     fprintf(fp, "%6d,", 0);
-    for (i = 1; i < grammar.rule_count; i++) {
+    for (i = 1; i < grammar.rules.size(); i++) {
         fprintf(fp,
                 "%6d",
                 (grammar.rules[i]->RHS_count << 1) + grammar.rules[i]->hasCode);
-        if (i < grammar.rule_count - 1)
+        if (i < grammar.rules.size() - 1)
             fprintf(fp, ",");
         if ((i - 9) % 10 == 0)
             fprintf(fp, "\n");
@@ -791,7 +791,7 @@ print_yyreds()
 {
     fprintf(fp, "char * yyreds[] = {\n");
     fprintf(fp, "\t\"-no such reduction-\"\n");
-    for (int i = 1; i < grammar.rule_count; i++) {
+    for (int i = 1; i < grammar.rules.size(); i++) {
         fprintf(fp, "\t\"%s : ", grammar.rules[i]->nLHS->snode->symbol);
 
         const SymbolNode* a = grammar.rules[i]->nRHS_head;

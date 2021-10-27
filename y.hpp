@@ -62,7 +62,7 @@ constexpr bool ADD_GOAL_RULE = true;
 extern FILE* fp_v;
 
 template<typename... T>
-constexpr auto
+inline auto
 yyprintf(const char* s, T... t) -> void
 {
     if (fp_v != nullptr) {
@@ -70,16 +70,14 @@ yyprintf(const char* s, T... t) -> void
     }
 }
 
-// template<typename T>
-// constexpr auto
-// HYY_NEW(size_t size) -> T*
-// {
-//     T* name = new T[size];
-//     if (name == nullptr) {
-//         throw std::runtime_error("HYY_NEW error: out of memory");
-//     }
-//     return name;
-// }
+template<>
+inline auto
+yyprintf(const char* s) -> void
+{
+    if (fp_v != nullptr) {
+        fprintf(fp_v, "%s", s);
+    }
+}
 
 template<typename T>
 constexpr auto
@@ -311,7 +309,7 @@ struct Production
      * In general, marker == -1 only when print grammar rules.
      * marker >= 0 when print configuration production.
      */
-    void write(int marker);
+    void write(int marker) const;
 };
 
 /*
@@ -397,7 +395,7 @@ struct StateList
      * @Return: true is added, false if not added.
      */
     auto add(State* s) -> bool;
-    void write();
+    void write() const;
 };
 
 struct StateNode
@@ -461,7 +459,7 @@ struct Grammar
     /*
      * Write rules of the given grammar.
      */
-    void write_rules();
+    void write_rules() const;
 
     /*
      * Write rules of the given grammar which are not
@@ -469,17 +467,17 @@ struct Grammar
      * The goal production is always printed no matter
      * it is a unit production or not.
      */
-    void write_rules_no_unit_prod();
+    void write_rules_no_unit_prod() const;
 
     /*
      * Returns number of rules excluding unit productions.
      */
-    auto get_opt_rule_count() -> int;
+    auto get_opt_rule_count() -> int const;
 
     /*
      * Write terminals of the given grammar.
      */
-    void write_terminals();
+    void write_terminals() const;
 
     /*
      * Write non-terminals of the given grammar.
@@ -488,15 +486,15 @@ struct Grammar
      * is just to keep consistent with yacc.
      * Leave this out for now.
      */
-    void write_non_terminals();
+    void write_non_terminals() const;
 
-    void write_vanish_symbols();
+    void write_vanish_symbols() const;
 
     /*
      * Write the given grammar, including its terminals,
      * non-terminals, goal symbol and rules.
      */
-    void write(bool before_rm_unit_prod);
+    void write(bool before_rm_unit_prod) const;
 };
 
 extern Grammar grammar; /* Used by the entire program. */

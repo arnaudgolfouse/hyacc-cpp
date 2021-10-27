@@ -265,7 +265,7 @@ get_ups_state(int a[], int count) -> int
 auto
 is_unit_production(int rule_no) -> bool
 {
-    if (rule_no >= grammar.rule_count) {
+    if (rule_no >= grammar.rules.size()) {
         throw std::runtime_error(
           std::string("isUnitProduction error: array index (") +
           std::to_string(rule_no) + ") out of bound");
