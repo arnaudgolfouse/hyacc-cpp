@@ -770,7 +770,7 @@ show_manpage();
 
 /* Defined in get_options.c */
 extern auto
-get_options(int argc, char** argv) -> int;
+get_options(int argc, char** argv, Options& options) -> int;
 
 /* Defined in gen_compiler.cpp */
 extern int* final_state_list; // for final states.

@@ -3414,7 +3414,7 @@ main(int argc, char** argv) -> int
 
         // test_x();
 
-        infile_index = get_options(argc, argv);
+        infile_index = get_options(argc, argv, options);
         hyacc_filename = argv[infile_index];
         // printf("file to open: %s\n", hyacc_filename);
 

@@ -31,30 +31,32 @@
 #include <iostream>
 #include <stdexcept>
 
-static int cmd_argc; /* argc passed from main(). */
-static int argc_pt;  /* index of current cmd parameter. */
-
-static bool ERR_NO_INPUT_FILE = false;
-static bool ERR_UNKNOWN_SWITCH_O = false;
-static bool ERR_UNKNOWN_SWITCH_O_use_lr0 = false;
-static bool ERR_UNKNOWN_SWITCH_D = false;
-static bool ERR_NO_OUTFILE_NAME = false;
-static bool ERR_NO_FILENAME_PREFIX = false;
+enum class ErrorFlags
+{
+    NO_INPUT_FILE,
+    ERROR_FLAGS,
+    UNKNOWN_SWITCH_O,
+    UNKNOWN_SWITCH_O_USE_LR0,
+    UNKNOWN_SWITCH_D,
+    NO_OUTFILE_NAME,
+    NO_FILENAME_PREFIX,
+    SHOW_HELP,
+};
 
 void
-show_helpmsg_exit()
+show_helpmsg_exit(const ErrorFlags error_flags)
 {
-    if (ERR_NO_INPUT_FILE) {
+    if (error_flags == ErrorFlags::NO_INPUT_FILE) {
         std::cout << "no input file" << std::endl;
     }
 
-    if (ERR_UNKNOWN_SWITCH_O) {
+    if (error_flags == ErrorFlags::UNKNOWN_SWITCH_O) {
         std::cout
           << "unknown parameter to switch -O. choices are -O0, -O1, -O2, -O3."
           << std::endl;
     }
 
-    if (ERR_UNKNOWN_SWITCH_O_use_lr0) {
+    if (error_flags == ErrorFlags::UNKNOWN_SWITCH_O_USE_LR0) {
         std::cout
           << "switch -O cannot be used together with -P (--lane-tracing-pgm), "
           << std::endl
@@ -62,19 +64,19 @@ show_helpmsg_exit()
           << std::endl;
     }
 
-    if (ERR_UNKNOWN_SWITCH_D) {
+    if (error_flags == ErrorFlags::UNKNOWN_SWITCH_D) {
         std::cout
           << "unknown parameter to switch -D. choices are -Di (i = 0 ~ 14)."
           << std::endl;
     }
 
-    if (ERR_NO_OUTFILE_NAME) {
+    if (error_flags == ErrorFlags::NO_OUTFILE_NAME) {
         std::cout
           << "output file name is not specified by -o or --output-file=="
           << std::endl;
     }
 
-    if (ERR_NO_FILENAME_PREFIX) {
+    if (error_flags == ErrorFlags::NO_FILENAME_PREFIX) {
         std::cout
           << "file name prefix is not specified by -b or --file-prefix=="
           << std::endl;
@@ -90,11 +92,10 @@ show_helpmsg_exit()
  * switches are used.
  */
 void
-get_outfile_name(size_t len, const char* name)
+get_outfile_name(const std::string name)
 {
-    if (len == 0 || strlen(name) == 0) {
-        ERR_NO_OUTFILE_NAME = true;
-        show_helpmsg_exit();
+    if (name.empty()) {
+        show_helpmsg_exit(ErrorFlags::NO_OUTFILE_NAME);
     }
     // printf("len = %d, name = %s\n", len, name);
     std::string y_tab_c_temp = name;
@@ -116,11 +117,10 @@ get_outfile_name(size_t len, const char* name)
  * switches are used.
  */
 void
-get_filename_prefix(size_t len, const char* name)
+get_filename_prefix(std::string name)
 {
-    if (len == 0 || strlen(name) == 0) {
-        ERR_NO_OUTFILE_NAME = true;
-        show_helpmsg_exit();
+    if (name.empty()) {
+        show_helpmsg_exit(ErrorFlags::NO_OUTFILE_NAME);
     }
     // printf("len = %d, name = %s\n", len, name);
     std::string y_tab_c_temp = name;
@@ -144,9 +144,8 @@ write_options(int infile_index, char** argv)
 }
 
 void
-init_options()
+init_options(Options& options)
 {
-    auto& options = Options::get();
     options.use_combine_compatible_config = true;
 
     // default: -O1
@@ -238,19 +237,29 @@ set_lrk(Options& options)
     options.use_lr_k = true;
 }
 
+/// @brief Get a single letter option out of `s`.
+///
+/// This will always advance `s` at least once. Some options require an
+/// additional arguments, advancing `s` again.
+///
+/// @param cmd_argc arcg passed from main.
+/// @param argc_pt index of current cmd parameter.
 void
-get_single_letter_option(char* s, unsigned int pos)
+get_single_letter_option(Options& options,
+                         int cmd_argc,
+                         int argc_pt,
+                         std::string::iterator& s,
+                         const std::string::iterator& end)
 {
-    auto& options = Options::get();
-    int switch_param = -1;
-    char c = s[pos];
+    char switch_param = 0;
+    char c = *s;
+    ++s;
 
     // printf("c = %c\n", c);
     switch (c) {
         case 'b': /* file name prefix */
             if (argc_pt >= cmd_argc - 1) {
-                ERR_NO_FILENAME_PREFIX = true;
-                show_helpmsg_exit();
+                show_helpmsg_exit(ErrorFlags::NO_FILENAME_PREFIX);
             }
             options.use_filename_prefix = true;
             break;
@@ -268,7 +277,7 @@ get_single_letter_option(char* s, unsigned int pos)
             break;
         case 'h':
         case '?':
-            show_helpmsg_exit();
+            show_helpmsg_exit(ErrorFlags::SHOW_HELP);
             break;
         case 'l': /* no line directives in y.tab.cpp */
             options.use_lines = false;
@@ -279,21 +288,19 @@ get_single_letter_option(char* s, unsigned int pos)
             break;
         case 'o': /* output file name */
             if (argc_pt >= cmd_argc - 1) {
-                ERR_NO_OUTFILE_NAME = true;
-                show_helpmsg_exit();
+                show_helpmsg_exit(ErrorFlags::NO_OUTFILE_NAME);
             }
             options.use_output_filename = true;
             break;
         case 'O': /* optimization. */
-            if (strlen(s) <= pos + 1) {
-                ERR_UNKNOWN_SWITCH_O = true;
-                show_helpmsg_exit();
+            if (s == end) {
+                show_helpmsg_exit(ErrorFlags::UNKNOWN_SWITCH_O);
             }
             if (options.use_lr0) {
-                ERR_UNKNOWN_SWITCH_O_use_lr0 = true;
-                show_helpmsg_exit();
+                show_helpmsg_exit(ErrorFlags::UNKNOWN_SWITCH_O_USE_LR0);
             }
-            sscanf(s + pos + 1, "%d", &switch_param);
+            switch_param = *s;
+            ++s;
             switch (switch_param) {
                 case 0:
                     options.use_combine_compatible_states = false;
@@ -316,8 +323,7 @@ get_single_letter_option(char* s, unsigned int pos)
                     options.use_remove_repeated_states = true;
                     break;
                 default:
-                    ERR_UNKNOWN_SWITCH_O = true;
-                    show_helpmsg_exit();
+                    show_helpmsg_exit(ErrorFlags::UNKNOWN_SWITCH_O);
                     break;
             }
             break;
@@ -349,11 +355,11 @@ get_single_letter_option(char* s, unsigned int pos)
             exit(0);
             break;
         case 'D': /* debug print options. */
-            if (strlen(s) <= pos + 1) {
-                ERR_UNKNOWN_SWITCH_D = true;
-                show_helpmsg_exit();
+            if (s == end) {
+                show_helpmsg_exit(ErrorFlags::UNKNOWN_SWITCH_D);
             }
-            sscanf(s + pos + 1, "%d", &switch_param);
+            switch_param = *s;
+            ++s;
             switch (switch_param) {
                 case 0:
                     options.show_grammar = true;
@@ -383,42 +389,41 @@ get_single_letter_option(char* s, unsigned int pos)
                 case 4:
                     options.debug_comb_comp_config = true;
                     break;
-                case 5:
+                case 5: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
                     options.debug_build_multirooted_tree = true;
                     break;
-                case 6:
+                case 6: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
                     options.debug_remove_up_step_1_2 = true;
                     break;
-                case 7:
+                case 7: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
                     options.debug_remove_up_step_4 = true;
                     break;
-                case 8:
+                case 8: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
                     options.show_total_parsing_tbl_after_rm_up = true;
                     break;
-                case 9:
+                case 9: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
                     options.show_theads = true;
                     break;
-                case 10:
+                case 10: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
                     options.debug_hash_tbl = true;
                     break;
-                case 11:
+                case 11: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
                     options.show_ss_conflicts = true;
                     break;
-                case 12:
+                case 12: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
                     options.show_state_transition_list = false;
                     break;
-                case 13:
+                case 13: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
                     options.show_state_config_count = true;
                     break;
-                case 14:
+                case 14: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
                     options.show_actual_state_array = true;
                     break;
-                case 15:
+                case 15: // NOLINT(cppcoreguidelines-avoid-magic-numbers)
                     options.show_originators = true;
                     break;
                 default:
-                    ERR_UNKNOWN_SWITCH_D = true;
-                    show_helpmsg_exit();
+                    show_helpmsg_exit(ErrorFlags::UNKNOWN_SWITCH_D);
                     break;
             }
             options.use_verbose = true; /* allow write to y.output */
@@ -433,48 +438,45 @@ get_single_letter_option(char* s, unsigned int pos)
 }
 
 void
-get_mnemonic_long_option(const char* s)
+get_mnemonic_long_option(Options& options, const std::string& s)
 {
-    auto& options = Options::get();
-    if (strcmp(s, "--debug") == 0) { // -t
+    if (s == "--debug") { // -t
         options.use_yydebug = true;
-    } else if (strcmp(s, "--defines") == 0) { // -d
+    } else if (s == "--defines") { // -d
         options.use_header_file = true;
-    } else if (strcmp(s, "--no-compiler") == 0) { // -c
+    } else if (s == "--no-compiler") { // -c
         options.use_generate_compiler = false;
-    } else if (strcmp(s, "--keep-unit-production-with-action") == 0) { // -C
+    } else if (s == "--keep-unit-production-with-action") { // -C
         options.preserve_unit_prod_with_code = false;
-    } else if (strncmp(s, "--file-prefix==", 15) == 0) { // -b
-        // 15 for strlen("--file-prefix==").
-        get_filename_prefix(strlen(s) - 15, s + 15);
-    } else if (strcmp(s, "--graphviz") == 0) { // -g
+    } else if (s.rfind("--file-prefix==", 0) == 0) { // -b
+        get_filename_prefix(s.substr(strlen("--file-prefix==")));
+    } else if (s == "--graphviz") { // -g
         options.use_graphviz = true;
-    } else if (strcmp(s, "--help") == 0) { // -h
-        show_helpmsg_exit();
-    } else if (strcmp(s, "--lalr1") == 0) { // -a
+    } else if (s == "--help") { // -h
+        show_helpmsg_exit(ErrorFlags::SHOW_HELP);
+    } else if (s == "--lalr1") { // -a
         set_lalr1(options);
-    } else if (strcmp(s, "--lane-tracing-pgm") == 0) { // -P
+    } else if (s == "--lane-tracing-pgm") { // -P
         // set_lane_tracing_no_pgm();
         set_lane_tracing_pgm(options);
-    } else if (strcmp(s, "--lane-tracing-ltt") == 0) { // -Q
+    } else if (s == "--lane-tracing-ltt") { // -Q
         set_lane_tracing_ltt(options);
-    } else if (strcmp(s, "--lr0") == 0) { // -r
+    } else if (s == "--lr0") { // -r
         set_lr0(options);
-    } else if (strcmp(s, "--lrk") == 0) {
+    } else if (s == "--lrk") {
         set_lrk(options);
-    } else if (strcmp(s, "--man-page") == 0) { // -m
-        show_manpage();                        /* in hyacc_path.cpp */
+    } else if (s == "--man-page") { // -m
+        show_manpage();             /* in hyacc_path.cpp */
         exit(0);
         //} else if (strncmp(s, "--name-prefix==", 15) == 0) { // -p
         // to be implemented.
-    } else if (strcmp(s, "--no-lines") == 0) { // -l
+    } else if (s == "--no-lines") { // -l
         options.use_lines = false;
-    } else if (strncmp(s, "--output-file==", 15) == 0) { // -o
-        // 15 for strlen("--output-file==").
-        get_outfile_name(strlen(s) - 15, s + 15);
-    } else if (strcmp(s, "--verbose") == 0) { // -v
+    } else if (s.rfind("--output-file==", 0) == 0) { // -o
+        get_outfile_name(s.substr(strlen("--output-file==")));
+    } else if (s == "--verbose") { // -v
         options.use_verbose = true;
-    } else if (strcmp(s, "--version") == 0) { // -V
+    } else if (s == "--version") { // -V
         print_version();
         exit(0);
     } else {
@@ -489,40 +491,46 @@ get_mnemonic_long_option(const char* s)
  *   optimization 3: further remove repeated states after 2.
  */
 auto
-get_options(int argc, char** argv) -> int
+get_options(int argc, char** argv, Options& options) -> int
 {
-    if ((cmd_argc = argc) == 1) {
-        ERR_NO_INPUT_FILE = true;
-        show_helpmsg_exit();
+    if (argc == 1) {
+        show_helpmsg_exit(ErrorFlags::NO_INPUT_FILE);
     }
 
-    init_options();
-    auto& options = Options::get();
+    init_options(options);
 
     int infile_index = -1;
     for (int i = 1; i < argc; i++) {
-        argc_pt = i;
-        auto* argv_i = argv[i];
+        int argc_pt = i;
+        std::string argv_i =
+          argv[i]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         // printf("%d, %s\n", i, argv_i);
-        size_t len = strlen(argv_i);
+        size_t len = argv_i.size();
 
         if (options.use_output_filename) { // get output file name.
-            get_outfile_name(len, argv_i);
+            get_outfile_name(argv_i);
             options.use_output_filename = false;
             continue;
         }
         if (options.use_filename_prefix) { // -b
-            get_filename_prefix(len, argv_i);
+            get_filename_prefix(argv_i);
             options.use_filename_prefix = false;
             continue;
         }
 
-        if (len >= 2 && argv_i[0] == '-' && argv_i[1] == '-') {
-            get_mnemonic_long_option(argv_i);
-        } else if (argv_i[0] == '-') {
-            // printf ("single letter switch %s\n", argv[i]);
-            for (int pos = 1; pos < len; pos++) {
-                get_single_letter_option(argv_i, pos);
+        std::string::iterator argv_i_iter = argv_i.begin();
+        const std::string::iterator argv_i_iter_end = argv_i.end();
+
+        if (len >= 2 && *argv_i_iter == '-') {
+            ++argv_i_iter;
+            if (*argv_i_iter == '-') {
+                get_mnemonic_long_option(options, argv_i.data());
+            } else {
+                for (; argv_i_iter != argv_i_iter_end; ++argv_i_iter) {
+                    char c = *argv_i_iter;
+                    get_single_letter_option(
+                      options, argc, argc_pt, argv_i_iter, argv_i_iter_end);
+                }
             }
         } else {
             if (infile_index == -1) {
@@ -533,8 +541,7 @@ get_options(int argc, char** argv) -> int
     }
 
     if (infile_index == -1) {
-        ERR_NO_INPUT_FILE = true;
-        show_helpmsg_exit();
+        show_helpmsg_exit(ErrorFlags::NO_INPUT_FILE);
     }
 
     write_options(infile_index, argv);
