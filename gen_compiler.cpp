@@ -30,15 +30,11 @@
 #include "lane_tracing.hpp"
 #include "y.hpp"
 #include <cstddef>
-#include <cstdio>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #include <string>
-
-static FILE* fp_yacc; // for yacc input file.
-static FILE* fp;      // pointer to output file y.tab.c
-static FILE* fp_h;    // for y.tab.h
 
 static int n_line; // count number of lines in yacc input file.
 static int n_col;
@@ -59,16 +55,18 @@ extern int ysymbol_pt;
 extern int ysymbol_size;
 
 static void
-prepare_outfile()
+prepare_outfile(std::ofstream* fp, std::ofstream* fp_h)
 {
-    if ((fp = fopen(y_tab_c.data(), "w")) == nullptr) {
+    fp->open(y_tab_c);
+    if (!fp->is_open()) {
         throw std::runtime_error(std::string("Cannot open output file ") +
                                  y_tab_c);
     }
     if (Options::get().use_header_file == false)
         return;
-    if ((fp_h = fopen(y_tab_h.data(), "w")) == nullptr) {
-        fclose(fp);
+    fp_h->open(y_tab_h);
+    if (!fp_h->is_open()) {
+        fp->close();
         throw std::runtime_error(std::string("Cannot open output file ") +
                                  y_tab_h);
     }
@@ -84,9 +82,9 @@ my_perror(const char* msg, int c)
 }
 
 inline void
-print_break()
+print_break(std::ofstream& fp)
 {
-    fprintf(fp, "break;\n");
+    fp << "break;" << std::endl;
 }
 
 /*
@@ -106,12 +104,12 @@ write_tokens()
  *  Write all terminal tokens that are not quoted, and not "error".
  */
 void
-write_tokens_to_compiler_file()
+write_tokens_to_compiler_file(std::ofstream& fp, std::ofstream& fp_h)
 {
     auto& options = Options::get();
-    fprintf(fp, "\n/* tokens */\n\n");
+    fp << std::endl << "/* tokens */" << std::endl << std::endl;
     if (options.use_header_file)
-        fprintf(fp_h, "\n/* tokens */\n\n");
+        fp_h << std::endl << "/* tokens */" << std::endl << std::endl;
 
     int index = 0;
     int i = 0;
@@ -119,16 +117,23 @@ write_tokens_to_compiler_file()
         if (a->snode->TP->is_quoted || strcmp(a->snode->symbol, STR_ERROR) == 0)
             continue;
 
-        fprintf(fp, "#define %s %d\n", a->snode->symbol, index + 257);
+        fp << "#define " << a->snode->symbol << index + 257 << std::endl;
         if (options.use_header_file)
-            fprintf(fp_h, "#define %s %d\n", a->snode->symbol, index + 257);
+            fp_h << "#define " << a->snode->symbol << index + 257 << std::endl;
         index++;
     }
 
-    fprintf(fp, YYSTYPE_FORMAT, yystype_definition);
+    fp << "#if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED" << std::endl
+       << yystype_definition << std::endl
+       << "#define YYSTYPE_IS_DECLARED 1" << std::endl
+       << "#endif" << std::endl;
     if (options.use_header_file) {
-        fprintf(fp_h, YYSTYPE_FORMAT, yystype_definition);
-        fprintf(fp_h, "\nextern YYSTYPE yylval;\n");
+        fp_h << "#if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED"
+             << std::endl
+             << yystype_definition << std::endl
+             << "#define YYSTYPE_IS_DECLARED 1" << std::endl
+             << "#endif" << std::endl;
+        fp_h << std::endl << "extern YYSTYPE yylval;" << std::endl;
     }
 }
 
@@ -137,14 +142,15 @@ write_tokens_to_compiler_file()
  *  y.tab.c, and write token declarations too.
  */
 void
-process_yacc_file_section1()
+process_yacc_file_section1(std::ifstream& fp_yacc,
+                           std::ofstream& fp,
+                           std::ofstream& fp_h)
 {
     n_line = n_col = 1;
 
     bool is_code = false;
     char c = 0, last_c = '\n', last_last_c = 0;
-    while ((c = static_cast<char>(getc(fp_yacc))) != EOF) {
-
+    while (fp_yacc.get(c)) {
         if (last_c == '\n' && c == '%') {
             is_code = false;
         } else if (last_last_c == '\n' && last_c == '%') {
@@ -157,7 +163,7 @@ process_yacc_file_section1()
                 is_code = false;
             }
         } else if (is_code) {
-            putc(c, fp); // write to output file.
+            fp << c;
         }
 
         last_last_c = last_c;
@@ -171,20 +177,20 @@ process_yacc_file_section1()
     }
 
     // writeTokens();
-    write_tokens_to_compiler_file();
+    write_tokens_to_compiler_file(fp, fp_h);
 }
 
 /*
  * rewind to section 2.
  */
 static void
-goto_section2()
+goto_section2(std::ifstream& fp_yacc)
 {
     char c = 0, last_c = 0, last_last_c = '\n';
 
-    fseek(fp_yacc, 0L, 0); // go to the beginning of file fp.
+    fp_yacc.seekg(0); // go to the beginning of file fp.
     n_line = 1;
-    while ((c = static_cast<char>(getc(fp_yacc))) != EOF) {
+    while (fp_yacc.get(c)) {
         if (c == '\n')
             n_line++;
         if (last_last_c == '\n' && last_c == '%' && c == '%')
@@ -200,11 +206,11 @@ goto_section2()
  * Presumption: finished section 1, entering section 2.
  */
 static void
-goto_section3()
+goto_section3(std::ifstream& fp_yacc)
 {
     char c = 0, last_c = 0, last_last_c = '\n';
 
-    while ((c = static_cast<char>(getc(fp_yacc))) != EOF) {
+    while (fp_yacc.get(c)) {
         if (c == '\n')
             n_line++;
         if (last_last_c == '\n' && last_c == '%' && c == '%') {
@@ -293,7 +299,9 @@ find_sym(Production* rule, int dollar_number) -> SymbolTblNode*
  * actions of rules.
  */
 static void
-process_yacc_file_section2(char* filename)
+process_yacc_file_section2(std::ifstream& fp_yacc,
+                           std::ofstream& fp,
+                           char* filename)
 {
     YACC_STATE state = LHS;
     int code_level;
@@ -309,7 +317,7 @@ process_yacc_file_section2(char* filename)
     SymbolTblNode* sym;
     static const char* padding = "        ";
 
-    while ((c = static_cast<char>(getc(fp_yacc))) != EOF) {
+    while (fp_yacc.get(c)) {
         if (last_c == '%' && c == '%')
             break; // end section 2.
 
@@ -366,20 +374,20 @@ process_yacc_file_section2(char* filename)
                     state = TERMINAL;
                     if (end_of_code) {
                         rule_count++;
-                        print_break();
+                        print_break(fp);
                         end_of_code = false;
                     }
 
                 } else if (c == ';') {
                     state = LHS; // end of a rule.
                     if (end_of_code) {
-                        print_break();
+                        print_break(fp);
                     }
                     end_of_code = false;
                 } else if (c == '|') { // end of a rule
                     rule_count++;
                     if (end_of_code) {
-                        print_break();
+                        print_break(fp);
                     }
                     end_of_code = false;
                 } else if (c == '{') { // code for rule #rule_count
@@ -387,11 +395,14 @@ process_yacc_file_section2(char* filename)
                     code_level = 1;
 
                     if (end_of_code == false) {
-                        fprintf(fp, "\n%s  case %d:\n", padding, rule_count);
+                        fp << std::endl
+                           << padding << "  case " << rule_count << ':'
+                           << std::endl;
                         if (Options::get().use_lines)
-                            fprintf(fp, "# line %d \"%s\"\n", n_line, filename);
+                            fp << "# line " << n_line << " \"" << filename
+                               << '\"' << std::endl;
                     }
-                    putc('{', fp);
+                    fp << '{';
 
                 } else if (last_c == '/' && c == '*') {
                     state = COMMENT;
@@ -405,7 +416,7 @@ process_yacc_file_section2(char* filename)
                     // reading a symbol. do nothing
                     if (end_of_code) {
                         rule_count++;
-                        print_break();
+                        print_break(fp);
                         end_of_code = false;
                     }
                 }
@@ -443,9 +454,9 @@ process_yacc_file_section2(char* filename)
                         token_type = rule->nLHS->snode->token_type;
                     }
                     if (token_type)
-                        fprintf(fp, "(yyval.%s)", token_type);
+                        fp << "(yyval." << token_type << ')';
                     else
-                        fprintf(fp, "yyval");
+                        fp << "yyval";
 
                 } else if (last_c == '$' && isdigit(c)) {
                     reading_number = true;
@@ -470,24 +481,18 @@ process_yacc_file_section2(char* filename)
                         token_type = sym->token_type;
                     }
                     if (token_type)
-                        fprintf(fp,
-                                "(yypvt[%d].%s)/* %d %d */",
-                                (dollar_number - rhs_index),
-                                token_type,
-                                rule_count,
-                                rhs_index);
+                        fp << "(yypvt[" << dollar_number - rhs_index << "]."
+                           << token_type << ")/* " << rule_count << ' '
+                           << rhs_index << " */";
                     else
-                        fprintf(fp,
-                                "yypvt[%d]/* %d %d */",
-                                dollar_number - rhs_index,
-                                rule_count,
-                                rhs_index);
+                        fp << "yypvt[" << dollar_number - rhs_index << "]/* "
+                           << rule_count << ' ' << rhs_index << " */";
 
-                    putc(c, fp);
+                    fp << c;
                     reading_number = false;
                     dollar_number = 0;
                 } else {
-                    putc(c, fp);
+                    fp << c;
                 }
 
                 if (c == '\"') {
@@ -499,7 +504,7 @@ process_yacc_file_section2(char* filename)
                 } else if (c == '/' && last_c == '/') {
                     state = CODE_COMMENT2;
                 } else if (c == '}' && code_level == 1) {
-                    fprintf(fp, " "); // print_break();
+                    fp << ' '; // print_break();
                     state = RHS;
                     //!!
                     end_of_code = true; // end of a section of code.
@@ -513,22 +518,22 @@ process_yacc_file_section2(char* filename)
                 }
                 break;
             case CODE_DOUBLE_QUOTE:
-                putc(c, fp);
+                fp << c;
                 if (c == '\"' && last_c != '\\')
                     state = CODE;
                 break;
             case CODE_SINGLE_QUOTE:
-                putc(c, fp);
+                fp << c;
                 if (c == '\'')
                     state = CODE;
                 break;
             case CODE_COMMENT:
-                putc(c, fp);
+                fp << c;
                 if (c == '/' && last_c == '*')
                     state = CODE;
                 break;
             case CODE_COMMENT2:
-                putc(c, fp);
+                fp << c;
                 if (c == '\n')
                     state = CODE;
                 break;
@@ -557,11 +562,11 @@ process_yacc_file_section2(char* filename)
 }
 
 void
-process_yacc_file_section3()
+process_yacc_file_section3(std::ifstream& fp_yacc, std::ofstream& fp)
 {
     char c = 0;
-    while ((c = static_cast<char>(getc(fp_yacc))) != EOF) {
-        putc(c, fp);
+    while (fp_yacc.get(c)) {
+        fp << c;
     }
 }
 
@@ -569,7 +574,7 @@ process_yacc_file_section3()
  * Copy code from resource files into output file.
  */
 void
-copy_src_file(char* filename)
+copy_src_file(std::ofstream& fp, char* filename)
 {
     std::ifstream fp_src;
     fp_src.open(filename);
@@ -579,7 +584,7 @@ copy_src_file(char* filename)
     }
     char c = 0;
     while (fp_src.get(c)) {
-        putc(c, fp);
+        fp << c;
     }
     fp_src.close();
 }
@@ -591,7 +596,7 @@ copy_src_file(char* filename)
  * associated with reductions.
  */
 void
-copy_yaccpar_file_1(const char* filename)
+copy_yaccpar_file_1(std::ofstream& fp, const char* filename)
 {
     std::ifstream fp_src;
     fp_src.open(filename);
@@ -604,15 +609,16 @@ copy_yaccpar_file_1(const char* filename)
         if (last_c == '$' && c == 'A') {
             break;
         }
-        putc(c, fp);
+        fp << c;
         last_c = c;
     }
-    fseek(fp, -1L, SEEK_CUR); // write head reverse 1 byte to remove '$'.
+    fp.seekp(-1,
+             std::ios_base::cur); // write head reverse 1 byte to remove '$'.
     fp_src.close();
 }
 
 void
-copy_yaccpar_file_2(const char* filename)
+copy_yaccpar_file_2(std::ofstream& fp, const char* filename)
 {
     std::ifstream fp_src;
     fp_src.open(filename);
@@ -625,11 +631,11 @@ copy_yaccpar_file_2(const char* filename)
         if (last_c == '$' && c == 'A') {
             break;
         }
-        putc(c, fp);
+        fp << c;
         last_c = c;
     }
     while (fp_src.get(c)) {
-        putc(c, fp);
+        fp << c;
     }
     fp_src.close();
 }
@@ -678,38 +684,36 @@ get_non_terminal_index(SymbolTblNode* snode) -> int
  * multi-rooted trees.
  */
 void
-print_yyr1()
+print_yyr1(std::ofstream& fp)
 {
-    fprintf(fp, "static YYCONST yytabelem yyr1[] = {\n");
+    fp << "static YYCONST yytabelem yyr1[] = {" << std::endl;
     // First rule is always "$accept : ...".
-    fprintf(fp, "%6d,", 0);
+    fp << std::setw(6) << 0 << ',';
 
     if (Options::get().use_remove_unit_production) {
         int index = 0;
         for (int i = 1; i < grammar.rules.size(); i++) {
             // printf("rule %d lhs: %s\n", i, grammar.rules[i]->LHS);
             index = grammar.rules[i]->nLHS->snode->value;
-            fprintf(fp, "%6d", index);
+            fp << std::setw(6) << index;
             if (i < grammar.rules.size() - 1)
-                fprintf(fp, ",");
+                fp << ',';
             if ((i - 9) % 10 == 0)
-                fprintf(fp, "\n");
+                fp << std::endl;
         }
-        fprintf(fp, "};\n");
+        fp << "};" << std::endl;
         return;
     }
 
     for (int i = 1; i < grammar.rules.size(); i++) {
-        fprintf(fp,
-                "%6d",
-                (-1) * get_non_terminal_index(grammar.rules[i]->nLHS->snode));
+        fp << std::setw(6)
+           << (-1) * get_non_terminal_index(grammar.rules[i]->nLHS->snode);
         if (i < grammar.rules.size() - 1)
-            fprintf(fp, ",");
+            fp << ',';
         if ((i - 9) % 10 == 0)
-            fprintf(fp, "\n");
+            fp << std::endl;
     }
-
-    fprintf(fp, "};\n");
+    fp << "};" << std::endl;
 }
 
 /*
@@ -721,80 +725,77 @@ print_yyr1()
  *   then yyr2[i] = (x << 1) + y;
  */
 void
-print_yyr2()
+print_yyr2(std::ofstream& fp)
 {
     int i = 0;
-    fprintf(fp, "static YYCONST yytabelem yyr2[] = {\n");
-    fprintf(fp, "%6d,", 0);
+    fp << "static YYCONST yytabelem yyr2[] = {" << std::endl;
+    fp << std::setw(6) << 0 << ',';
     for (i = 1; i < grammar.rules.size(); i++) {
-        fprintf(fp,
-                "%6d",
-                (grammar.rules[i]->RHS_count << 1) + grammar.rules[i]->hasCode);
+        fp << std::setw(6)
+           << (grammar.rules[i]->RHS_count << 1) + grammar.rules[i]->hasCode;
         if (i < grammar.rules.size() - 1)
-            fprintf(fp, ",");
+            fp << ',';
         if ((i - 9) % 10 == 0)
-            fprintf(fp, "\n");
+            fp << std::endl;
     }
-    fprintf(fp, "};\n");
+    fp << "};" << std::endl;
 }
 
 void
-print_yynonterminals()
+print_yynonterminals(std::ofstream& fp)
 {
     SymbolNode* a = nullptr;
-    fprintf(fp, "yytoktype yynts[] = {\n");
+    fp << "yytoktype yynts[] = {" << std::endl;
 
     int i = 1; // ignore first nonterminal: $accept.
     for (a = grammar.non_terminal_list->next; a != nullptr; a = a->next) {
-        fprintf(fp, "\t\"%s\",\t-%d,\n", a->snode->symbol, i);
+        fp << "\t\"" << a->snode->symbol << "\",\t-" << i << ',' << std::endl;
         i++;
     }
-    fprintf(fp, "\t\"-unknown-\", 1  /* ends search */\n");
-    fprintf(fp, "};\n");
+    fp << "\t\"-unknown-\", 1  /* ends search */" << std::endl;
+    fp << "};" << std::endl;
 }
 
 /*
  * Print terminal tokens.
  */
 void
-print_yytoks()
+print_yytoks(std::ofstream& fp)
 {
-    SymbolNode* a = tokens;
-    int index = 0;
-
-    fprintf(fp, "yytoktype yytoks[] = {\n");
-    for (int i = 0; a != nullptr; a = a->next, i++) {
+    fp << "yytoktype yytoks[] = {" << std::endl;
+    for (SymbolNode* a = tokens; a != nullptr; a = a->next) {
         if (strcmp(a->snode->symbol, STR_ERROR) == 0)
             continue;
 
         if (strlen(a->snode->symbol) == 2 &&
             a->snode->symbol[0] == '\\') { // escape sequence
-            fprintf(
-              fp, "\t\"\\\\%s\",\t%d,\n", a->snode->symbol, a->snode->value);
+            fp << R"(	"\\)" << a->snode->symbol << R"(",	)"
+               << a->snode->value << ',' << std::endl;
         } else {
-            fprintf(fp, "\t\"%s\",\t%d,\n", a->snode->symbol, a->snode->value);
+            fp << "\t\"" << a->snode->symbol << "\",\t" << a->snode->value
+               << ',' << std::endl;
         }
     }
 
-    fprintf(fp, "\t\"-unknown-\", -1  /* ends search */\n");
-    fprintf(fp, "};\n");
+    fp << "\t\"-unknown-\", -1  /* ends search */" << std::endl
+       << "};" << std::endl;
 }
 
 /*
  * Print reductions.
  */
 void
-print_yyreds()
+print_yyreds(std::ofstream& fp)
 {
-    fprintf(fp, "char * yyreds[] = {\n");
-    fprintf(fp, "\t\"-no such reduction-\"\n");
+    fp << "char * yyreds[] = {" << std::endl;
+    fp << "\t\"-no such reduction-\"" << std::endl;
     for (int i = 1; i < grammar.rules.size(); i++) {
-        fprintf(fp, "\t\"%s : ", grammar.rules[i]->nLHS->snode->symbol);
+        fp << "\t\"" << grammar.rules[i]->nLHS->snode->symbol << " : ";
 
         const SymbolNode* a = grammar.rules[i]->nRHS_head;
         for (int j = 0; j < grammar.rules[i]->RHS_count; j++) {
             if (j > 0)
-                fprintf(fp, " ");
+                fp << ' ';
 
             if (j > 0)
                 a = a->next;
@@ -802,49 +803,53 @@ print_yyreds()
 
             if (strlen(symbol) == 1 ||
                 (strlen(symbol) == 2 && symbol[0] == '\\')) {
-                fprintf(fp, "'%s'", symbol);
+                fp << '\'' << symbol << '\'';
             } else {
-                fprintf(fp, "%s", symbol);
+                fp << symbol;
             }
         }
-        fprintf(fp, "\", \n");
+        fp << "\", " << std::endl;
     }
-    fprintf(fp, "};\n");
+    fp << "};" << std::endl;
 }
 
 void
-print_yytoken()
+print_yytoken(std::ofstream& fp)
 {
     const SymbolNode* a = tokens;
 
-    fprintf(fp, "int yytoken[] = {\n");
+    fp << "int yytoken[] = {" << std::endl;
     for (int i = 0; a != nullptr; a = a->next, i++) {
-        fprintf(fp, "\t\"%s\",\t%d,\n", a->snode->symbol, 257 + i);
+        fp << "\t\"" << a->snode->symbol << "\",\t" << 257 + i << ','
+           << std::endl;
     }
 
-    fprintf(fp, "\t\"-unknown-\", -1  /* ends search */\n");
-    fprintf(fp, "};\n");
+    fp << "\t\"-unknown-\", -1  /* ends search */" << std::endl;
+    fp << "};" << std::endl;
 }
 
 void
-print_parsing_tbl_entry(char action, int state_no, int* count)
+print_parsing_tbl_entry(std::ofstream& fp,
+                        char action,
+                        int state_no,
+                        int* count)
 {
     bool is_entry = false;
     if (action == 's' || action == 'g') {
-        fprintf(fp, "%d, ", state_no); // state to go.
+        fp << state_no << ", ";
         is_entry = true;
     } else if (action == 'r') {
-        fprintf(fp, "-%d, ", state_no); // no. of reduction.
+        fp << '-' << state_no << ", ";
         is_entry = true;
     } else if (action == 'a') {
-        fprintf(fp, "0, ");
+        fp << "0, ";
         is_entry = true;
     }
 
     if (is_entry) {
         (*count)++;
         if ((*count) % 10 == 0 && (*count) != 0)
-            fprintf(fp, "\n");
+            fp << std::endl;
     }
 }
 
@@ -855,14 +860,14 @@ print_parsing_tbl_entry(char action, int state_no, int* count)
  * if it's zero, it's accept.
  */
 void
-print_parsing_tbl()
+print_parsing_tbl(std::ofstream& fp)
 {
     int col_size = ParsingTblCols;
     int* rowoffset = new int[ParsingTblRows];
     int rowoffset_pt = 0;
     int count = 0;
 
-    fprintf(fp, "static YYCONST yytabelem yyptblact[] = {\n");
+    fp << "static YYCONST yytabelem yyptblact[] = {" << std::endl;
 
     if (Options::get().use_remove_unit_production) {
         int i = 0;
@@ -888,7 +893,7 @@ print_parsing_tbl()
                         if (action == 's' || action == 'g')
                             state_no = get_actual_state(state_no);
                         // printf("%c%d\t", action, state_no);
-                        print_parsing_tbl_entry(action, state_no, &count);
+                        print_parsing_tbl_entry(fp, action, state_no, &count);
                     } // end of if.
                 }
 
@@ -914,7 +919,7 @@ print_parsing_tbl()
                 int state_no = 0;
                 get_action(ParsingTblColHdr[j]->type, j, i, &action, &state_no);
                 // printf("%c%d, ", action, state_no);
-                print_parsing_tbl_entry(action, state_no, &count);
+                print_parsing_tbl_entry(fp, action, state_no, &count);
             }
 
             *(rowoffset + rowoffset_pt) = count;
@@ -923,32 +928,36 @@ print_parsing_tbl()
         } // end of for.
     }
 
-    fprintf(fp, "-10000000};\n\n"); // -10000000 is space filler
+    fp << "-10000000};" << std::endl << std::endl; // -10000000 is space filler
 
-    fprintf(fp, "static YYCONST yytabelem yyrowoffset[] = {\n0, ");
+    fp << "static YYCONST yytabelem yyrowoffset[] = {\n0, " << std::endl;
     for (int i = 0; i < rowoffset_pt; i++) {
-        fprintf(fp, "%d", *(rowoffset + i));
+        fp << *(rowoffset + i);
         if (i < rowoffset_pt - 1)
-            fprintf(fp, ", ");
+            fp << ", ";
         if (i % 10 == 0 && i != 0)
-            fprintf(fp, "\n");
+            fp << std::endl;
     }
-    fprintf(fp, "};\n\n"); // NOTE: the last entry is (yyptbl.size - 1).
+    fp << "};" << std::endl
+       << std::endl; // NOTE: the last entry is (yyptbl.size - 1).
 }
 
 void
-print_parsing_tbl_col_entry(char action, int token_value, int* count)
+print_parsing_tbl_col_entry(std::ofstream& fp,
+                            char action,
+                            int token_value,
+                            int* count)
 {
     bool isEntry = false;
     if (action == 's' || action == 'g' || action == 'r' || action == 'a') {
-        fprintf(fp, "%d, ", token_value); // state to go.
+        fp << token_value << ", ";
         isEntry = true;
     }
 
     if (isEntry) {
         (*count)++;
         if ((*count) % 10 == 0 && (*count) != 0)
-            fprintf(fp, "\n");
+            fp << std::endl;
     }
 }
 
@@ -960,12 +969,12 @@ print_parsing_tbl_col_entry(char action, int token_value, int* count)
  * if it's < 0, it's a non-terminal.
  */
 void
-print_parsing_tbl_col()
+print_parsing_tbl_col(std::ofstream& fp)
 {
     int count = 0;
     int col_size = ParsingTblCols;
 
-    fprintf(fp, "static YYCONST yytabelem yyptbltok[] = {\n");
+    fp << "static YYCONST yytabelem yyptbltok[] = {" << std::endl;
 
     if (Options::get().use_remove_unit_production) {
         int i = 0;
@@ -985,7 +994,8 @@ print_parsing_tbl_col()
                         char action = 0;
                         int state = 0;
                         get_action(n->type, col, row, &action, &state);
-                        print_parsing_tbl_col_entry(action, n->value, &count);
+                        print_parsing_tbl_col_entry(
+                          fp, action, n->value, &count);
                     } // end of if.
                 }     // end of for.
             }         // end of if.
@@ -1005,12 +1015,12 @@ print_parsing_tbl_col()
                 char action = 0;
                 int state = 0;
                 get_action(n->type, j, i, &action, &state);
-                print_parsing_tbl_col_entry(action, n->value, &count);
+                print_parsing_tbl_col_entry(fp, action, n->value, &count);
             }
         } // end of for.
     }
 
-    fprintf(fp, "-10000000};\n\n"); // -10000000 is space filler
+    fp << "-10000000};" << std::endl << std::endl; // -10000000 is space filler
 }
 
 /*
@@ -1018,10 +1028,10 @@ print_parsing_tbl_col()
  * Refer: Pager July, 72', Tech Rpt PE 259. Measure 3.
  */
 void
-get_final_states()
+get_final_states(std::ofstream& fp)
 {
-    fprintf(fp, "static YYCONST yytabelem yyfs[] = {\n");
-    fprintf(fp, "%d", final_state_list[0]);
+    fp << "static YYCONST yytabelem yyfs[] = {" << std::endl;
+    fp << final_state_list[0];
     int j = 0;
     for (int i = 1; i < ParsingTblRows; i++) {
         if (Options::get().use_remove_unit_production) {
@@ -1029,12 +1039,12 @@ get_final_states()
                 continue;
         }
 
-        fprintf(fp, ", ");
+        fp << ", ";
         if ((++j) % 10 == 0)
-            fprintf(fp, "\n");
-        fprintf(fp, "%d", final_state_list[i]);
+            fp << std::endl;
+        fp << final_state_list[i];
     }
-    fprintf(fp, "};\n\n");
+    fp << "};" << std::endl << std::endl;
 }
 
 auto
@@ -1045,86 +1055,89 @@ use_lrk() -> bool
 }
 
 void
-write_lrk_table_arrays()
+write_lrk_table_arrays(std::ofstream& fp)
 {
-    fprintf(fp, "/*\n * For LR(k) parsing tables.\n */\n");
+    fp << std::endl
+       << "/* * For LR(k) parsing tables." << std::endl
+       << " */" << std::endl;
 
     // yy_lrk_k.
-    fprintf(fp, "\n/* Max K in LR(k). */\n");
-    fprintf(
-      fp, "static YYCONST yytabelem yy_lrk_k = %d;\n", lrk_pt_array->max_k);
+    fp << std::endl << "/* Max K in LR(k). */" << std::endl;
+    fp << "static YYCONST yytabelem yy_lrk_k = " << lrk_pt_array->max_k << ";"
+       << std::endl;
 
     // yy_lrk_rows[].
-    fprintf(fp, "\n/* Number of rows in each LR(k) parsing table. */\n");
-    fprintf(fp, "static YYCONST yytabelem yy_lrk_rows[] = {");
+    fp << std::endl
+       << "/* Number of rows in each LR(k) parsing table. */" << std::endl;
+    fp << "static YYCONST yytabelem yy_lrk_rows[] = {";
     for (int i = 2; i <= lrk_pt_array->max_k; i++) {
         // printf("write LRK table arrays: i = %d\n", i);
         if (i > 2)
-            fprintf(fp, ", ");
-        fprintf(fp, "%d", lrk_pt_array->array[i - 2]->row_count);
+            fp << ", ";
+        fp << lrk_pt_array->array[i - 2]->row_count;
     }
-    fprintf(fp, "};\n");
+    fp << "};" << std::endl;
 
     // yy_lrk_cols
-    fprintf(fp, "\n/* yyPTC_count + 2 */\n");
-    fprintf(
-      fp, "static YYCONST yytabelem yy_lrk_cols = %d;\n", ParsingTblCols + 2);
+    fp << std::endl << "/* yyPTC_count + 2 */" << std::endl;
+    fp << "static YYCONST yytabelem yy_lrk_cols = " << ParsingTblCols + 2 << ';'
+       << std::endl;
 
     // yy_lrk_r[].
-    fprintf(fp, "\n/* Values in each LR(k) parsing table. */\n");
-    fprintf(fp, "static YYCONST yytabelem yy_lrk_r[] = {\n");
+    fp << std::endl << "/* Values in each LR(k) parsing table. */" << std::endl;
+    fp << "static YYCONST yytabelem yy_lrk_r[] = {" << std::endl;
     for (int i = 2; i <= lrk_pt_array->max_k; i++) {
         const LRkPT* t = lrk_pt_array->array[i - 2];
         for (const LRkPTRow* r = t->rows; r != nullptr; r = r->next) {
-            fprintf(fp, "  %d, %d, ", r->state, r->token->snode->value);
+            fp << "  " << r->state << ", " << r->token->snode->value << ", ";
             for (int j = 0; j < ParsingTblCols; j++) {
                 if (r->row[j] != nullptr) {
                     if (r->row[j]->end ==
                         (Configuration*)CONST_CONFLICT_SYMBOL) {
-                        fprintf(fp, "%d, %d, ", j, -2);
+                        fp << j << ", " << -2 << ", ";
                     } else {
-                        fprintf(fp, "%d, %d, ", j, r->row[j]->end->ruleID);
+                        fp << j << ", " << r->row[j]->end->ruleID << ", ";
                     }
                 }
             }
             if (i == lrk_pt_array->max_k && r->next == nullptr) {
-                fprintf(fp, "-1");
+                fp << "-1";
             } else {
-                fprintf(fp, "-1, ");
+                fp << "-1, ";
             }
-            fprintf(fp, "\n");
+            fp << std::endl;
         }
         if (i < lrk_pt_array->max_k)
-            fprintf(fp, "\n");
+            fp << std::endl;
     }
-    fprintf(fp, "};\n");
+    fp << "};" << std::endl;
 
     // CONST_ACC.
-    fprintf(fp, "\n#define CONST_ACC -10000000 ");
-    fprintf(fp, "/* for ACC in parsing table. */\n");
+    fp << std::endl << "#define CONST_ACC -10000000 ";
+    fp << "/* for ACC in parsing table. */" << std::endl;
 
     // yyPTC[].
-    fprintf(fp, "\n/* Values of parsing table column tokens. */\n");
-    fprintf(fp, "static YYCONST yytabelem yyPTC[] = {\n");
+    fp << std::endl
+       << "/* Values of parsing table column tokens. */" << std::endl;
+    fp << "static YYCONST yytabelem yyPTC[] = {" << std::endl;
     for (int i = 0; i < ParsingTblCols; i++) {
         if (i > 0)
-            fprintf(fp, ", ");
+            fp << ", ";
         if (i % 10 == 0) {
             if (i > 0)
-                fprintf(fp, "\n");
-            fprintf(fp, "  ");
+                fp << std::endl;
+            fp << "  ";
         }
         if (strcmp("$accept", ParsingTblColHdr[i]->symbol) == 0) {
-            fprintf(fp, "CONST_ACC");
+            fp << "CONST_ACC";
         } else if (strcmp("$end", ParsingTblColHdr[i]->symbol) == 0) {
-            fprintf(fp, "%d", 0);
+            fp << 0;
         } else {
-            fprintf(fp, "%d", ParsingTblColHdr[i]->value);
+            fp << ParsingTblColHdr[i]->value;
         }
     }
-    fprintf(fp, "\n};\n");
-
-    fprintf(fp, "\n\n");
+    fp << std::endl << "};" << std::endl;
+    fp << std::endl << std::endl;
 }
 
 /*
@@ -1132,35 +1145,39 @@ write_lrk_table_arrays()
  * used by the driver code.
  */
 void
-write_parsing_table_arrays()
+write_parsing_table_arrays(std::ofstream& fp)
 {
-    get_final_states();
+    get_final_states(fp);
 
-    print_parsing_tbl_col(); // yytbltok[]
-    print_parsing_tbl();     // yytblact[], yyrowoffset[]
+    print_parsing_tbl_col(fp); // yytbltok[]
+    print_parsing_tbl(fp);     // yytblact[], yyrowoffset[]
 
-    print_yyr1(); // yyr1[]
-    print_yyr2(); // yyr2[]
+    print_yyr1(fp); // yyr1[]
+    print_yyr2(fp); // yyr2[]
 
     if (use_lrk() == false) {
-        fprintf(fp, "\n#ifdef YYDEBUG\n\n");
-        fprintf(fp, "typedef struct {char *t_name; int t_val;} yytoktype;\n\n");
-        print_yynonterminals(); // yynts[]. nonterminals.
+        fp << std::endl << "#ifdef YYDEBUG" << std::endl << std::endl;
+        fp << "typedef struct {char *t_name; int t_val;} yytoktype;"
+           << std::endl
+           << std::endl;
+        print_yynonterminals(fp); // yynts[]. nonterminals.
 
-        print_yytoks(); // yytoks[]. tokens.
-        print_yyreds(); // yyreds[]. Productions of grammar.
-        fprintf(fp, "#endif /* YYDEBUG */\n\n");
+        print_yytoks(fp); // yytoks[]. tokens.
+        print_yyreds(fp); // yyreds[]. Productions of grammar.
+        fp << "#endif /* YYDEBUG */" << std::endl << std::endl;
 
     } else { // use LR(k).
-        fprintf(fp, "typedef struct {char *t_name; int t_val;} yytoktype;\n\n");
-        print_yynonterminals(); // yynts[]. nonterminals.
-        print_yytoks();         // yytoks[]. tokens.
+        fp << "typedef struct {char *t_name; int t_val;} yytoktype;"
+           << std::endl
+           << std::endl;
+        print_yynonterminals(fp); // yynts[]. nonterminals.
+        print_yytoks(fp);         // yytoks[]. tokens.
 
-        fprintf(fp, "\n#ifdef YYDEBUG\n\n");
-        print_yyreds(); // yyreds[]. Productions of grammar.
-        fprintf(fp, "#endif /* YYDEBUG */\n\n");
+        fp << std::endl << "#ifdef YYDEBUG" << std::endl << std::endl;
+        print_yyreds(fp); // yyreds[]. Productions of grammar.
+        fp << "#endif /* YYDEBUG */" << std::endl << std::endl;
 
-        write_lrk_table_arrays();
+        write_lrk_table_arrays(fp);
     }
 }
 
@@ -1169,11 +1186,11 @@ write_parsing_table_arrays()
 ///////////////////////////////////////////////////////
 
 void
-write_special_info()
+write_special_info(std::ofstream& fp)
 {
-    fprintf(fp, "\nYYSTYPE yylval;\n");
+    fp << std::endl << "YYSTYPE yylval;" << std::endl;
     if (Options::get().use_yydebug) {
-        fprintf(fp, "\n#define YYDEBUG 1\n");
+        fp << std::endl << "#define YYDEBUG 1" << std::endl;
     }
 }
 
@@ -1190,7 +1207,7 @@ get_lrk_hyacc_path()
         strcat(tmp, "k"); // hyaccpark
         HYACC_PATH = tmp;
 
-        printf("LR(k) HYACC_PATH: %s\n", HYACC_PATH);
+        std::cout << "LR(k) HYACC_PATH: " << HYACC_PATH << std::endl;
     }
 }
 
@@ -1198,41 +1215,47 @@ void
 generate_compiler(char* infile)
 {
     auto& options = Options::get();
-    if ((fp_yacc = fopen(infile, "r")) == nullptr) {
+    std::ifstream fp_yacc{};
+    std::ofstream fp{};
+    std::ofstream fp_h{};
+
+    fp_yacc.open(infile);
+    if (!fp_yacc.is_open()) {
         throw std::runtime_error(std::string("error: can't open file ") +
                                  infile);
     }
 
-    prepare_outfile(); // open output compiler file.
+    prepare_outfile(&fp, &fp_h); // open output compiler file.
 
     if (options.use_lines)
-        fprintf(fp, "\n# line 1 \"%s\"\n", infile);
-    process_yacc_file_section1(); // declaration section.
+        fp << std::endl << "# line 1 \"" << infile << '\"' << std::endl;
+    process_yacc_file_section1(fp_yacc, fp, fp_h); // declaration section.
 
-    write_special_info();
+    write_special_info(fp);
 
-    goto_section3();
+    goto_section3(fp_yacc);
 
     if (options.use_lines)
-        fprintf(fp, "\n# line %d \"%s\"\n", n_line, infile);
+        fp << std::endl
+           << "# line " << n_line << " \"" << infile << '\"' << std::endl;
 
-    process_yacc_file_section3(); // code section.
+    process_yacc_file_section3(fp_yacc, fp); // code section.
 
-    fprintf(fp, "\n#define YYCONST const\n");
-    fprintf(fp, "typedef int yytabelem;\n\n");
-    write_parsing_table_arrays();
+    fp << std::endl << "#define YYCONST const" << std::endl;
+    fp << "typedef int yytabelem;" << std::endl << std::endl;
+    write_parsing_table_arrays(fp);
 
     get_lrk_hyacc_path(); /* do this if LR(k) is used */
 
-    copy_yaccpar_file_1(HYACC_PATH);
-    goto_section2();
-    process_yacc_file_section2(infile); // get reduction code.
-    copy_yaccpar_file_2(HYACC_PATH);
+    copy_yaccpar_file_1(fp, HYACC_PATH);
+    goto_section2(fp_yacc);
+    process_yacc_file_section2(fp_yacc, fp, infile); // get reduction code.
+    copy_yaccpar_file_2(fp, HYACC_PATH);
 
     free_symbol_node_list(tokens);
 
-    fclose(fp);
+    fp.close();
     if (options.use_header_file)
-        fclose(fp_h);
-    fclose(fp_yacc);
+        fp_h.close();
+    fp_yacc.close();
 }
