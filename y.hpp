@@ -39,6 +39,7 @@
 #include <mutex>
 #include <ostream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 constexpr size_t SYMBOL_INIT_SIZE = 128; /* Init size of a symbol string. */
@@ -151,12 +152,12 @@ class Options
 };
 
 /* used by gen_compiler.c, value obtained in get_options.c */
-extern const char* y_tab_c;
-extern const char* y_tab_h;
+extern std::string y_tab_c;
+extern std::string y_tab_h;
 /* used by y.c, value obtained in get_options.c */
-extern const char* y_output;
+extern std::string y_output;
 /* used by gen_graphviz.c, value obtained in get_options.c */
-extern const char* y_gviz;
+extern std::string y_gviz;
 /* Max K used for LR(k) */
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,readability-identifier-naming)
 extern std::atomic_int MAX_K;
@@ -705,7 +706,7 @@ insert_state_to_pm(State* s);
  * the parsing table.
  *
  * The column is arranged this way:
- * strEnd, terminals, non-terminals.
+ * STR_END, terminals, non-terminals.
  * Use macro so it's inline and faster.
  *
  * Used in y.c and upe.c.
@@ -854,11 +855,11 @@ enum YACC_STATE
     COMMENT2
 };
 
-extern const char* strAccept;
-extern const char* strPlaceHolder;
-extern const char* strEnd;
-extern const char* strEmpty;
-extern const char* strError;
+extern const char* const STR_ACCEPT;
+extern const char* const STR_PLACE_HOLDER;
+extern const char* const STR_END;
+extern const char* const STR_EMPTY;
+extern const char* const STR_ERROR;
 
 /* function in gen_graphviz.c */
 extern void

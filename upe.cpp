@@ -333,9 +333,9 @@ insert_actions_of_combined_states(int new_state,
     // copy actions of old_states to new_state.
 
     for (int i = 0; i < old_states_count; i++) {
-        // Copy action of end marker strEnd.
+        // Copy action of end marker STR_END.
         insert_action_of_symbol(
-          hash_tbl_find(strEnd), new_state, i, old_states);
+          hash_tbl_find(STR_END), new_state, i, old_states);
 
         // copy actions of terminals.
         for (const SymbolNode* a = grammar.terminal_list; a != nullptr;
@@ -393,7 +393,7 @@ in_int_array(int n, int a[], int a_size) -> bool
 
 /*
  * Note that action 'g' applies to non-terminals only.
- * But include it does not affect the cases for strEnd
+ * But include it does not affect the cases for STR_END
  * and terminals, which have only action 's'. So just
  * include checking for 'g' for all three situations.
  */
@@ -426,7 +426,7 @@ void
 get_reachable_states(int cur_state, int states_reachable[], int* states_count)
 {
     get_reachable_states_for_symbol(
-      strEnd, cur_state, states_reachable, states_count);
+      STR_END, cur_state, states_reachable, states_count);
 
     for (SymbolNode* a = grammar.terminal_list; a != nullptr; a = a->next) {
         get_reachable_states_for_symbol(
@@ -454,13 +454,13 @@ write_parsing_table_col_header()
 
 /*
  * get final parsing table column headers.
- * + 1 for end marker strEnd.
+ * + 1 for end marker STR_END.
  */
 void
 get_f_parsing_tbl_col_hdr()
 {
     SymbolNode* tail = F_ParsingTblColHdr =
-      create_symbol_node(hash_tbl_find(strEnd));
+      create_symbol_node(hash_tbl_find(STR_END));
     F_ParsingTblCols = 1;
 
     for (SymbolNode* a = grammar.terminal_list; a != nullptr; a = a->next) {
@@ -828,11 +828,11 @@ update_repeated_row(int new_state, int old_state, int row)
     Grammar* g = &grammar;
     // printf("In row %d, replace %d by %d\n", row, old_state, new_state);
 
-    // for end marker column strEnd
-    SymbolTblNode* n = hash_tbl_find(strEnd);
+    // for end marker column STR_END
+    SymbolTblNode* n = hash_tbl_find(STR_END);
     get_action(n->type, get_col(n), row, &action, &state_dest);
     if (state_dest == old_state)
-        update_action(get_col(hash_tbl_find(strEnd)), row, new_state);
+        update_action(get_col(hash_tbl_find(STR_END)), row, new_state);
 
     // for terminal columns
     for (SymbolNode* a = g->terminal_list; a != nullptr; a = a->next) {

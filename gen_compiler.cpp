@@ -36,9 +36,6 @@
 #include <stdexcept>
 #include <string>
 
-extern const char* y_tab_c;
-extern const char* y_tab_h;
-
 static FILE* fp_yacc; // for yacc input file.
 static FILE* fp;      // pointer to output file y.tab.c
 static FILE* fp_h;    // for y.tab.h
@@ -64,13 +61,13 @@ extern int ysymbol_size;
 static void
 prepare_outfile()
 {
-    if ((fp = fopen(y_tab_c, "w")) == nullptr) {
+    if ((fp = fopen(y_tab_c.data(), "w")) == nullptr) {
         throw std::runtime_error(std::string("Cannot open output file ") +
                                  y_tab_c);
     }
     if (Options::get().use_header_file == false)
         return;
-    if ((fp_h = fopen(y_tab_h, "w")) == nullptr) {
+    if ((fp_h = fopen(y_tab_h.data(), "w")) == nullptr) {
         fclose(fp);
         throw std::runtime_error(std::string("Cannot open output file ") +
                                  y_tab_h);
@@ -119,7 +116,7 @@ write_tokens_to_compiler_file()
     int index = 0;
     int i = 0;
     for (SymbolNode* a = tokens; a != nullptr; a = a->next, i++) {
-        if (a->snode->TP->is_quoted || strcmp(a->snode->symbol, strError) == 0)
+        if (a->snode->TP->is_quoted || strcmp(a->snode->symbol, STR_ERROR) == 0)
             continue;
 
         fprintf(fp, "#define %s %d\n", a->snode->symbol, index + 257);
@@ -767,7 +764,7 @@ print_yytoks()
 
     fprintf(fp, "yytoktype yytoks[] = {\n");
     for (int i = 0; a != nullptr; a = a->next, i++) {
-        if (strcmp(a->snode->symbol, strError) == 0)
+        if (strcmp(a->snode->symbol, STR_ERROR) == 0)
             continue;
 
         if (strlen(a->snode->symbol) == 2 &&

@@ -97,17 +97,17 @@ get_outfile_name(size_t len, const char* name)
         show_helpmsg_exit();
     }
     // printf("len = %d, name = %s\n", len, name);
-    auto* y_tab_c_temp = new char[len + 5];
-    sprintf(y_tab_c_temp, "%s.cpp", name);
+    std::string y_tab_c_temp = name;
+    y_tab_c_temp += ".cpp";
     y_tab_c = y_tab_c_temp;
-    auto* y_tab_h_temp = new char[len + 5];
-    sprintf(y_tab_h_temp, "%s.hpp", name);
+    std::string y_tab_h_temp = name;
+    y_tab_h_temp += ".hpp";
     y_tab_h = y_tab_h_temp;
-    auto* y_output_temp = new char[len + 8];
-    sprintf(y_output_temp, "%s.output", name);
+    std::string y_output_temp = name;
+    y_output_temp += ".output";
     y_output = y_output_temp;
-    auto* y_gviz_temp = new char[len + 8];
-    sprintf(y_gviz_temp, "%s.gviz", name);
+    std::string y_gviz_temp = name;
+    y_gviz_temp += ".gviz";
     y_gviz = y_gviz_temp;
 }
 
@@ -123,17 +123,17 @@ get_filename_prefix(size_t len, const char* name)
         show_helpmsg_exit();
     }
     // printf("len = %d, name = %s\n", len, name);
-    auto* y_tab_c_temp = new char[len + 7];
-    sprintf(y_tab_c_temp, "%s.tab.cpp", name);
+    std::string y_tab_c_temp = name;
+    y_tab_c_temp += ".tab.cpp";
     y_tab_c = y_tab_c_temp;
-    auto* y_tab_h_temp = new char[len + 7];
-    sprintf(y_tab_h_temp, "%s.tab.hpp", name);
+    std::string y_tab_h_temp = name;
+    y_tab_h_temp += ".tab.hpp";
     y_tab_h = y_tab_h_temp;
-    auto* y_output_temp = new char[len + 6];
-    sprintf(y_output_temp, "%s.output", name);
+    std::string y_output_temp = name;
+    y_output_temp += ".output";
     y_output = y_output_temp;
-    auto* y_gviz_temp = new char[len + 6];
-    sprintf(y_gviz_temp, "%s.gviz", name);
+    std::string y_gviz_temp = name;
+    y_gviz_temp += ".gviz";
     y_gviz = y_gviz_temp;
 }
 
@@ -195,7 +195,7 @@ void
 set_lalr1(Options& options)
 {
     options.use_lalr = true;
-   options. use_lr0 = true;
+    options.use_lr0 = true;
 }
 
 void
@@ -261,7 +261,7 @@ get_single_letter_option(char* s, unsigned int pos)
             options.preserve_unit_prod_with_code = true;
             break;
         case 'd': /* define: create y.tab.h */
-           options. use_header_file = true;
+            options.use_header_file = true;
             break;
         case 'g': /* create y.gviz */
             options.use_graphviz = true;
@@ -497,7 +497,7 @@ get_options(int argc, char** argv) -> int
     }
 
     init_options();
-	auto& options = Options::get();
+    auto& options = Options::get();
 
     int infile_index = -1;
     for (int i = 1; i < argc; i++) {

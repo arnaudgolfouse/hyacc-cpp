@@ -41,10 +41,10 @@ Options Options::
 std::mutex Options::
   inner_lock{}; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-const char* y_tab_c;
-const char* y_tab_h;
-const char* y_output;
-const char* y_gviz;
+std::string y_tab_c;
+std::string y_tab_h;
+std::string y_output;
+std::string y_gviz;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic_int MAX_K;
 
@@ -569,7 +569,7 @@ write_configuration(const Configuration& c)
     if (options.use_lr0 && options.use_lalr == false) { // LR(0), no context.
         // do nothing unless is goal production.
         if (c.ruleID == 0)
-            yyprintf("%s", strEnd);
+            yyprintf("%s", STR_END);
     } else {
         write_context(c.context);
     }
@@ -2791,9 +2791,9 @@ init_start_state()
 
     state0->config[0]->owner = state0;
     state0->config[0]->context->context_count = 1;
-    hash_tbl_insert(strEnd);
+    hash_tbl_insert(STR_END);
     state0->config[0]->context->nContext =
-      create_symbol_node(hash_tbl_find(strEnd));
+      create_symbol_node(hash_tbl_find(STR_END));
 
     // writeState(state0);
 
@@ -3238,7 +3238,7 @@ lr1(int argc, char** argv) -> int
 
     fp_v = nullptr; // for y.output
     if (options.use_verbose) {
-        if ((fp_v = fopen(y_output, "w")) == nullptr) {
+        if ((fp_v = fopen(y_output.data(), "w")) == nullptr) {
             throw std::runtime_error(std::string("cannot open file ") +
                                      y_output);
         }
@@ -3319,7 +3319,7 @@ lr0(int argc, char** argv) -> int
 
     fp_v = nullptr; // for y.output
     if (options.use_verbose) {
-        if ((fp_v = fopen(y_output, "w")) == nullptr) {
+        if ((fp_v = fopen(y_output.data(), "w")) == nullptr) {
             throw std::runtime_error(std::string("cannot open file ") +
                                      y_output);
         }

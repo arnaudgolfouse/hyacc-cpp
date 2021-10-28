@@ -91,6 +91,8 @@ static void
 set_transitors_pass_thru_on(const Configuration* cur_config, Configuration* o);
 static auto
 inherit_parent_context(State* s, State* parent) -> bool;
+static void
+clear_state_context(State* s);
 
 /*
  * Initialize this to nullptr at the beginning of phase2_regeneration2().
@@ -1189,19 +1191,19 @@ combine_cluster(LtCluster* c_new, LtCluster* c_old)
  * Note that if it is state 0, then should add $end
  * to the goal rule before get_closure() !
  */
-#define clear_regenerate(state_no)                                             \
-    {                                                                          \
-        State* s;                                                              \
-        s = states_new_array->state_list[state_no];                            \
-        clear_state_context(s);                                                \
-        if (0 == (state_no)) {                                                 \
-            hash_tbl_insert(strEnd);                                           \
-            s->config[0]->context->nContext =                                  \
-              create_symbol_node(hash_tbl_find(strEnd));                       \
-            s->config[0]->context->context_count = 1;                          \
-        }                                                                      \
-        get_closure(s);                                                        \
+inline void
+clear_regenerate(int state_no)
+{
+    State* s = states_new_array->state_list[state_no];
+    clear_state_context(s);
+    if (0 == (state_no)) {
+        hash_tbl_insert(STR_END);
+        s->config[0]->context->nContext =
+          create_symbol_node(hash_tbl_find(STR_END));
+        s->config[0]->context->context_count = 1;
     }
+    get_closure(s);
+}
 
 /*
  * Function to propagate context change until a state where
@@ -3455,7 +3457,7 @@ do_loop()
 #if DEBUG_PHASE_1
                 puts("GOAL PRODUCTION - generate context: $end");
 #endif
-                gamma_theads = create_symbol_node(hash_tbl_find(strEnd));
+                gamma_theads = create_symbol_node(hash_tbl_find(STR_END));
             }
         }
 

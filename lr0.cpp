@@ -104,7 +104,7 @@ insert_reduction_to_parsing_table_lr0(Configuration* c, int state_no)
     if (grammar.rules[c->ruleID]->nLHS->snode ==
         grammar.goal_symbol->snode) { // accept, action = "a";
         // note this should happen only if the end is $end.
-        insert_action(hash_tbl_find(strEnd), state_no, CONST_ACC);
+        insert_action(hash_tbl_find(STR_END), state_no, CONST_ACC);
     } else { // reduct, action = "r";
         for (int col = 0; col < max_col; col++) {
             SymbolTblNode* n = ParsingTblColHdr[col];
@@ -125,7 +125,7 @@ insert_reduction_to_parsing_table_lalr(Configuration* c, int state_no)
     if (grammar.rules[c->ruleID]->nLHS->snode ==
         grammar.goal_symbol->snode) { // accept, action = "a";
         // note this should happen only if the end is $end.
-        insert_action(hash_tbl_find(strEnd), state_no, CONST_ACC);
+        insert_action(hash_tbl_find(STR_END), state_no, CONST_ACC);
     } else { // reduct, action = "r";
         SymbolNode* a = c->context->nContext;
         if (a != nullptr) {

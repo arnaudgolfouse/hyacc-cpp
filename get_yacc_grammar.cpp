@@ -42,11 +42,11 @@
 //////////////////////////////////////////////////////////////////
 
 /* Special symbols used by the entire program */
-const char* strAccept = "$accept";
-const char* strPlaceHolder = "$placeholder";
-const char* strEnd = "$end";
-const char* strEmpty = "";
-const char* strError = "error"; // reserved word.
+const char* const STR_ACCEPT = "$accept";
+const char* const STR_PLACE_HOLDER = "$placeholder";
+const char* const STR_END = "$end";
+const char* const STR_EMPTY = "";
+const char* const STR_ERROR = "error"; // reserved word.
 
 char* ysymbol; // token symbol.
 int ysymbol_pt;
@@ -437,7 +437,7 @@ process_yacc_file_input_section1()
                         prev_state = static_cast<yacc_section1_state>(-1);
     char* token_type = nullptr;
     int union_depth = 0;
-    off_t union_start;
+    off_t union_start = 0;
 
     ysymbol_pt = 0;
     tokens = tokens_tail = nullptr;
@@ -880,7 +880,7 @@ get_non_terminals(Grammar* g)
             tail = tail->next;
         }
 
-        if (strcmp(tail->snode->symbol, strAccept) != 0)
+        if (strcmp(tail->snode->symbol, STR_ACCEPT) != 0)
             tail->snode->value = (-1) * (++index);
 
         g->non_terminal_count++;
@@ -1011,9 +1011,9 @@ get_token_value(const char* s, int* index) -> int
             return val;
     }
 
-    if (strcmp(s, strError) == 0)
+    if (strcmp(s, STR_ERROR) == 0)
         return 256;
-    if (strcmp(s, strEnd) == 0)
+    if (strcmp(s, STR_END) == 0)
         return 0;
 
     val = 257 + (*index);
@@ -1024,19 +1024,19 @@ get_token_value(const char* s, int* index) -> int
 /*
  * This function gets the values of all terminals,
  * Including those after %prec in the rule section,
- * and including strEnd, strError.
+ * and including STR_END, STR_ERROR.
  *
  * Symbol can be:
  *   - a token, value is 257 + index in token list (in un-quoted ones).
  *   - "error", value is 256.
  *   - a char or escaped char, value is its ascii code.
- *   - strEnd, value is 0.
+ *   - STR_END, value is 0.
  *   - a non-terminal symbol, value is -1 * index in non-terminal list.
  *
  * The values of non-terminals are calculated in
  * getNonTerminals().
  *
- * strEmpty has no value. strAccept is a non-terminal,
+ * STR_EMPTY has no value. STR_ACCEPT is a non-terminal,
  * whose value is default to 0. But the value of these
  * two are never used, so doesn't matter.
  *
@@ -1078,7 +1078,7 @@ void
 get_symbol_parsing_tbl_col(Grammar* g)
 {
     SymbolNode* a = g->terminal_list;
-    SymbolTblNode* n = hash_tbl_find(strEnd);
+    SymbolTblNode* n = hash_tbl_find(STR_END);
     n->seq = 0;
 
     for (int i = 1; a != nullptr; a = a->next, i++) {
@@ -1103,7 +1103,7 @@ get_parsing_tbl_col_hdr(Grammar* g)
     ParsingTblColHdr =
       new SymbolTblNode*[1 + g->terminal_count + g->non_terminal_count];
 
-    ParsingTblColHdr[0] = hash_tbl_find(strEnd);
+    ParsingTblColHdr[0] = hash_tbl_find(STR_END);
     ParsingTblCols = 1;
 
     for (SymbolNode* a = grammar.terminal_list; a != nullptr; a = a->next) {
@@ -1254,7 +1254,7 @@ output_nonterminal(YACC_STATE state) -> SymbolTblNode*
 
             // if quoted by '', is terminal, otherwise is non-terminal.
             // "error" is a reserved word, a terminal.
-            if (state == TERMINAL || strcmp(ysymbol, strError) == 0) {
+            if (state == TERMINAL || strcmp(ysymbol, STR_ERROR) == 0) {
                 n->type = symbol_type::TERMINAL;
                 init_terminal_property(n);
                 n->TP->is_quoted = true;
@@ -1534,7 +1534,7 @@ get_goal_rule_rhs()
 void
 get_goal_rule_lhs()
 {
-    SymbolTblNode* n = hash_tbl_insert(strAccept);
+    SymbolTblNode* n = hash_tbl_insert(STR_ACCEPT);
     create_new_rule(); // goal production rule.
     grammar.rules[0]->nLHS = create_symbol_node(n);
     n->type = symbol_type::NONTERMINAL;
@@ -1557,7 +1557,7 @@ post_modification(Grammar* g)
     if (options.preserve_unit_prod_with_code)
         return;
 
-    SymbolTblNode* n = hash_tbl_insert(strPlaceHolder);
+    SymbolTblNode* n = hash_tbl_insert(STR_PLACE_HOLDER);
     n->type = symbol_type::NONTERMINAL;
 
     int count = 0;
@@ -1589,12 +1589,12 @@ void
 get_yacc_grammar_init()
 {
     // insert special symbols to hash table.
-    SymbolTblNode* n = hash_tbl_insert(strEnd); // end marker of production.
+    SymbolTblNode* n = hash_tbl_insert(STR_END); // end marker of production.
     n->type = symbol_type::TERMINAL;
 
-    hash_tbl_insert(strAccept);
-    hash_tbl_insert(strEnd);
-    n = hash_tbl_insert(strEmpty);
+    hash_tbl_insert(STR_ACCEPT);
+    hash_tbl_insert(STR_END);
+    n = hash_tbl_insert(STR_EMPTY);
     n->type = symbol_type::TERMINAL;
     n->vanishable = 1;
 
