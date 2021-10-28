@@ -130,7 +130,7 @@ search_state_hash_tbl(State* s, int* is_compatible) -> State*
         if (is_same_state(n->state, s) == true) {
             return n->state;
         }
-        if (USE_COMBINE_COMPATIBLE_STATES) {
+        if (Options::get().use_combine_compatible_states) {
             if (is_compatible_states(n->state, s) == true) {
                 combine_compatible_states(n->state, s);
                 (*is_compatible) = 1;

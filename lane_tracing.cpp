@@ -1053,7 +1053,7 @@ cluster_add_lt_tbl_entry(LtCluster* c,
         printf("clone state %d to %d\n", s->state_no, state_no);
 #endif
 
-        if (USE_LR_K) {
+        if (Options::get().use_lr_k) {
             // For LR(k), replace entry in lane_head_tail_pairs!
             // printf("parrent state: %d\n", e_parent_state_no);
             lane_head_tail_pairs_replace(c, cur_red_config, s, s_copy);
@@ -1641,7 +1641,7 @@ dump_lane_head_list(const laneHead* lh_list)
 /* for originator list */
 
 /*
- * Used when USE_LANE_TRACING  only.
+ * Used when use_lane_tracing  only.
  * Called in y.c function create_config().
  */
 auto
@@ -1813,7 +1813,7 @@ my_write_context(const Context* c)
         }
     }
 
-    if (USE_LR_K) {
+    if (Options::get().use_lr_k) {
         // specifically for LR(k). This can be combined with the
         // above if block. Single this part out here is to keep
         // the code easier to maintain for LR(1) and LR(k) separately.
@@ -2159,7 +2159,7 @@ remove_pass_through_states(laneHead* lh_list) -> laneHead*
 static void
 gpm(State* new_state)
 {
-    if (DEBUG_GEN_PARSING_MACHINE) {
+    if (Options::get().debug_gen_parsing_machine) {
         std::cout << std::endl
                   << std::endl
                   << "--generate parsing machine--" << std::endl
@@ -2168,7 +2168,7 @@ gpm(State* new_state)
     }
 
     while (new_state != nullptr) {
-        if (DEBUG_GEN_PARSING_MACHINE) {
+        if (Options::get().debug_gen_parsing_machine) {
             yyprintf("%d states, current state is %d\n",
                      states_new->state_count,
                      new_state->state_no);
@@ -2607,7 +2607,7 @@ trace_back(const Configuration* c0, Configuration* c, laneHead* lh_list)
                c->ruleID);
 #endif
 
-        if (USE_LR_K) { // for LR(k) use only.
+        if (Options::get().use_lr_k) { // for LR(k) use only.
 #if DEBUG_PHASE_2_GET_TBL
             printf("config_red_config: %d.%d, LANE_END: %d.%d\n",
                    cur_red_config->owner->state_no,
@@ -2838,7 +2838,7 @@ lane_tracing_phase2()
     puts("Now do regeneration");
 #endif
 
-    if (!USE_COMBINE_COMPATIBLE_STATES) {
+    if (!Options::get().use_combine_compatible_states) {
         phase2_regeneration2(); // using all_clusters.
     } else {
         phase2_regeneration(lane_head_list);
@@ -2848,18 +2848,19 @@ lane_tracing_phase2()
 void
 lane_tracing()
 {
+    auto& options = Options::get();
     IN_EDGE_PUSHING_LANE_TRACING = false;
     MAX_K = 1; // max K used in LR(k).
 
     lane_tracing_phase1();
     resolve_lalr1_conflicts();
 
-    if (USE_LANE_TRACING && states_inadequate->count_unresolved > 0) {
+    if (options.use_lane_tracing && states_inadequate->count_unresolved > 0) {
         lane_tracing_phase2();
         resolve_lalr1_conflicts();   ///
         output_parsing_table_lalr(); ///
 
-        if (USE_LR_K && rr_count > 0) {
+        if (options.use_lr_k && rr_count > 0) {
             lrk_pt_array = nullptr; // initialize for use in gen_compiler.
             // do LR(k) if there are still r/r conflicts.
             lane_tracing_lrk();
@@ -3256,7 +3257,7 @@ set_transitors_pass_thru_on(const Configuration* cur_config, Configuration* o)
 
         if (is_on_transitor_chain(c, o)) {
 
-            if (false == USE_COMBINE_COMPATIBLE_STATES) {
+            if (false == Options::get().use_combine_compatible_states) {
 #if DEBUG_PHASE_2_GET_TBL
                 printf("B: next entry in entry_table: (%d.%d, %d.%d)\n",
                        c->owner->state_no,

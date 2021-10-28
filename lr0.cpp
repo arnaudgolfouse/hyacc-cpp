@@ -346,14 +346,15 @@ update_parsing_table_lr0()
 void
 generate_lr0_parsing_machine()
 {
+    bool debug_gen_parsing_machine = Options::get().debug_gen_parsing_machine;
     State* new_state = states_new->states_head;
 
-    if (DEBUG_GEN_PARSING_MACHINE) {
+    if (debug_gen_parsing_machine) {
         yyprintf("\n\n--generate parsing machine--\n");
     }
 
     while (new_state != nullptr) {
-        if (DEBUG_GEN_PARSING_MACHINE) {
+        if (debug_gen_parsing_machine) {
             yyprintf("%d states, current state is %d\n",
                      states_new->state_count,
                      new_state->state_no);

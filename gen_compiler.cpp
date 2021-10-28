@@ -68,7 +68,7 @@ prepare_outfile()
         throw std::runtime_error(std::string("Cannot open output file ") +
                                  y_tab_c);
     }
-    if (USE_HEADER_FILE == false)
+    if (Options::get().use_header_file == false)
         return;
     if ((fp_h = fopen(y_tab_h, "w")) == nullptr) {
         fclose(fp);
@@ -111,9 +111,9 @@ write_tokens()
 void
 write_tokens_to_compiler_file()
 {
-
+    auto& options = Options::get();
     fprintf(fp, "\n/* tokens */\n\n");
-    if (USE_HEADER_FILE)
+    if (options.use_header_file)
         fprintf(fp_h, "\n/* tokens */\n\n");
 
     int index = 0;
@@ -123,13 +123,13 @@ write_tokens_to_compiler_file()
             continue;
 
         fprintf(fp, "#define %s %d\n", a->snode->symbol, index + 257);
-        if (USE_HEADER_FILE)
+        if (options.use_header_file)
             fprintf(fp_h, "#define %s %d\n", a->snode->symbol, index + 257);
         index++;
     }
 
     fprintf(fp, YYSTYPE_FORMAT, yystype_definition);
-    if (USE_HEADER_FILE) {
+    if (options.use_header_file) {
         fprintf(fp_h, YYSTYPE_FORMAT, yystype_definition);
         fprintf(fp_h, "\nextern YYSTYPE yylval;\n");
     }
@@ -391,7 +391,7 @@ process_yacc_file_section2(char* filename)
 
                     if (end_of_code == false) {
                         fprintf(fp, "\n%s  case %d:\n", padding, rule_count);
-                        if (USE_LINES)
+                        if (Options::get().use_lines)
                             fprintf(fp, "# line %d \"%s\"\n", n_line, filename);
                     }
                     putc('{', fp);
@@ -452,18 +452,18 @@ process_yacc_file_section2(char* filename)
 
                 } else if (last_c == '$' && isdigit(c)) {
                     reading_number = true;
-                    dollar_number = (c - 48) + 10 * dollar_number;
+                    dollar_number = (c - '0') + 10 * dollar_number;
                 } else if (reading_number && isdigit(c)) {
-                    dollar_number = (c - 48) + 10 * dollar_number;
+                    dollar_number = (c - '0') + 10 * dollar_number;
                 } else if (reading_number && !isdigit(c)) {
                     Production* start_rule = grammar.rules[rule_count];
-                    int RHS_index;
+                    int rhs_index = 0;
 
                     rule = find_full_rule(rule_count);
                     if (rule != start_rule)
-                        RHS_index = find_mid_prod_index(rule, start_rule);
+                        rhs_index = find_mid_prod_index(rule, start_rule);
                     else
-                        RHS_index = rule->RHS_count;
+                        rhs_index = rule->RHS_count;
                     const char* token_type = nullptr;
                     if (explicit_type) {
                         token_type = explicit_type;
@@ -475,16 +475,16 @@ process_yacc_file_section2(char* filename)
                     if (token_type)
                         fprintf(fp,
                                 "(yypvt[%d].%s)/* %d %d */",
-                                (dollar_number - RHS_index),
+                                (dollar_number - rhs_index),
                                 token_type,
                                 rule_count,
-                                RHS_index);
+                                rhs_index);
                     else
                         fprintf(fp,
                                 "yypvt[%d]/* %d %d */",
-                                dollar_number - RHS_index,
+                                dollar_number - rhs_index,
                                 rule_count,
-                                RHS_index);
+                                rhs_index);
 
                     putc(c, fp);
                     reading_number = false;
@@ -687,7 +687,7 @@ print_yyr1()
     // First rule is always "$accept : ...".
     fprintf(fp, "%6d,", 0);
 
-    if (USE_REMOVE_UNIT_PRODUCTION) {
+    if (Options::get().use_remove_unit_production) {
         int index = 0;
         for (int i = 1; i < grammar.rules.size(); i++) {
             // printf("rule %d lhs: %s\n", i, grammar.rules[i]->LHS);
@@ -867,7 +867,7 @@ print_parsing_tbl()
 
     fprintf(fp, "static YYCONST yytabelem yyptblact[] = {\n");
 
-    if (USE_REMOVE_UNIT_PRODUCTION) {
+    if (Options::get().use_remove_unit_production) {
         int i = 0;
         for (int row = 0; row < ParsingTblRows; row++) {
             if (is_reachable_state(row)) {
@@ -965,17 +965,14 @@ print_parsing_tbl_col_entry(char action, int token_value, int* count)
 void
 print_parsing_tbl_col()
 {
-    int i, j, row, col, count = 0;
+    int count = 0;
     int col_size = ParsingTblCols;
-    char action;
-    int state;
-    SymbolTblNode* n;
 
     fprintf(fp, "static YYCONST yytabelem yyptbltok[] = {\n");
 
-    if (USE_REMOVE_UNIT_PRODUCTION) {
-        i = 0;
-        for (row = 0; row < ParsingTblRows; row++) {
+    if (Options::get().use_remove_unit_production) {
+        int i = 0;
+        for (int row = 0; row < ParsingTblRows; row++) {
             if (is_reachable_state(row)) {
 
 #if USE_REM_FINAL_STATE
@@ -984,10 +981,12 @@ print_parsing_tbl_col()
                     continue;
                 }
 #endif
-                for (col = 0; col < ParsingTblCols; col++) {
-                    n = ParsingTblColHdr[col];
+                for (int col = 0; col < ParsingTblCols; col++) {
+                    SymbolTblNode* n = ParsingTblColHdr[col];
                     if (is_goal_symbol(n) == false &&
                         is_parent_symbol(n) == false) {
+                        char action = 0;
+                        int state = 0;
                         get_action(n->type, col, row, &action, &state);
                         print_parsing_tbl_col_entry(action, n->value, &count);
                     } // end of if.
@@ -995,7 +994,7 @@ print_parsing_tbl_col()
             }         // end of if.
         }
     } else {
-        for (i = 0; i < ParsingTblRows; i++) {
+        for (int i = 0; i < ParsingTblRows; i++) {
 
 #if USE_REM_FINAL_STATE
             if (final_state_list[i] < 0) { // is a final state.
@@ -1004,8 +1003,10 @@ print_parsing_tbl_col()
                 continue;
             }
 #endif
-            for (j = 0; j < ParsingTblCols; j++) {
-                n = ParsingTblColHdr[j];
+            for (int j = 0; j < ParsingTblCols; j++) {
+                SymbolTblNode* n = ParsingTblColHdr[j];
+                char action = 0;
+                int state = 0;
                 get_action(n->type, j, i, &action, &state);
                 print_parsing_tbl_col_entry(action, n->value, &count);
             }
@@ -1026,7 +1027,7 @@ get_final_states()
     fprintf(fp, "%d", final_state_list[0]);
     int j = 0;
     for (int i = 1; i < ParsingTblRows; i++) {
-        if (USE_REMOVE_UNIT_PRODUCTION) {
+        if (Options::get().use_remove_unit_production) {
             if (is_reachable_state(i) == false)
                 continue;
         }
@@ -1042,7 +1043,8 @@ get_final_states()
 auto
 use_lrk() -> bool
 {
-    return USE_LR_K && (lrk_pt_array != nullptr && lrk_pt_array->max_k >= 2);
+    return Options::get().use_lr_k &&
+           (lrk_pt_array != nullptr && lrk_pt_array->max_k >= 2);
 }
 
 void
@@ -1173,7 +1175,7 @@ void
 write_special_info()
 {
     fprintf(fp, "\nYYSTYPE yylval;\n");
-    if (USE_YYDEBUG) {
+    if (Options::get().use_yydebug) {
         fprintf(fp, "\n#define YYDEBUG 1\n");
     }
 }
@@ -1198,6 +1200,7 @@ get_lrk_hyacc_path()
 void
 generate_compiler(char* infile)
 {
+    auto& options = Options::get();
     if ((fp_yacc = fopen(infile, "r")) == nullptr) {
         throw std::runtime_error(std::string("error: can't open file ") +
                                  infile);
@@ -1205,7 +1208,7 @@ generate_compiler(char* infile)
 
     prepare_outfile(); // open output compiler file.
 
-    if (USE_LINES)
+    if (options.use_lines)
         fprintf(fp, "\n# line 1 \"%s\"\n", infile);
     process_yacc_file_section1(); // declaration section.
 
@@ -1213,7 +1216,7 @@ generate_compiler(char* infile)
 
     goto_section3();
 
-    if (USE_LINES)
+    if (options.use_lines)
         fprintf(fp, "\n# line %d \"%s\"\n", n_line, infile);
 
     process_yacc_file_section3(); // code section.
@@ -1232,7 +1235,7 @@ generate_compiler(char* infile)
     free_symbol_node_list(tokens);
 
     fclose(fp);
-    if (USE_HEADER_FILE)
+    if (options.use_header_file)
         fclose(fp_h);
     fclose(fp_yacc);
 }

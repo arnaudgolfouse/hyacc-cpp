@@ -31,10 +31,12 @@
  ****************************************************************/
 
 #include <array>
+#include <atomic>
 #include <cctype> /* isspace, isdigit. */
 #include <cstdio>
 #include <cstdlib> /* exit, malloc, realloc, free, system. */
 #include <cstring> /* strtok, strcpy, strcmp. */
+#include <mutex>
 #include <ostream>
 #include <stdexcept>
 #include <vector>
@@ -99,51 +101,65 @@ YYERR_EXIT(const char* msg)
 //////////////////////////////////////////////////////////////////
 // Options that can be turned on/off in get_options.c
 //////////////////////////////////////////////////////////////////
-extern bool USE_COMBINE_COMPATIBLE_CONFIG;
-extern bool USE_COMBINE_COMPATIBLE_STATES;
-extern bool USE_REMOVE_UNIT_PRODUCTION;
-extern bool USE_REMOVE_REPEATED_STATES;
-/* Switches for debug purpose in y.c */
-extern bool SHOW_GRAMMAR;
-extern bool SHOW_PARSING_TBL;
-extern bool DEBUG_GEN_PARSING_MACHINE;
-extern bool DEBUG_COMB_COMP_CONFIG;
-extern bool DEBUG_BUILD_MULTIROOTED_TREE;
-extern bool DEBUG_REMOVE_UP_STEP_1_2;
-extern bool DEBUG_REMOVE_UP_STEP_4;
-extern bool SHOW_TOTAL_PARSING_TBL_AFTER_RM_UP;
-extern bool SHOW_THEADS;
-extern bool DEBUG_EXPAND_ARRAY;
-extern bool DEBUG_HASH_TBL;
-extern bool SHOW_SS_CONFLICTS;
-extern bool SHOW_STATE_TRANSITION_LIST;
-extern bool SHOW_STATE_CONFIG_COUNT;
-extern bool SHOW_ACTUAL_STATE_ARRAY;
-/* switch for YYDEBUG in hyaccpar */
-extern bool USE_YYDEBUG;
-extern bool USE_LINES;
-extern bool USE_VERBOSE;
+
+class Options
+{
+  private:
+    static Options
+      inner; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+    static std::mutex
+      inner_lock; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+  public:
+    static auto get() -> Options& { return Options::inner; }
+
+    std::atomic_bool use_combine_compatible_config;
+    std::atomic_bool use_combine_compatible_states;
+    std::atomic_bool use_remove_unit_production;
+    std::atomic_bool use_remove_repeated_states;
+    std::atomic_bool show_grammar;
+    std::atomic_bool show_parsing_tbl;
+    std::atomic_bool debug_gen_parsing_machine;
+    std::atomic_bool debug_comb_comp_config;
+    std::atomic_bool debug_build_multirooted_tree;
+    std::atomic_bool debug_remove_up_step_1_2;
+    std::atomic_bool debug_remove_up_step_4;
+    std::atomic_bool show_total_parsing_tbl_after_rm_up;
+    std::atomic_bool show_theads;
+    std::atomic_bool debug_expand_array;
+    std::atomic_bool debug_hash_tbl;
+    std::atomic_bool show_ss_conflicts;
+    std::atomic_bool show_state_transition_list;
+    std::atomic_bool show_state_config_count;
+    std::atomic_bool show_actual_state_array;
+    /* switch for YYDEBUG in hyaccpar */
+    std::atomic_bool use_yydebug;
+    std::atomic_bool use_lines;
+    std::atomic_bool use_verbose;
+    std::atomic_bool use_output_filename;
+    std::atomic_bool use_filename_prefix;
+    std::atomic_bool use_header_file;
+    std::atomic_bool use_generate_compiler;
+    std::atomic_bool preserve_unit_prod_with_code;
+    std::atomic_bool use_graphviz;
+    /* lane-tracing algorithm */
+    std::atomic_bool use_lr0;
+    std::atomic_bool use_lalr;
+    std::atomic_bool use_lane_tracing;
+    std::atomic_bool use_lr_k;
+    std::atomic_bool show_originators;
+};
+
 /* used by gen_compiler.c, value obtained in get_options.c */
 extern const char* y_tab_c;
 extern const char* y_tab_h;
-extern bool USE_OUTPUT_FILENAME;
-extern bool USE_FILENAME_PREFIX;
-extern bool USE_HEADER_FILE;
-extern bool USE_GENERATE_COMPILER;
-extern bool PRESERVE_UNIT_PROD_WITH_CODE;
 /* used by y.c, value obtained in get_options.c */
 extern const char* y_output;
 /* used by gen_graphviz.c, value obtained in get_options.c */
 extern const char* y_gviz;
-extern bool USE_GRAPHVIZ;
-/* lane-tracing algorithm */
-extern bool USE_LR0;
-extern bool USE_LALR;
-extern bool USE_LANE_TRACING;
-extern bool USE_LR_K;
-extern bool SHOW_ORIGINATORS;
 /* Max K used for LR(k) */
-extern int MAX_K;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,readability-identifier-naming)
+extern std::atomic_int MAX_K;
 
 ////////////////////////////////////////////
 // For symbol table

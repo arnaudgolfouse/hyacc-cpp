@@ -508,7 +508,7 @@ remove_unit_production_step4()
     get_reachable_states(0, states_reachable, &states_reachable_count);
     sort_int(states_reachable, states_reachable_count);
 
-    if (DEBUG_REMOVE_UP_STEP_4) {
+    if (Options::get().debug_remove_up_step_4) {
         yyprintf("\n--remove_unit_production_step4--\n");
         yyprintf("states reachable from state 0:\n");
         print_int_array(states_reachable, states_reachable_count);
@@ -617,7 +617,7 @@ get_actual_state(int virtual_state) -> int
 void
 write_actual_state_array()
 {
-    if (!USE_REMOVE_UNIT_PRODUCTION)
+    if (!Options::get().use_remove_unit_production)
         return;
 
     yyprintf("\n\n--actual state array [actual, pseudo]--\n");
@@ -692,6 +692,7 @@ remove_unit_production_step5()
 void
 remove_unit_production_step1and2()
 {
+    bool debug_remove_up_step_1_2 = Options::get().debug_remove_up_step_1_2;
     int state = 0, i = 0, unit_prod_count = 0, ups_state = 0;
     SymbolTblNode* leaf = nullptr;
     MRParents* parents = nullptr;
@@ -710,7 +711,7 @@ remove_unit_production_step1and2()
         // writeMRParents(MRLeaves[i], leaf_parents[i]);
     }
 
-    if (DEBUG_REMOVE_UP_STEP_1_2) {
+    if (debug_remove_up_step_1_2) {
         yyprintf("\n--remove_unit_production_step1and2--\n");
         yyprintf("--writeUnitProdShift--\n");
     }
@@ -749,7 +750,7 @@ remove_unit_production_step1and2()
                 // Update the link from src_state to leaf transition state
                 update_action(get_col(leaf), state, ups_state); // shift.
 
-                if (DEBUG_REMOVE_UP_STEP_1_2) {
+                if (debug_remove_up_step_1_2) {
                     write_unit_prod_shift(state,
                                           leaf,
                                           unit_prod_dest_states,
@@ -760,7 +761,7 @@ remove_unit_production_step1and2()
             } // end if (unitProdCount > 0)
         }
     }
-    if (DEBUG_REMOVE_UP_STEP_1_2) {
+    if (debug_remove_up_step_1_2) {
         yyprintf("--after remove_unit_production_step1and2(), ");
         yyprintf("total states: %d--\n", ParsingTblRows);
     }
@@ -918,7 +919,7 @@ further_optimization()
 
     n_state_opt123 = states_reachable_count + 1;
 
-    if (SHOW_PARSING_TBL && (n_state_opt12 > n_state_opt123)) {
+    if (Options::get().show_parsing_tbl && (n_state_opt12 > n_state_opt123)) {
         yyprintf("After further optimization, ");
         yyprintf("total states reduced from %d to %d\n",
                  n_state_opt12,

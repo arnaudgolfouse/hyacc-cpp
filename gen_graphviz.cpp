@@ -222,9 +222,10 @@ get_gv_node_list_len(GvNode* list) -> int
 static auto
 update_r_list(GvNode* r_list, GvNode* s_list) -> GvNode*
 {
+    auto& options = Options::get();
     const char* str_any = "(any)"; // means: any terminal can cause reduction.
 
-    if (USE_LR0 || USE_LALR) {
+    if (options.use_lr0 || options.use_lalr) {
         if (get_gv_node_list_len(r_list) == 1) {
             int state = r_list->target_state;
             destroy_gv_node_list(r_list);

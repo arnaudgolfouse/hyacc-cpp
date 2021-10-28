@@ -35,44 +35,19 @@
 #include <string>
 
 FILE* fp_v;
-bool USE_COMBINE_COMPATIBLE_CONFIG;
-bool USE_COMBINE_COMPATIBLE_STATES;
-bool USE_REMOVE_UNIT_PRODUCTION;
-bool USE_REMOVE_REPEATED_STATES;
-bool SHOW_GRAMMAR;
-bool SHOW_PARSING_TBL;
-bool DEBUG_GEN_PARSING_MACHINE;
-bool DEBUG_COMB_COMP_CONFIG;
-bool DEBUG_BUILD_MULTIROOTED_TREE;
-bool DEBUG_REMOVE_UP_STEP_1_2;
-bool DEBUG_REMOVE_UP_STEP_4;
-bool SHOW_TOTAL_PARSING_TBL_AFTER_RM_UP;
-bool SHOW_THEADS;
-bool DEBUG_EXPAND_ARRAY;
-bool DEBUG_HASH_TBL;
-bool SHOW_SS_CONFLICTS;
-bool SHOW_STATE_TRANSITION_LIST;
-bool SHOW_STATE_CONFIG_COUNT;
-bool SHOW_ACTUAL_STATE_ARRAY;
-bool USE_YYDEBUG;
-bool USE_LINES;
-bool USE_VERBOSE;
+
+Options Options::
+  inner{}; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+std::mutex Options::
+  inner_lock{}; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
 const char* y_tab_c;
 const char* y_tab_h;
-bool USE_OUTPUT_FILENAME;
-bool USE_FILENAME_PREFIX;
-bool USE_HEADER_FILE;
-bool USE_GENERATE_COMPILER;
-bool PRESERVE_UNIT_PROD_WITH_CODE;
 const char* y_output;
 const char* y_gviz;
-bool USE_GRAPHVIZ;
-bool USE_LR0;
-bool USE_LALR;
-bool USE_LANE_TRACING;
-bool USE_LR_K;
-bool SHOW_ORIGINATORS;
-int MAX_K;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::atomic_int MAX_K;
+
 std::array<HashTblNode, HT_SIZE> HashTbl;
 Queue* config_queue;
 int OriginatorList_Len_Init;
@@ -377,7 +352,7 @@ Grammar::write(bool before_rm_unit_prod) const
     this->write_vanish_symbols();
     yyprintf("Goal symbol: %s\n", this->goal_symbol->snode->symbol);
 
-    if (before_rm_unit_prod || USE_REMOVE_UNIT_PRODUCTION == false) {
+    if (before_rm_unit_prod || !Options::get().use_remove_unit_production) {
         this->write_rules();
     } else { // after remove unit production.
         this->write_rules_no_unit_prod();
@@ -537,7 +512,7 @@ init()
     states_new = create_state_collection();
     states_new_array = State_array::create(); // size == PARSING_TABLE_SIZE
 
-    if (USE_LALR) {
+    if (Options::get().use_lalr) {
         states_inadequate = create_state_no_array();
         OriginatorList_Len_Init = 2;
     }
@@ -567,7 +542,7 @@ write_context(Context* c)
         }
     }
 
-    if (USE_LR_K) {
+    if (Options::get().use_lr_k) {
         // specifically for LR(k). This can be combined with the
         // above if block. Single this part out here is to keep
         // the code easier to maintain for LR(1) and LR(k) separately.
@@ -588,9 +563,10 @@ write_context(Context* c)
 void
 write_configuration(const Configuration& c)
 {
+    auto& options = Options::get();
     grammar.rules[c.ruleID]->write(c.marker);
 
-    if (USE_LR0 && USE_LALR == false) { // LR(0), no context.
+    if (options.use_lr0 && options.use_lalr == false) { // LR(0), no context.
         // do nothing unless is goal production.
         if (c.ruleID == 0)
             yyprintf("%s", strEnd);
@@ -601,7 +577,7 @@ write_configuration(const Configuration& c)
     if (c.isCoreConfig == 1u)
         yyprintf(" (core) ");
 
-    if (USE_LALR && SHOW_ORIGINATORS) {
+    if (options.use_lalr && options.show_originators) {
         if (c.LANE_END == 1u) {
             yyprintf(" [LANE_END]");
         }
@@ -646,7 +622,7 @@ write_successor_list(State& s)
 void
 write_state_conflict_list(int state)
 {
-    if (USE_REMOVE_UNIT_PRODUCTION) {
+    if (Options::get().use_remove_unit_production) {
         state = get_actual_state(state);
         // if (state == -1) return; // removed state.
     }
@@ -763,6 +739,7 @@ write_grammar_conflict_list2()
 void
 write_state(State& s)
 {
+    auto& options = Options::get();
     write_state_conflict_list(s.state_no);
 
     yyprintf("--state %d-- config count:%d, core_config count:%d\n",
@@ -775,7 +752,7 @@ write_state(State& s)
 
     write_successor_list(s);
 
-    if (USE_LALR && SHOW_ORIGINATORS) {
+    if (options.use_lalr && options.show_originators) {
         s.parents_list->write();
     }
 
@@ -1073,7 +1050,7 @@ get_theads(SymbolNode* alpha) -> SymbolNode*
     theads = theads->next;
     free_symbol_node(n);
 
-    if (DEBUG_GEN_PARSING_MACHINE) {
+    if (Options::get().debug_gen_parsing_machine) {
         yyprintf("==getTHeads: theads for: ");
         write_symbol_node_array(alpha);
         write_symbol_node_array(theads);
@@ -1109,7 +1086,7 @@ get_context(Configuration* cfg, Context* context)
         // is last symbol, just copy the context.
         get_context_do(cfg, context);
     } else { // need to find thead(alpha)
-        if (SHOW_THEADS)
+        if (Options::get().show_theads)
             write_configuration(*cfg);
 
         // alpha is the string after scanned symbol.
@@ -1117,7 +1094,7 @@ get_context(Configuration* cfg, Context* context)
           cfg->nMarker->next; // we know cfg->nMarker != nullptr.
         theads = get_theads(alpha);
 
-        if (SHOW_THEADS) {
+        if (Options::get().show_theads) {
             show_t_heads(alpha, theads);
         }
 
@@ -1814,7 +1791,7 @@ create_config(int rule_id, int marker, int is_core_config) -> Configuration*
         c->nMarker = grammar.rules[rule_id]->nRHS_head;
 
     c->owner = nullptr;
-    if (USE_LALR) {
+    if (Options::get().use_lalr) {
         c->ORIGINATOR_CHANGED = false;
         c->COMPLETE = 0;
         c->IN_LANE = 0;
@@ -2196,7 +2173,7 @@ is_existing_state(const StateCollection* sc, const State* s, int* is_compatible)
         if (is_same_state(t, s)) {
             return t;
         }
-        if (USE_COMBINE_COMPATIBLE_STATES) {
+        if (Options::get().use_combine_compatible_states) {
             if (is_compatible_states(t, s)) {
                 combine_compatible_states(t, s);
                 (*is_compatible) = 1;
@@ -2283,7 +2260,7 @@ add_successor(State* s, State* n)
         //        s->state_no, s->successor_max_count);
     }
 
-    if (USE_LALR) {
+    if (Options::get().use_lalr) {
         // add s to the parents_list of n. To get originators in lane-tracing.
         n->parents_list->add(s);
     }
@@ -2479,12 +2456,12 @@ generate_parsing_machine()
 {
     State* new_state = states_new->states_head;
 
-    if (DEBUG_GEN_PARSING_MACHINE) {
+    if (Options::get().debug_gen_parsing_machine) {
         yyprintf("\n\n--generate parsing machine--\n");
     }
 
     while (new_state != nullptr) {
-        if (DEBUG_GEN_PARSING_MACHINE) {
+        if (Options::get().debug_gen_parsing_machine) {
             yyprintf("%d states, current state is %d\n",
                      states_new->state_count,
                      new_state->state_no);
@@ -2619,6 +2596,7 @@ get_action(symbol_type symbol_type,
 void
 insert_action(SymbolTblNode* lookahead, int row, int state_dest)
 {
+    const auto& options = Options::get();
     int reduce = 0, shift = 0; // for shift/reduce conflict.
     struct TerminalProperty *tp_s = nullptr, *tp_r = nullptr;
 
@@ -2636,7 +2614,7 @@ insert_action(SymbolTblNode* lookahead, int row, int state_dest)
     // The following code process shift/reduce and reduce/reduce conflicts.
 
     if (ParsingTable[cell] == CONST_ACC || state_dest == CONST_ACC) {
-        if (USE_LR0 && (ParsingTable[cell] < 0 || state_dest < 0)) {
+        if (options.use_lr0 && (ParsingTable[cell] < 0 || state_dest < 0)) {
             ParsingTable[cell] = CONST_ACC; // ACC wins over reduce.
             return;
         }
@@ -2665,7 +2643,7 @@ insert_action(SymbolTblNode* lookahead, int row, int state_dest)
         }
 
         // include r/r conflict for inadequate states.
-        if (USE_LALR) {
+        if (options.use_lalr) {
             add_state_no_array(states_inadequate, row);
         }
 
@@ -2674,7 +2652,7 @@ insert_action(SymbolTblNode* lookahead, int row, int state_dest)
 
     // shift/shift conflict.
     if (ParsingTable[cell] > 0 && state_dest > 0) {
-        if (SHOW_SS_CONFLICTS) {
+        if (Options::get().show_ss_conflicts) {
             std::cerr << "warning: shift/shift conflict: " << state_dest
                       << " v.s. " << ParsingTable[cell] << " @ (" << row << ", "
                       << lookahead->symbol << ")" << std::endl;
@@ -2712,7 +2690,7 @@ insert_action(SymbolTblNode* lookahead, int row, int state_dest)
         }
 
         // include s/r conflicts not handled by precedence/associativity.
-        if (USE_LALR) {
+        if (options.use_lalr) {
             add_state_no_array(states_inadequate, row);
         }
 
@@ -2728,7 +2706,7 @@ insert_action(SymbolTblNode* lookahead, int row, int state_dest)
     }
 
     // include s/r conflicts not handled by precedence/associativity.
-    if (USE_LALR) {
+    if (options.use_lalr) {
         add_state_no_array(states_inadequate, row);
     }
 
@@ -2997,13 +2975,14 @@ show_conflict_count()
 void
 show_stat()
 {
-    if (USE_VERBOSE == false)
+    auto& options = Options::get();
+    if (options.use_verbose == false)
         return;
 
     write_state_transition_list();
-    if (SHOW_STATE_CONFIG_COUNT)
+    if (options.show_state_config_count)
         show_state_config_info();
-    if (SHOW_ACTUAL_STATE_ARRAY)
+    if (options.show_actual_state_array)
         write_actual_state_array();
 
     yyprintf("\n");
@@ -3014,21 +2993,21 @@ show_stat()
              grammar.terminal_count,
              grammar.non_terminal_count);
     yyprintf("%d grammar rules\n", n_rule);
-    if (USE_REMOVE_UNIT_PRODUCTION) {
+    if (options.use_remove_unit_production) {
         yyprintf("%d grammar rules after remove unit productions\n",
                  n_rule_opt);
     }
-    if (USE_COMBINE_COMPATIBLE_STATES) {
-        if (USE_LR0) {
+    if (options.use_combine_compatible_states) {
+        if (options.use_lr0) {
             yyprintf("%d states without optimization\n", n_state_opt1);
         } else {
             yyprintf("%d states after combine compatible states\n",
                      n_state_opt1);
         }
-        if (USE_REMOVE_UNIT_PRODUCTION) {
+        if (options.use_remove_unit_production) {
             yyprintf("%d states after remove unit productions\n",
                      n_state_opt12);
-            if (USE_REMOVE_REPEATED_STATES)
+            if (options.use_remove_repeated_states)
                 yyprintf("%d states after remove repeated states\n",
                          n_state_opt123);
         }
@@ -3042,7 +3021,7 @@ show_stat()
              (rs_count > 1) ? "s" : "",
              rr_count,
              (rr_count > 1) ? "s" : "");
-    if (USE_REMOVE_UNIT_PRODUCTION && ss_count > 0) {
+    if (options.use_remove_unit_production && ss_count > 0) {
         yyprintf(
           "%d shift/shift conflict%s\n\n", ss_count, (ss_count > 1) ? "s" : "");
     }
@@ -3056,7 +3035,7 @@ show_stat()
 
 /*
  * Used when --lr0 or --lalr is used.
- * Under such situation USE_LR0 or USE_LALR is true.
+ * Under such situation use_lr0 or use_lalr is true.
  */
 void
 write_parsing_tbl_row_lalr(int state)
@@ -3065,6 +3044,8 @@ write_parsing_tbl_row_lalr(int state)
     int reduction = 1;
     int only_one_reduction = true;
 
+    auto& options = Options::get();
+
     // write shift/acc actions.
     // note if a state has acc action, then that's the only action.
     // so don't have to put acc in a separate loop.
@@ -3072,7 +3053,7 @@ write_parsing_tbl_row_lalr(int state)
         int v = ParsingTable[row_start + col];
         const SymbolTblNode* s = ParsingTblColHdr[col];
         if (v > 0) {
-            if (USE_REMOVE_UNIT_PRODUCTION)
+            if (options.use_remove_unit_production)
                 v = get_actual_state(v);
 
             if (ParsingTblColHdr[col]->type == symbol_type::TERMINAL) {
@@ -3115,7 +3096,7 @@ write_parsing_tbl_row_lalr(int state)
         int v = ParsingTable[row_start + col];
         const SymbolTblNode* s = ParsingTblColHdr[col];
         if (v > 0) {
-            if (USE_REMOVE_UNIT_PRODUCTION)
+            if (options.use_remove_unit_production)
                 v = get_actual_state(v);
 
             if (ParsingTblColHdr[col]->type == symbol_type::NONTERMINAL) {
@@ -3128,6 +3109,7 @@ write_parsing_tbl_row_lalr(int state)
 void
 write_parsing_tbl_row(int state)
 {
+    const auto& options = Options::get();
     int row_start = state * ParsingTblCols;
 
     yyprintf("\n");
@@ -3137,7 +3119,7 @@ write_parsing_tbl_row(int state)
         return;
     }
 
-    if (USE_LR0 || USE_LALR) {
+    if (options.use_lr0 || options.use_lalr) {
         write_parsing_tbl_row_lalr(state);
         return;
     }
@@ -3146,7 +3128,7 @@ write_parsing_tbl_row(int state)
         int v = ParsingTable[row_start + col];
         const SymbolTblNode* s = ParsingTblColHdr[col];
         if (v > 0) {
-            if (USE_REMOVE_UNIT_PRODUCTION)
+            if (options.use_remove_unit_production)
                 v = get_actual_state(v);
 
             if (ParsingTblColHdr[col]->type == symbol_type::NONTERMINAL) {
@@ -3165,6 +3147,7 @@ write_parsing_tbl_row(int state)
 void
 write_state_info(State& s)
 {
+    const auto& options = Options::get();
     write_state_conflict_list(s.state_no);
 
     if (s.PASS_THRU == 1u) {
@@ -3183,7 +3166,7 @@ write_state_info(State& s)
     }
 
     // writeSuccessorList(s);
-    if (USE_LALR && SHOW_ORIGINATORS) {
+    if (options.use_lalr && options.show_originators) {
         s.parents_list->write();
     }
 
@@ -3230,10 +3213,10 @@ write_state_info_from_parsing_tbl()
 void
 write_state_transition_list()
 {
-    if (SHOW_STATE_TRANSITION_LIST == false)
+    if (!Options::get().show_state_transition_list)
         return;
 
-    if (USE_REMOVE_UNIT_PRODUCTION) {
+    if (Options::get().use_remove_unit_production) {
         // write from the parsing table.
         write_state_info_from_parsing_tbl();
         write_grammar_conflict_list2();
@@ -3250,10 +3233,11 @@ write_state_transition_list()
 auto
 lr1(int argc, char** argv) -> int
 {
+    const auto& options = Options::get();
     hash_tbl_init();
 
     fp_v = nullptr; // for y.output
-    if (USE_VERBOSE) {
+    if (options.use_verbose) {
         if ((fp_v = fopen(y_output, "w")) == nullptr) {
             throw std::runtime_error(std::string("cannot open file ") +
                                      y_output);
@@ -3264,63 +3248,63 @@ lr1(int argc, char** argv) -> int
 
     get_yacc_grammar(hyacc_filename);
 
-    if (DEBUG_HASH_TBL) {
+    if (options.debug_hash_tbl) {
         hash_tbl_dump();
     }
 
     init();
-    if (SHOW_GRAMMAR) {
+    if (options.show_grammar) {
         grammar.write(true);
     }
 
     generate_parsing_machine();
 
-    if (SHOW_PARSING_TBL)
+    if (options.show_parsing_tbl)
         print_parsing_table();
 
-    if (USE_GRAPHVIZ && !USE_REMOVE_UNIT_PRODUCTION) {
+    if (options.use_graphviz && !options.use_remove_unit_production) {
         gen_graphviz_input();
     } /*O0,O1*/
 
-    if (USE_REMOVE_UNIT_PRODUCTION) {
+    if (options.use_remove_unit_production) {
         remove_unit_production();
-        if (SHOW_PARSING_TBL)
+        if (options.show_parsing_tbl)
             yyprintf("\nAFTER REMOVING UNIT PRODUCTION:\n");
-        if (SHOW_TOTAL_PARSING_TBL_AFTER_RM_UP) {
+        if (options.show_total_parsing_tbl_after_rm_up) {
             yyprintf("\n--Entire parsing table ");
             yyprintf("after removing unit productions--\n");
             print_parsing_table();
         }
 
-        if (SHOW_PARSING_TBL)
+        if (options.show_parsing_tbl)
             print_final_parsing_table();
-        if (USE_REMOVE_REPEATED_STATES) {
+        if (options.use_remove_repeated_states) {
             further_optimization();
-            if (SHOW_PARSING_TBL) {
+            if (options.show_parsing_tbl) {
                 yyprintf("\nAFTER REMOVING REPEATED STATES:\n");
                 print_final_parsing_table();
             }
         }
         get_actual_state_no(); /* update actual_state_no[]. */
-        if (SHOW_PARSING_TBL)
+        if (options.show_parsing_tbl)
             print_condensed_final_parsing_table();
-        if (SHOW_GRAMMAR) {
+        if (options.show_grammar) {
             yyprintf("\n--Grammar after removing unit productions--\n");
             grammar.write(false);
         }
-        if (USE_GRAPHVIZ) {
+        if (options.use_graphviz) {
             gen_graphviz_input2();
         } /*O2,O3*/
     }
     get_final_state_list();
 
-    if (USE_GENERATE_COMPILER)
+    if (options.use_generate_compiler)
         generate_compiler(hyacc_filename);
 
     show_stat();
     show_conflict_count();
 
-    if (USE_VERBOSE)
+    if (options.use_verbose)
         fclose(fp_v);
     // free_vars(); // let system take care of it.
     return 0;
@@ -3329,12 +3313,12 @@ lr1(int argc, char** argv) -> int
 auto
 lr0(int argc, char** argv) -> int
 {
-
+    const auto& options = Options::get();
     /// USE_COMBINE_COMPATIBLE_STATES = false; ///
     hash_tbl_init();
 
     fp_v = nullptr; // for y.output
-    if (USE_VERBOSE) {
+    if (options.use_verbose) {
         if ((fp_v = fopen(y_output, "w")) == nullptr) {
             throw std::runtime_error(std::string("cannot open file ") +
                                      y_output);
@@ -3345,72 +3329,72 @@ lr0(int argc, char** argv) -> int
 
     get_yacc_grammar(hyacc_filename);
 
-    if (DEBUG_HASH_TBL) {
+    if (options.debug_hash_tbl) {
         hash_tbl_dump();
     }
 
     init();
-    if (SHOW_GRAMMAR) {
+    if (options.show_grammar) {
         grammar.write(true);
     }
 
     generate_lr0_parsing_machine(); //
 
-    if (USE_LALR) {
+    if (options.use_lalr) {
         lane_tracing();
         // outputParsingTable_LALR();
     }
 
-    if (SHOW_PARSING_TBL)
+    if (options.show_parsing_tbl)
         print_parsing_table();
 
-    if (USE_GRAPHVIZ && !USE_REMOVE_UNIT_PRODUCTION) {
+    if (options.use_graphviz && !options.use_remove_unit_production) {
         gen_graphviz_input();
     } /*O0,O1*/
 
-    if (USE_REMOVE_UNIT_PRODUCTION) {
+    if (options.use_remove_unit_production) {
         remove_unit_production();
-        if (SHOW_PARSING_TBL)
+        if (options.show_parsing_tbl)
             yyprintf("\nAFTER REMOVING UNIT PRODUCTION:\n");
-        if (SHOW_TOTAL_PARSING_TBL_AFTER_RM_UP) {
+        if (options.show_total_parsing_tbl_after_rm_up) {
             yyprintf("\n--Entire parsing table ");
             yyprintf("after removing unit productions--\n");
             print_parsing_table();
         }
 
-        if (SHOW_PARSING_TBL)
+        if (options.show_parsing_tbl)
             print_final_parsing_table();
-        if (USE_REMOVE_REPEATED_STATES) {
+        if (options.use_remove_repeated_states) {
             further_optimization();
-            if (SHOW_PARSING_TBL) {
+            if (options.show_parsing_tbl) {
                 yyprintf("\nAFTER REMOVING REPEATED STATES:\n");
                 print_final_parsing_table();
             }
         }
         get_actual_state_no(); /* update actual_state_no[]. */
-        if (SHOW_PARSING_TBL)
+        if (options.show_parsing_tbl)
             print_condensed_final_parsing_table();
-        if (SHOW_GRAMMAR) {
+        if (options.show_grammar) {
             yyprintf("\n--Grammar after removing unit productions--\n");
             grammar.write(false);
         }
-        if (USE_GRAPHVIZ) {
+        if (options.use_graphviz) {
             gen_graphviz_input2();
         } /*O2,O3*/
     }
     get_final_state_list();
 
-    if (USE_GENERATE_COMPILER)
+    if (options.use_generate_compiler)
         generate_compiler(hyacc_filename);
 
     show_stat();
     show_conflict_count();
 
-    if (USE_LR_K) {
+    if (options.use_lr_k) {
         std::cout << "Max K in LR(k): " << MAX_K << std::endl;
     }
 
-    if (USE_VERBOSE)
+    if (options.use_verbose)
         fclose(fp_v);
     // free_vars(); // let system take care of it.
 
@@ -3424,8 +3408,9 @@ auto
 main(int argc, char** argv) -> int
 {
     try {
+        auto& options = Options::get();
         int infile_index = 0;
-        DEBUG_EXPAND_ARRAY = false;
+        options.debug_expand_array = false;
 
         // test_x();
 
@@ -3433,7 +3418,7 @@ main(int argc, char** argv) -> int
         hyacc_filename = argv[infile_index];
         // printf("file to open: %s\n", hyacc_filename);
 
-        if (USE_LR0) {
+        if (options.use_lr0) {
             lr0(argc, argv);
         } else {
             lr1(argc, argv);

@@ -671,21 +671,19 @@ static void
 insert_mid_prod_rule(int ct)
 {
     constexpr size_t NAME_LHS_SIZE = 20;
-    Production* p;
     std::array<char, NAME_LHS_SIZE> name_lhs{};
-    SymbolTblNode* n;
 
     create_new_rule();
 
     // switch the postion of the last two rules.
     int rule_id = grammar.rules.size() - 1; // last rule's pointer.
-    p = grammar.rules[rule_id];
+    Production* p = grammar.rules[rule_id];
     grammar.rules[rule_id] = grammar.rules[rule_id - 1];
     grammar.rules[rule_id - 1] = p;
 
     // now fill the value of the new added rule.
     sprintf(name_lhs.data(), "$$%d_@%d", rule_id - 1, ct);
-    n = hash_tbl_insert(name_lhs.data());
+    SymbolTblNode* n = hash_tbl_insert(name_lhs.data());
     n->type = symbol_type::NONTERMINAL;
     p->nLHS = create_symbol_node(n);
     p->hasCode = 1;
@@ -1552,10 +1550,11 @@ get_goal_rule_lhs()
 void
 post_modification(Grammar* g)
 {
+    auto& options = Options::get();
     // printf("calling post_modification\n");
-    if (USE_REMOVE_UNIT_PRODUCTION == false)
+    if (options.use_remove_unit_production == false)
         return;
-    if (PRESERVE_UNIT_PROD_WITH_CODE)
+    if (options.preserve_unit_prod_with_code)
         return;
 
     SymbolTblNode* n = hash_tbl_insert(strPlaceHolder);

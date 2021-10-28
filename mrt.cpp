@@ -67,7 +67,7 @@ expand_array_leaf_index_for_parent()
     if (leafIndexForParent == nullptr)
         YYERR_EXIT("expandArray_leafIndexForparent error: out of memory\n");
 
-    if (DEBUG_EXPAND_ARRAY)
+    if (Options::get().debug_expand_array)
         std::cout << "leafIndexForParent size expanded to "
                   << all_parents->max_count << std::endl;
 }
@@ -107,7 +107,7 @@ check_array_size_mr_parents(MRParents* p)
     if (p->parents == nullptr)
         YYERR_EXIT("checkArraySize_MRParents error: out of meory\n");
 
-    if (DEBUG_EXPAND_ARRAY)
+    if (Options::get().debug_expand_array)
         std::cout << "MRParents size expanded to " << p->max_count << std::endl;
 
     // if all_parents array is expanded, expand leafIndexForParent too.
@@ -147,7 +147,7 @@ check_mr_leaves_array_size()
     if (MRLeaves == nullptr)
         YYERR_EXIT("checkMRLeavesArraySize error: out of memory\n");
 
-    if (DEBUG_EXPAND_ARRAY)
+    if (Options::get().debug_expand_array)
         yyprintf("MRLeaves size expanded to %d\n", MRLeaves_max_count);
 }
 
@@ -287,7 +287,7 @@ check_parent_array_size(MRTreeNode* node)
     if (node->parent == nullptr)
         YYERR_EXIT("checkParentArraySize: out of memory\n");
 
-    if (DEBUG_EXPAND_ARRAY)
+    if (Options::get().debug_expand_array)
         std::cout << "MRTreeNode.parent size expanded to "
                   << node->parent_max_count << std::endl;
 }
@@ -454,7 +454,7 @@ build_multirooted_tree()
 
     get_all_mr_parents();
 
-    if (DEBUG_BUILD_MULTIROOTED_TREE) {
+    if (Options::get().debug_build_multirooted_tree) {
         write_mr_forest();
         write_all_mr_parents();
     }
