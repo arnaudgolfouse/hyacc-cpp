@@ -38,7 +38,7 @@ Stack::create() -> Stack*
 }
 
 auto
-Stack::create2(size_t size) -> Stack*
+Stack::create2(const size_t size) -> Stack*
 {
     Stack* s = new Stack{};
     if (s == nullptr) {

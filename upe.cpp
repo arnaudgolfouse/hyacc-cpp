@@ -31,10 +31,13 @@
 
 #include "mrt.hpp"
 #include "y.hpp"
+#include <algorithm>
 #include <cstddef>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 /*
  * State numbers are added to the dynamic array cmbined_states
@@ -45,42 +48,41 @@
  */
 struct UnitProdState
 {
-    int* combined_states;
-    int combined_states_count;
-    int state_no; // state_no of this new state.
+    std::vector<int> combined_states{};
+    int state_no{ 0 }; // state_no of this new state.
 };
 
 /* assume 500 new states maximal. */
-static int UPS_SIZE = 64;
+constexpr size_t UPS_SIZE = 64;
 constexpr size_t UPS_MAX_SIZE = 65536;
-static UnitProdState* ups;
-static int ups_count = 0;
 
 /*
  * sort an integer array increasingly.
  * Uses insertion sort.
  */
-void
-sort_int(int array[], int array_len)
-{
-    for (int i = 1; i < array_len; i++) {
-        int tmp = array[i];
-        int j = i;
-        for (; j > 0 && array[j - 1] > tmp; j--) {
-            array[j] = array[j - 1];
-        }
-        array[j] = tmp;
-    }
-}
+// void
+// sort_int(int array[], int array_len)
+// {
+//     for (int i = 1; i < array_len; i++) {
+//         int tmp = array[i];
+//         int j = i;
+//         for (; j > 0 && array[j - 1] > tmp; j--) {
+//             array[j] = array[j - 1];
+//         }
+//         array[j] = tmp;
+//     }
+// }
 
 void
-print_int_array(int a[], int count)
+print_int_array(const std::vector<int>& a)
 {
-    yyprintf("count = %d\n", count);
-    for (int i = 0; i < count; i++) {
-        if (i > 0)
+    yyprintf("count = %d\n", a.size());
+    bool first = true;
+    for (int elem : a) {
+        if (!first)
             yyprintf(", ");
-        yyprintf("%d", a[i]);
+        first = false;
+        yyprintf("%d", elem);
     }
     yyprintf("\n");
 }
@@ -115,52 +117,46 @@ print_int_array(int a[], int count)
 void
 get_unit_prod_shift(int state,
                     SymbolTblNode* leaf,
-                    MRParents* parents,
-                    int unit_prod_dest_states[],
-                    int* unit_prod_count)
+                    const MRParents& parents,
+                    std::vector<int>& unit_prod_dest_states)
 {
-
     // printf("getUnitProdShift for '%s'\n", leaf);
-    (*unit_prod_count) = 0;
+    unit_prod_dest_states.clear();
 
-    for (int i = 0; i < parents->count; i++) {
-        SymbolTblNode* n = parents->parents[i]->snode;
+    for (const auto& parent : parents) {
+        SymbolTblNode* n = parent->snode;
         char action = 0;
         int state_dest = 0;
-        get_action(n->type, get_col(n), state, &action, &state_dest);
+        get_action(n->type, get_col(*n), state, &action, &state_dest);
         // printf("%c, %d\n", action, state_dest);
         if (action == 'g') {
-            unit_prod_dest_states[*unit_prod_count] = state_dest;
-            (*unit_prod_count)++;
+            unit_prod_dest_states.push_back(state_dest);
         }
     }
 
     // Note: leaf itself can be a non-terminal.
     // so action can be g too.
-    if ((*unit_prod_count) > 0) {
+    if (!unit_prod_dest_states.empty()) {
         char action = 0;
         int state_dest = 0;
-        get_action(leaf->type, get_col(leaf), state, &action, &state_dest);
+        get_action(leaf->type, get_col(*leaf), state, &action, &state_dest);
         if (action == 's' || action == 'g') {
-            unit_prod_dest_states[*unit_prod_count] = state_dest;
-            (*unit_prod_count)++;
+            unit_prod_dest_states.push_back(state_dest);
         }
     }
 
-    sort_int(unit_prod_dest_states, *unit_prod_count);
+    std::sort(unit_prod_dest_states.begin(), unit_prod_dest_states.end());
 }
 
 void
 write_unit_prod_shift(int state,
                       SymbolTblNode* leaf,
-                      int unit_prod_dest_states[],
-                      int unit_prod_count,
+                      const std::vector<int>& unit_prod_dest_states,
                       int new_ups_state)
 {
-    int i;
     yyprintf("state %d, leaf '%s' -", state, leaf->symbol);
     yyprintf(" combine these states to new state %d:\n", new_ups_state);
-    for (i = 0; i < unit_prod_count; i++) {
+    for (int i = 0; i < unit_prod_dest_states.size(); i++) {
         if (i > 0)
             yyprintf(", ");
         yyprintf("%d", unit_prod_dest_states[i]);
@@ -169,77 +165,35 @@ write_unit_prod_shift(int state,
 }
 
 void
-check_ups_size()
+write_ups_state(const UnitProdState& ups)
 {
-    if (ups_count < UPS_SIZE)
-        return;
-
-    // yyprintf("checkUPSSize: max size %d reached\n", UPS_SIZE);
-    // writeUPSStates(); exit(0);
-
-    if (2 * UPS_SIZE >= UPS_MAX_SIZE) {
-        std::cout << "checkUPSSize: max size " << UPS_MAX_SIZE << " reached"
-                  << std::endl;
-        std::cout << "Too many UPS states. " << std::endl;
-        // writeUPSStates();
-        exit(0);
-    }
-
-    UPS_SIZE *= 2;
-    HYY_EXPAND(&ups, UPS_SIZE);
-
-    // printf("expand ups size to %d\n", UPS_SIZE);
-    // yyprintf("checkUPSSize: expand ups size to %d\n", UPS_SIZE);
+    yyprintf("State no: %d. Is combination of these states:\n", ups.state_no);
+    print_int_array(ups.combined_states);
 }
 
 void
-write_ups_state(UnitProdState* ups)
-{
-    yyprintf("State no: %d. Is combination of these states:\n", ups->state_no);
-    print_int_array(ups->combined_states, ups->combined_states_count);
-}
-
-void
-write_ups_states()
+write_ups_states(const std::vector<UnitProdState>& ups)
 {
     yyprintf("==New states for unit production removal");
-    yyprintf(" (total %d):\n", ups_count);
-    for (int i = 0; i < ups_count; i++) {
-        write_ups_state(&ups[i]);
+    yyprintf(" (total %d):\n", ups.size());
+    for (const auto& up : ups) {
+        write_ups_state(up);
     }
 }
 
 void
-create_new_ups_state(int new_state, int old_states[], int old_states_count)
+create_new_ups_state(std::vector<UnitProdState>& ups,
+                     int new_state,
+                     const std::vector<int>& old_states)
 {
-    check_ups_size(); // expand if necessary.
-
-    UnitProdState* new_ups = &ups[ups_count];
-    new_ups->state_no = new_state;
-    new_ups->combined_states_count = old_states_count;
-
-    // allocate dynamic array int * combined_states.
-    new_ups->combined_states = new int[new_ups->combined_states_count];
-
-    // copy state numbers.
-    for (int i = 0; i < old_states_count; i++)
-        new_ups->combined_states[i] = old_states[i];
-
-    ups_count++;
+    UnitProdState new_ups;
+    new_ups.state_no = new_state;
+    new_ups.combined_states = old_states;
+    ups.push_back(new_ups);
 
     // printf("ups_count = %d\n", ups_count);
     // printf("new UPS state %d, is combination of states: \n", ups_count - 1);
     // printIntArray(old_states, old_states_count);
-}
-
-auto
-is_same_ups_state(int a[], int b[], int count) -> bool
-{
-    for (int i = 0; i < count; i++) {
-        if (a[i] != b[i])
-            return false;
-    }
-    return true;
 }
 
 /*
@@ -248,15 +202,14 @@ is_same_ups_state(int a[], int b[], int count) -> bool
  *   state no. if found, or -1 if not found.
  */
 auto
-get_ups_state(int a[], int count) -> int
+get_ups_state(const std::vector<UnitProdState>& ups, const std::vector<int>& a)
+  -> int
 {
-    if (ups_count == 0)
+    if (ups.empty())
         return -1;
-
-    for (int i = 0; i < ups_count; i++) {
-        if (count == ups[i].combined_states_count) {
-            if (is_same_ups_state(ups[i].combined_states, a, count) == true)
-                return ups[i].state_no;
+    for (const auto& up : ups) {
+        if (a == up.combined_states) {
+            return up.state_no;
         }
     }
     return -1;
@@ -284,14 +237,14 @@ void
 insert_action_of_symbol(SymbolTblNode* symbol,
                         int new_state,
                         int old_state_index,
-                        int old_states[])
+                        std::vector<int>& old_states)
 {
 
     char action = 0;
     int state_dest = 0;
 
     get_action(symbol->type,
-               get_col(symbol),
+               get_col(*symbol),
                old_states[old_state_index],
                &action,
                &state_dest);
@@ -323,8 +276,7 @@ insert_action_of_symbol(SymbolTblNode* symbol,
 void
 insert_actions_of_combined_states(int new_state,
                                   int src_state,
-                                  int old_states[],
-                                  int old_states_count)
+                                  std::vector<int>& old_states)
 {
     // printf("Source state: %d. ", src_state);
     // printf("Combine these states into state %d:\n", new_state);
@@ -332,7 +284,7 @@ insert_actions_of_combined_states(int new_state,
 
     // copy actions of old_states to new_state.
 
-    for (int i = 0; i < old_states_count; i++) {
+    for (int i = 0; i < old_states.size(); i++) {
         // Copy action of end marker STR_END.
         insert_action_of_symbol(
           hash_tbl_find(STR_END), new_state, i, old_states);
@@ -370,8 +322,8 @@ remove_unit_production_step3()
              a = a->next) {
             // use "" as action and 0 as dest state clears it.
             // Only those non-terminals y => x are cleared.
-            if (is_parent_symbol(a->snode) == true) {
-                update_action(get_col(a->snode), i, 0);
+            if (is_parent_symbol(a->snode)) {
+                update_action(get_col(*a->snode), i, 0);
             }
         }
     }
@@ -382,11 +334,12 @@ remove_unit_production_step3()
  * Returns true if exists, false if not exists.
  */
 auto
-in_int_array(int n, int a[], int a_size) -> bool
+in_int_array(int n, const std::vector<int>& states_reachable) -> bool
 {
-    for (int i = 0; i < a_size; i++) {
-        if (n == a[i])
+    for (const int elem : states_reachable) {
+        if (n == elem) {
             return true;
+        }
     }
     return false;
 }
@@ -400,20 +353,18 @@ in_int_array(int n, int a[], int a_size) -> bool
 void
 get_reachable_states_for_symbol(const char* symbol,
                                 int cur_state,
-                                int states_reachable[],
-                                int* states_count)
+                                std::vector<int>& states_reachable)
 {
     char action = 0;
     int state_dest = 0;
 
     const SymbolTblNode* n = hash_tbl_find(symbol);
 
-    get_action(n->type, get_col(n), cur_state, &action, &state_dest);
+    get_action(n->type, get_col(*n), cur_state, &action, &state_dest);
     if ((action == 's' || action == 'g') &&
-        in_int_array(state_dest, states_reachable, *states_count) == false) {
-        states_reachable[*states_count] = state_dest;
-        (*states_count)++;
-        get_reachable_states(state_dest, states_reachable, states_count);
+        !in_int_array(state_dest, states_reachable)) {
+        states_reachable.push_back(state_dest);
+        get_reachable_states(state_dest, states_reachable);
     }
 }
 
@@ -423,20 +374,19 @@ get_reachable_states_for_symbol(const char* symbol,
  * states_reachable[].
  */
 void
-get_reachable_states(int cur_state, int states_reachable[], int* states_count)
+get_reachable_states(int cur_state, std::vector<int>& states_reachable)
 {
-    get_reachable_states_for_symbol(
-      STR_END, cur_state, states_reachable, states_count);
+    get_reachable_states_for_symbol(STR_END, cur_state, states_reachable);
 
     for (SymbolNode* a = grammar.terminal_list; a != nullptr; a = a->next) {
         get_reachable_states_for_symbol(
-          a->snode->symbol, cur_state, states_reachable, states_count);
+          a->snode->symbol, cur_state, states_reachable);
     }
 
     for (SymbolNode* a = grammar.non_terminal_list; a != nullptr; a = a->next) {
         if (is_parent_symbol(a->snode) == false) {
             get_reachable_states_for_symbol(
-              a->snode->symbol, cur_state, states_reachable, states_count);
+              a->snode->symbol, cur_state, states_reachable);
         }
     }
 }
@@ -460,11 +410,11 @@ void
 get_f_parsing_tbl_col_hdr()
 {
     SymbolNode* tail = F_ParsingTblColHdr =
-      create_symbol_node(hash_tbl_find(STR_END));
+      SymbolNode::create(hash_tbl_find(STR_END));
     F_ParsingTblCols = 1;
 
     for (SymbolNode* a = grammar.terminal_list; a != nullptr; a = a->next) {
-        tail->next = create_symbol_node(a->snode);
+        tail->next = SymbolNode::create(a->snode);
         tail = tail->next;
         F_ParsingTblCols++;
     }
@@ -472,7 +422,7 @@ get_f_parsing_tbl_col_hdr()
     for (SymbolNode* a = grammar.non_terminal_list; a != nullptr; a = a->next) {
         if (is_parent_symbol(a->snode) == false &&
             is_goal_symbol(a->snode) == false) {
-            tail->next = create_symbol_node(a->snode);
+            tail->next = SymbolNode::create(a->snode);
             tail = tail->next;
             F_ParsingTblCols++;
         }
@@ -500,18 +450,15 @@ write_final_parsing_table_col_header()
 void
 remove_unit_production_step4()
 {
-    states_reachable = new int[ParsingTblRows];
-    if (states_reachable == nullptr) {
-        YYERR_EXIT("remove_unit_productino_step4 error: out of memory\n");
-    }
-    states_reachable_count = 0;
-    get_reachable_states(0, states_reachable, &states_reachable_count);
-    sort_int(states_reachable, states_reachable_count);
+    states_reachable.clear();
+    states_reachable.reserve(ParsingTblRows);
+    get_reachable_states(0, states_reachable);
+    std::sort(states_reachable.begin(), states_reachable.end());
 
     if (Options::get().debug_remove_up_step_4) {
         yyprintf("\n--remove_unit_production_step4--\n");
         yyprintf("states reachable from state 0:\n");
-        print_int_array(states_reachable, states_reachable_count);
+        print_int_array(states_reachable);
     }
 
     get_f_parsing_tbl_col_hdr();
@@ -520,8 +467,7 @@ remove_unit_production_step4()
 auto
 is_reachable_state(int state) -> bool
 {
-    if (state == 0 ||
-        in_int_array(state, states_reachable, states_reachable_count) == true) {
+    if (state == 0 || in_int_array(state, states_reachable)) {
         return true;
     }
     return false;
@@ -544,7 +490,7 @@ print_final_parsing_table()
     write_final_parsing_table_col_header();
 
     for (int row = 0; row < row_size; row++) {
-        if (is_reachable_state(row) == true) {
+        if (is_reachable_state(row)) {
             yyprintf("%d\t", row);
             for (int col = 0; col < ParsingTblCols; col++) {
                 SymbolTblNode* n = ParsingTblColHdr[col];
@@ -579,24 +525,18 @@ print_final_parsing_table()
  * int actual_state_no[2 * STATE_COLLECTION_SIZE];
  * int actual_state_no_ct;
  */
-
 void
 get_actual_state_no()
 {
-    int row_size = ParsingTblRows;
-    actual_state_no = new int[2 * row_size];
-    if (actual_state_no == nullptr) {
-        YYERR_EXIT("get_actual_state_no error: out of memory\n");
-    }
+    size_t row_size = ParsingTblRows;
+    actual_state_no.clear();
+    actual_state_no.reserve(2 * row_size);
 
     int i = 0;
-    actual_state_no_ct = 0;
     for (int row = 0; row < row_size; row++) {
-        if (row == 0 ||
-            in_int_array(row, states_reachable, states_reachable_count) ==
-              true) {
-            actual_state_no[actual_state_no_ct++] = row;
-            actual_state_no[actual_state_no_ct++] = i;
+        if (row == 0 || in_int_array(row, states_reachable)) {
+            actual_state_no.push_back(row);
+            actual_state_no.push_back(i);
             i++;
         }
     }
@@ -607,7 +547,7 @@ get_actual_state_no()
 auto
 get_actual_state(int virtual_state) -> int
 {
-    for (int i = 0; i < actual_state_no_ct; i += 2) {
+    for (int i = 0; i < actual_state_no.size(); i += 2) {
         if (virtual_state == actual_state_no[i])
             return actual_state_no[i + 1];
     }
@@ -617,12 +557,13 @@ get_actual_state(int virtual_state) -> int
 void
 write_actual_state_array()
 {
+    constexpr int LINE_LENGTH = 5;
     if (!Options::get().use_remove_unit_production)
         return;
 
     yyprintf("\n\n--actual state array [actual, pseudo]--\n");
-    for (int i = 0; i < actual_state_no_ct; i += 2) {
-        if (i > 0 && i % 5 == 0)
+    for (int i = 0; i < actual_state_no.size(); i += 2) {
+        if (i > 0 && i % LINE_LENGTH == 0)
             yyprintf("\n");
         yyprintf("[%d, %d] ", actual_state_no[i], actual_state_no[i + 1]);
     }
@@ -648,7 +589,7 @@ print_condensed_final_parsing_table()
 
     int i = 0;
     for (int row = 0; row < row_size; row++) {
-        if (is_reachable_state(row) == true) {
+        if (is_reachable_state(row)) {
             yyprintf("%d\t", i);
             for (int col = 0; col < ParsingTblCols; col++) {
                 SymbolTblNode* n = ParsingTblColHdr[col];
@@ -675,39 +616,33 @@ print_condensed_final_parsing_table()
  * is how many symbols we have on the RHS.
  */
 void
-remove_unit_production_step5()
+remove_unit_production_step5(const MRLeaves& mr_leaves)
 {
-    int ct = get_grammar_rule_count();
-    for (int i = 0; i < ct; i++) {
-        int index =
-          get_index_in_mr_parents(grammar.rules[i]->nLHS->snode, all_parents);
+    for (const auto& rule : grammar.rules) {
+        int index = get_index_in_mr_parents(rule->nLHS->snode, *all_parents);
         if (index >= 0) {
-            free_symbol_node(grammar.rules[i]->nLHS);
-            grammar.rules[i]->nLHS = create_symbol_node(
-              MRLeaves[leafIndexForParent[index]]->symbol->snode);
+            free_symbol_node(rule->nLHS);
+            rule->nLHS = SymbolNode::create(
+              mr_leaves[leaf_index_for_parent[index]]->symbol->snode);
         }
     }
 }
 
 void
-remove_unit_production_step1and2()
+remove_unit_production_step1and2(const MRLeaves& mr_leaves)
 {
     bool debug_remove_up_step_1_2 = Options::get().debug_remove_up_step_1_2;
-    int state = 0, i = 0, unit_prod_count = 0, ups_state = 0;
-    SymbolTblNode* leaf = nullptr;
-    MRParents* parents = nullptr;
-
     // as discussed in the function comments of getUnitProdShift(),
     // unitProdDestStates array is bounded by number of non_terminals + 1.
-    auto* unit_prod_dest_states = new int[grammar.non_terminal_count + 1];
-    ups = new UnitProdState[UPS_SIZE];
-    ups_count = 0;
-    auto* leaf_parents = new MRParents*[MRLeaves_count];
+    std::vector<int> unit_prod_dest_states;
+    std::vector<UnitProdState> ups;
+    ups.reserve(UPS_SIZE);
+    std::vector<std::shared_ptr<MRParents>> leaf_parents;
 
     // pre-calculate all parents for each leaf.
-    for (i = 0; i < MRLeaves_count; i++) {
-        leaf_parents[i] = create_mr_parents();
-        get_parents_for_mr_leaf(i, leaf_parents[i]);
+    for (size_t i = 0; i < mr_leaves.size(); i++) {
+        leaf_parents.push_back(create_mr_parents());
+        get_parents_for_mr_leaf(mr_leaves, i, leaf_parents[i].get());
         // writeMRParents(MRLeaves[i], leaf_parents[i]);
     }
 
@@ -717,45 +652,39 @@ remove_unit_production_step1and2()
     }
 
     // now, steps 1 and 2.
-    for (state = 0; state < ParsingTblRows; state++) {
-        for (i = 0; i < MRLeaves_count; i++) {
-            leaf = MRLeaves[i]->symbol->snode;
+    for (int state = 0; state < ParsingTblRows; state++) {
+        for (int i = 0; i < mr_leaves.size(); i++) {
+            SymbolTblNode* leaf = mr_leaves[i]->symbol->snode;
             // printf("state %d, checking leaf %s\n", state, leaf->symbol);
-            parents = leaf_parents[i];
+            const auto& parents = leaf_parents[i];
 
-            get_unit_prod_shift(
-              state, leaf, parents, unit_prod_dest_states, &unit_prod_count);
+            get_unit_prod_shift(state, leaf, *parents, unit_prod_dest_states);
 
-            if (unit_prod_count > 0) { // unitProdCount >= 2
-                ups_state =
-                  get_ups_state(unit_prod_dest_states, unit_prod_count);
+            if (!unit_prod_dest_states.empty()) { // unitProdCount >= 2
+                int ups_state = get_ups_state(ups, unit_prod_dest_states);
                 if (ups_state == -1) {
                     ups_state = ParsingTblRows;
                     ParsingTblRows++;
-                    if (ParsingTblRows == PARSING_TABLE_SIZE) {
+                    if (ParsingTblRows >= PARSING_TABLE_SIZE) {
                         // yyprintf("remove_unit_production message: ");
                         // yyprintf("Parsing Table size reached\n");
                         expand_parsing_table();
                     }
-                    create_new_ups_state(
-                      ups_state, unit_prod_dest_states, unit_prod_count);
+                    create_new_ups_state(ups, ups_state, unit_prod_dest_states);
 
                     // Combine actions of states into state ups_state.
                     // Do this only if this combined state does not exist yet.
                     insert_actions_of_combined_states(
-                      ups_state, state, unit_prod_dest_states, unit_prod_count);
+                      ups_state, state, unit_prod_dest_states);
 
                 } // end if (ups_state != -1)
 
                 // Update the link from src_state to leaf transition state
-                update_action(get_col(leaf), state, ups_state); // shift.
+                update_action(get_col(*leaf), state, ups_state); // shift.
 
                 if (debug_remove_up_step_1_2) {
-                    write_unit_prod_shift(state,
-                                          leaf,
-                                          unit_prod_dest_states,
-                                          unit_prod_count,
-                                          ups_state);
+                    write_unit_prod_shift(
+                      state, leaf, unit_prod_dest_states, ups_state);
                     // yyprintf(" => new ups_state: %d\n", ups_state);
                 }
             } // end if (unitProdCount > 0)
@@ -765,11 +694,6 @@ remove_unit_production_step1and2()
         yyprintf("--after remove_unit_production_step1and2(), ");
         yyprintf("total states: %d--\n", ParsingTblRows);
     }
-
-    for (i = 0; i < MRLeaves_count; i++)
-        destroy_mr_parents(leaf_parents[i]);
-
-    delete[] unit_prod_dest_states;
 }
 
 ////////////////////////////////////////////////////////
@@ -778,14 +702,14 @@ remove_unit_production_step1and2()
 void
 remove_unit_production()
 {
-    build_multirooted_tree();
+    MRLeaves mr_leaves = build_multirooted_tree();
 
-    remove_unit_production_step1and2();
+    remove_unit_production_step1and2(mr_leaves);
     remove_unit_production_step3();
     remove_unit_production_step4();
-    remove_unit_production_step5();
+    remove_unit_production_step5(mr_leaves);
 
-    n_state_opt12 = states_reachable_count + 1;
+    n_state_opt12 = states_reachable.size() + 1;
 }
 
 /////////////////////////////////////////////////////
@@ -807,8 +731,8 @@ is_equal_row(int i, int j) -> bool
 
     for (int col = 0; col < ParsingTblCols; col++) {
         SymbolTblNode* n = ParsingTblColHdr[col];
-        get_action(n->type, get_col(n), i, &action_i, &state_dest_i);
-        get_action(n->type, get_col(n), j, &action_j, &state_dest_j);
+        get_action(n->type, get_col(*n), i, &action_i, &state_dest_i);
+        get_action(n->type, get_col(*n), j, &action_j, &state_dest_j);
         if (action_i != action_j || state_dest_i != state_dest_j)
             return false;
     }
@@ -830,24 +754,24 @@ update_repeated_row(int new_state, int old_state, int row)
 
     // for end marker column STR_END
     SymbolTblNode* n = hash_tbl_find(STR_END);
-    get_action(n->type, get_col(n), row, &action, &state_dest);
+    get_action(n->type, get_col(*n), row, &action, &state_dest);
     if (state_dest == old_state)
-        update_action(get_col(hash_tbl_find(STR_END)), row, new_state);
+        update_action(get_col(*hash_tbl_find(STR_END)), row, new_state);
 
     // for terminal columns
     for (SymbolNode* a = g->terminal_list; a != nullptr; a = a->next) {
         n = a->snode;
-        get_action(n->type, get_col(n), row, &action, &state_dest);
+        get_action(n->type, get_col(*n), row, &action, &state_dest);
         if (state_dest == old_state)
-            update_action(get_col(a->snode), row, new_state);
+            update_action(get_col(*a->snode), row, new_state);
     }
 
     // for non-terminal columns
     for (SymbolNode* a = g->non_terminal_list; a != nullptr; a = a->next) {
         n = a->snode;
-        get_action(n->type, get_col(n), row, &action, &state_dest);
+        get_action(n->type, get_col(*n), row, &action, &state_dest);
         if (state_dest == old_state)
-            update_action(get_col(a->snode), row, new_state);
+            update_action(get_col(*a->snode), row, new_state);
     }
 }
 
@@ -861,8 +785,8 @@ update_repeated_rows(int new_state, int old_state)
 {
     update_repeated_row(new_state, old_state, 0); // row 0.
 
-    for (int i = 0; i < states_reachable_count; i++)
-        update_repeated_row(new_state, old_state, states_reachable[i]);
+    for (const auto& state_reachable : states_reachable)
+        update_repeated_row(new_state, old_state, state_reachable);
 }
 
 /*
@@ -871,10 +795,7 @@ update_repeated_rows(int new_state, int old_state)
 void
 remove_reachable_state(int i)
 {
-    for (; i < states_reachable_count - 1; i++) {
-        states_reachable[i] = states_reachable[i + 1];
-    }
-    states_reachable_count--;
+    states_reachable.erase(states_reachable.begin() + i);
 }
 
 /*
@@ -899,7 +820,7 @@ further_optimization()
 {
     // n_state_opt12 = states_reachable_count + 1;
 
-    for (int k = 0; k < states_reachable_count - 1; k++) {
+    for (int k = 0; k < states_reachable.size() - 1; k++) {
         int i = states_reachable[k];
         int j = states_reachable[k + 1];
         // printf("furtherOpt: i = %d, j = %d\n", i, j);
@@ -909,15 +830,15 @@ further_optimization()
 
             update_repeated_rows(i, j);
             // printf("state %d removed\n", states_reachable[k + 1]);
-            remove_reachable_state(k + 1);
-            if ((k + 1) == states_reachable_count)
+            states_reachable.erase(states_reachable.begin() + k + 1);
+            if ((k + 1) == states_reachable.size())
                 break;
             j = states_reachable[k + 1];
             // printf("- furtherOpt: i = %d, j = %d\n", i, j);
         } while (true);
     }
 
-    n_state_opt123 = states_reachable_count + 1;
+    n_state_opt123 = states_reachable.size() + 1;
 
     if (Options::get().show_parsing_tbl && (n_state_opt12 > n_state_opt123)) {
         yyprintf("After further optimization, ");

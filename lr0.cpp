@@ -35,17 +35,10 @@ propagate_originator_change(State* s);
 void
 add_successor_config_to_state_lr0(State* s, int rule_id)
 {
-    if (s->config_count >= s->config_max_count - 1) {
-        s->config_max_count *= 2;
-        HYY_EXPAND(&s->config, s->config_max_count);
-    }
-
     // marker = 0, isCoreConfig = 0.
     Configuration* c = create_config(rule_id, 0, 0);
     c->owner = s;
-
-    s->config[s->config_count] = c;
-    s->config_count++;
+    s->config.push_back(c);
 }
 
 /*
@@ -73,8 +66,9 @@ get_config_successors_lr0(State* s)
 
                     if (index == -1) { // new config.
                         add_successor_config_to_state_lr0(s, r->ruleID);
-                        queue_push(config_queue, s->config_count - 1);
-                        index = s->config_count - 1;
+                        queue_push(config_queue,
+                                   static_cast<int>(s->config.size()) - 1);
+                        index = static_cast<int>(s->config.size()) - 1;
                     } // else is an existing old config, do nothing.
 
                 } // end for
@@ -87,7 +81,7 @@ void
 get_closure_lr0(State* s)
 {
     // queue_clear(config_queue);
-    for (int i = 0; i < s->config_count; i++) {
+    for (int i = 0; i < s->config.size(); i++) {
         queue_push(config_queue, i);
     }
     get_config_successors_lr0(s);
@@ -192,30 +186,26 @@ add_transition_states2_new_lr0(StateCollection* coll, State* src_state)
 void
 transition_lr0(State* s)
 {
-    int i = 0;
-    Configuration *c = nullptr, *new_config = nullptr;
-    SymbolTblNode* scanned_symbol = nullptr;
     StateCollection* coll = create_state_collection();
-    State* new_state = nullptr;
 
-    for (i = 0; i < s->config_count; i++) {
-        c = s->config[i];
+    for (const auto& c : s->config) {
         if (is_final_configuration(c)) {
             // do nothing.
         } else { // do transit operation.
-            scanned_symbol = get_scanned_symbol(c);
+            SymbolTblNode* scanned_symbol = get_scanned_symbol(c);
             if (strlen(scanned_symbol->symbol) == 0) { // empty reduction.
                 continue;
             }
-            new_state = find_state_for_scanned_symbol(coll, scanned_symbol);
+            State* new_state =
+              find_state_for_scanned_symbol(coll, scanned_symbol);
             if (new_state == nullptr) {
                 new_state = create_state();
                 // record which symbol this state is a successor by.
-                new_state->trans_symbol = create_symbol_node(scanned_symbol);
+                new_state->trans_symbol = SymbolNode::create(scanned_symbol);
                 coll->add_state2(new_state);
             }
             // create a new core config for new_state.
-            new_config = create_config(-1, 0, 1);
+            Configuration* new_config = create_config(-1, 0, 1);
 
             new_config->owner = new_state;
             copy_config(new_config, c);
@@ -241,12 +231,10 @@ transition_lr0(State* s)
 static void
 output_parsing_table_row_lr0(State* s)
 {
-    int ct = s->config_count;
     // printf("\nstate %d. config count: %d\n", s->state_no, ct);
 
     // insert a/r actions.
-    for (int i = 0; i < ct; i++) {
-        Configuration* c = s->config[i];
+    for (const auto& c : s->config) {
         // printf("%d.%d\n", s->state_no, c->ruleID);
 
         if (is_final_configuration(c) || is_empty_production(c)) {
@@ -255,9 +243,7 @@ output_parsing_table_row_lr0(State* s)
     }
 
     // insert s/g actions.
-    ct = s->successor_count;
-    for (int i = 0; i < ct; i++) {
-        State* t = s->successor_list[i];
+    for (State* t : s->successor_list) {
         insert_action(t->trans_symbol->snode, s->state_no, t->state_no);
     }
 }
@@ -265,11 +251,8 @@ output_parsing_table_row_lr0(State* s)
 static void
 output_parsing_table_row_lalr(State* s)
 {
-    int ct = s->config_count;
-
     // insert a/r actions.
-    for (int i = 0; i < ct; i++) {
-        Configuration* c = s->config[i];
+    for (const auto& c : s->config) {
         // printf("%d.%d\n", s->state_no, c->ruleID);
 
         if (is_final_configuration(c) || is_empty_production(c)) {
@@ -278,9 +261,7 @@ output_parsing_table_row_lalr(State* s)
     }
 
     // insert s/g actions.
-    ct = s->successor_count;
-    for (int i = 0; i < ct; i++) {
-        State* t = s->successor_list[i];
+    for (State* t : s->successor_list) {
         insert_action(t->trans_symbol->snode, s->state_no, t->state_no);
     }
 }
@@ -299,11 +280,13 @@ output_parsing_table_lr0()
     int cols = n_symbol + 1;
 
     // expand size of parsing table array if needed.
-    if (rows >= PARSING_TABLE_SIZE) {
+    if (rows * ParsingTblCols >= PARSING_TABLE_SIZE) {
         expand_parsing_table();
     }
 
-    memset((void*)ParsingTable, 0, cols * rows * 4);
+    for (size_t i = 0; i < cols * rows; ++i) {
+        ParsingTable.at(i) = 0;
+    }
 
     for (int i = 0; i < rows; i++) {
         State* s = states_new_array->state_list[i];
@@ -321,11 +304,13 @@ output_parsing_table_lalr()
     int cols = n_symbol + 1;
 
     // expand size of parsing table array if needed.
-    if (rows >= PARSING_TABLE_SIZE) {
+    while (rows >= PARSING_TABLE_SIZE) {
         expand_parsing_table();
     }
 
-    memset((void*)ParsingTable, 0, cols * rows * 4);
+    for (size_t i = 0; i < cols * rows; ++i) {
+        ParsingTable.at(i) = 0;
+    }
 
     for (int i = 0; i < rows; i++) {
         State* s = states_new_array->state_list[i];

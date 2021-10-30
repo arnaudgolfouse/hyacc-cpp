@@ -11,6 +11,6 @@ void show_manpage()
   system("less /usr/local/lib/hyacc/hyaccmanpage");
 }
 
-const char * HYACC_PATH = 
+std::string HYACC_PATH = 
 "/usr/local/lib/hyacc/hyaccpar";
 

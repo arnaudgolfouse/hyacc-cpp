@@ -98,7 +98,7 @@ destroy_rule_id_list(RuleIDNode* r)
  * Create a symbol node, used by Production, Context etc.
  */
 auto
-create_symbol_node(SymbolTblNode* sn) -> SymbolNode*
+SymbolNode::create(SymbolTblNode* sn) -> SymbolNode*
 {
     if (sn == nullptr)
         YYERR_EXIT("createSymbolNode error: snode is nullptr\n");
@@ -161,10 +161,10 @@ clone_symbol_list(const SymbolList a) -> SymbolList
 {
     if (a == nullptr)
         return nullptr;
-    SymbolNode* c = create_symbol_node(a->snode);
+    SymbolNode* c = SymbolNode::create(a->snode);
     SymbolNode* clone = c;
     for (SymbolNode* b = a->next; b != nullptr; b = b->next) {
-        c->next = create_symbol_node(b->snode);
+        c->next = SymbolNode::create(b->snode);
         c = c->next;
     }
 
@@ -231,17 +231,17 @@ insert_inc_symbol_list(SymbolList a, SymbolTblNode* n) -> SymbolNode*
     if (nullptr == n)
         return a;
     if (nullptr == a)
-        return create_symbol_node(n);
+        return SymbolNode::create(n);
 
     for (b_prev = nullptr, b = a; b != nullptr; b_prev = b, b = b->next) {
         int cmp = strcmp(n->symbol, b->snode->symbol);
         if (cmp < 0) {               // insert after b_prev, before b.
             if (b_prev == nullptr) { // insert at the head.
-                b_prev = create_symbol_node(n);
+                b_prev = SymbolNode::create(n);
                 b_prev->next = b;
                 return b_prev;
             } // insert in the middle.
-            b_prev->next = create_symbol_node(n);
+            b_prev->next = SymbolNode::create(n);
             b_prev->next->next = b;
             return a;
         }
@@ -252,7 +252,7 @@ insert_inc_symbol_list(SymbolList a, SymbolTblNode* n) -> SymbolNode*
     }
 
     // b is nullptr. insert at the end.
-    b_prev->next = create_symbol_node(n);
+    b_prev->next = SymbolNode::create(n);
 
     return a;
 }
@@ -284,11 +284,11 @@ combine_inc_symbol_list(SymbolList a, SymbolList b) -> SymbolNode*
             nb = nb->next;
         } else if (cmp > 0) {         // insert b before na.
             if (na_prev == nullptr) { // insert at the head of a.
-                na_prev = create_symbol_node(nb->snode);
+                na_prev = SymbolNode::create(nb->snode);
                 na_prev->next = a;
                 a = na_prev;
             } else { // insert in the middle of list a before na.
-                na_prev->next = create_symbol_node(nb->snode);
+                na_prev->next = SymbolNode::create(nb->snode);
                 na_prev->next->next = na;
             }
             nb = nb->next;
@@ -493,7 +493,7 @@ hash_tbl_find(const char* symbol) -> SymbolTblNode*
         return nullptr;
     int v = hash_value(symbol);
 
-    for (SymbolTblNode* n = HashTbl[v].next; n != nullptr; n = n->next) {
+    for (SymbolTblNode* n = HashTbl.at(v).next; n != nullptr; n = n->next) {
         if (strcmp(n->symbol, symbol) == 0) {
 #if DEBUG_HASHTBL
             printf("node for %s is found\n", symbol);

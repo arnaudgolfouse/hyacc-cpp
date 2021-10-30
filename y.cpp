@@ -31,8 +31,10 @@
 #include "lane_tracing.hpp"
 #include <cstddef>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 FILE* fp_v;
 
@@ -57,28 +59,24 @@ int rs_count;
 int expected_sr_conflict;
 Grammar grammar;
 StateCollection* states_new;
-State_array* states_new_array;
-size_t PARSING_TABLE_SIZE;
-int* ParsingTable;
+std::shared_ptr<StateArray> states_new_array;
+std::atomic_size_t PARSING_TABLE_SIZE;
+std::vector<int> ParsingTable;
 int ParsingTblCols;
 int ParsingTblRows;
-SymbolTblNode** ParsingTblColHdr;
+std::vector<SymbolTblNode*> ParsingTblColHdr;
 SymbolList F_ParsingTblColHdr;
 int F_ParsingTblCols;
-int* states_reachable;
-int states_reachable_count;
-int* actual_state_no;
-int actual_state_no_ct;
+std::vector<int> states_reachable;
+std::vector<int> actual_state_no;
 int n_symbol;
-int n_rule;
-int n_rule_opt;
-int n_state_opt1;
-int n_state_opt12;
-int n_state_opt123;
-int* final_state_list;
+size_t n_rule;
+size_t n_rule_opt;
+size_t n_state_opt1;
+size_t n_state_opt12;
+size_t n_state_opt123;
+std::vector<int> final_state_list;
 SymbolList tokens;
-SymbolNode* tokens_tail;
-int tokens_max_ct;
 int tokens_ct;
 StateNoArray* states_inadequate;
 
@@ -119,8 +117,8 @@ auto
 create_state_collection() -> StateCollection*;
 void
 destroy_state_collection(StateCollection* c);
-void
-expand_parsing_table();
+// void
+// expand_parsing_table();
 void
 copy_context(Context* dest, const Context* src);
 void
@@ -129,8 +127,6 @@ void
 free_production(Production* p);
 void
 clear_production(Production* p);
-void
-clear_context(Context* c);
 void
 free_context(Context* c);
 void
@@ -145,13 +141,13 @@ auto
 add_to_conflict_array(int state,
                       SymbolTblNode* lookahead,
                       int action1,
-                      int action2) -> Conflict*;
+                      int action2) -> std::shared_ptr<ConflictNode>;
 void
 write_state_transition_list();
 void
 write_symbol_node_array(SymbolNode* str);
 
-char* hyacc_filename;
+std::string hyacc_filename;
 
 auto
 get_grammar_rule_count() -> size_t
@@ -164,29 +160,13 @@ get_grammar_rule_count() -> size_t
  */
 
 auto
-StateList::create() -> StateList*
+StateList::create() -> std::shared_ptr<StateList>
 {
-    auto* l = new StateList;
-    l->state_list.reserve(5);
+    constexpr size_t INITIAL_SIZE = 5;
+    auto l = std::make_shared<StateList>();
+    l->state_list.reserve(INITIAL_SIZE);
     return l;
 }
-
-void
-StateList::destroy(StateList* L)
-{
-    if (L == nullptr)
-        return;
-    delete L;
-}
-
-// void
-// StateList_expand(StateList* L)
-// {
-//     if (nullptr == L)
-//         return;
-//     HYY_EXPAND(&L->state_list, L->size * 2);
-//     L->size *= 2;
-// }
 
 /*
  * Add if not exist yet.
@@ -206,11 +186,9 @@ StateList::add(State* s) -> bool
 }
 
 auto
-StateList::clone() -> StateList*
+StateList::clone() -> std::shared_ptr<StateList>
 {
-    auto* L = new StateList;
-    L->state_list = this->state_list;
-    return L;
+    return std::make_shared<StateList>(*this);
 }
 
 void
@@ -279,7 +257,7 @@ Grammar::write_rules_no_unit_prod() const
     int i = 0;
     yyprintf("Rules: \n");
     for (const auto& rule : this->rules) {
-        if ((is_unit_production(i) == false) || i == 0) {
+        if (!is_unit_production(i) || i == 0) {
             yyprintf("(%d) ", i);
             rule->write(-1);
             count++;
@@ -290,9 +268,9 @@ Grammar::write_rules_no_unit_prod() const
 }
 
 auto
-Grammar::get_opt_rule_count() -> int const
+Grammar::get_opt_rule_count() -> size_t const
 {
-    int count = 0;
+    size_t count = 0;
     for (int i = 0; i < this->rules.size(); i++) {
         if (!is_unit_production(i) || i == 0)
             count++;
@@ -375,22 +353,22 @@ free_vars()
     // free dynamically allocated variables in states_new.
     destroy_state_collection(states_new);
 
-    delete[] states_reachable;
-    delete actual_state_no;
-    delete ParsingTable;
+    states_reachable.clear();
+    actual_state_no.clear();
+    ParsingTable.clear();
 
     hash_tbl_destroy();
 
-#if USE_CONFIG_QUEUE_FOR_GET_CLOSURE
-    queue_destroy(config_queue);
-#endif
+    if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
+        queue_destroy(config_queue);
+    }
 }
 
 auto
-Conflict::create(int state, SymbolTblNode* lookahead, int r, int s)
-  -> ConflictNode*
+ConflictNode::create_node(int state, SymbolTblNode* lookahead, int r, int s)
+  -> std::shared_ptr<ConflictNode>
 {
-    auto* c = new Conflict;
+    auto c = std::make_shared<ConflictNode>();
     c->state = state;
     c->lookahead = lookahead;
     c->r = r;
@@ -399,34 +377,24 @@ Conflict::create(int state, SymbolTblNode* lookahead, int r, int s)
     return c;
 }
 
-void
-Conflict::destroy_node(Conflict* c)
+auto
+StateArray::create() -> std::shared_ptr<StateArray>
 {
-    delete c;
+    return std::make_shared<StateArray>();
 }
 
 void
-Conflict::destroy_list(Conflict* a)
+StateArray::expand(StateArray* a, size_t new_size)
 {
-    Conflict* b = nullptr;
-    if (a == nullptr)
-        return;
-    while (a != nullptr) {
-        b = a->next;
-        delete a;
-        a = b;
+    a->rs_count = std::vector<int>(a->conflict_list.size(), 0);
+    a->rr_count = std::vector<int>(a->conflict_list.size(), 0);
+    while (a->conflict_list.size() != new_size) {
+        a->conflict_list.push_back(nullptr);
     }
 }
 
-auto
-State_array::create() -> State_array*
-{
-    auto* s = new State_array();
-    return s;
-}
-
 void
-add_state_to_state_array(State_array& a, State* s)
+add_state_to_state_array(StateArray& a, State* s)
 {
     a.state_list.push_back(s);
 }
@@ -447,16 +415,16 @@ inc_conflict_count(int s, int state)
  * insert in incresing order by conflict's state no.
  *
  * Note: no need to check size of conflict arrays,
- * which is handled in expandParsingTable().
+ * which is handled in expand_parsing_table().
  */
 auto
 add_to_conflict_array(int state,
                       SymbolTblNode* lookahead,
                       int action1,
-                      int action2) -> Conflict*
+                      int action2) -> std::shared_ptr<ConflictNode>
 {
     int r = 0, s = 0; // r < s
-    Conflict *c = nullptr, *b = nullptr, *b_prev = nullptr;
+    Conflict* b_prev = nullptr;
 
     if (action1 < action2) {
         r = action1;
@@ -466,22 +434,25 @@ add_to_conflict_array(int state,
         s = action1;
     }
 
-    if (states_new_array->rr_count[state] == 0 &&
-        states_new_array->rs_count[state] == 0) {
-        c = ConflictNode::create(state, lookahead, r, s);
-        states_new_array->conflict_list[state] = c;
+    if (states_new_array->rr_count.at(state) == 0 &&
+        states_new_array->rs_count.at(state) == 0) {
+        std::shared_ptr<ConflictNode> c =
+          ConflictNode::create_node(state, lookahead, r, s);
+        states_new_array->conflict_list.at(state) = c;
         inc_conflict_count(s, state);
         return c;
     }
 
-    for (b = states_new_array->conflict_list[state]; b != nullptr;
-         b_prev = b, b = b->next) {
+    for (std::shared_ptr<Conflict> b = states_new_array->conflict_list[state];
+         b != nullptr;
+         b_prev = b.get(), b = b->next) {
         if (state == b->state && lookahead == b->lookahead && r == b->r &&
             s == b->s)
             return nullptr; // exits already.
 
         if (state < b->state) {
-            c = ConflictNode::create(state, lookahead, r, s);
+            std::shared_ptr<ConflictNode> c =
+              ConflictNode::create_node(state, lookahead, r, s);
 
             if (b_prev == nullptr) { // insert at the head.
                 c->next = states_new_array->conflict_list[state];
@@ -495,7 +466,8 @@ add_to_conflict_array(int state,
         }
     } // end of for.
 
-    c = ConflictNode::create(state, lookahead, r, s);
+    std::shared_ptr<ConflictNode> c =
+      ConflictNode::create_node(state, lookahead, r, s);
     b_prev->next = c; // insert at the tail.
     inc_conflict_count(s, state);
 
@@ -510,16 +482,16 @@ void
 init()
 {
     states_new = create_state_collection();
-    states_new_array = State_array::create(); // size == PARSING_TABLE_SIZE
+    states_new_array = StateArray::create(); // size == PARSING_TABLE_SIZE
 
     if (Options::get().use_lalr) {
         states_inadequate = create_state_no_array();
         OriginatorList_Len_Init = 2;
     }
 
-#if USE_CONFIG_QUEUE_FOR_GET_CLOSURE
-    config_queue = queue_create(); // for getClosure().
-#endif
+    if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
+        config_queue = queue_create(); // for getClosure().
+    }
 
     // for finding same/compatible states fast.
     init_state_hash_tbl();
@@ -566,7 +538,7 @@ write_configuration(const Configuration& c)
     auto& options = Options::get();
     grammar.rules[c.ruleID]->write(c.marker);
 
-    if (options.use_lr0 && options.use_lalr == false) { // LR(0), no context.
+    if (options.use_lr0 && !options.use_lalr) { // LR(0), no context.
         // do nothing unless is goal production.
         if (c.ruleID == 0)
             yyprintf("%s", STR_END);
@@ -609,13 +581,13 @@ write_core_configuration(State* s)
 void
 write_successor_list(State& s)
 {
-    if (s.successor_count > 0)
+    if (!s.successor_list.empty())
         yyprintf("\n");
     //  yyprintf("\n-successor list-\n");
-    for (int i = 0; i < s.successor_count; i++) {
+    for (const auto& successor : s.successor_list) {
         yyprintf("%s : %d\n",
-                 s.successor_list[i]->trans_symbol->snode->symbol,
-                 s.successor_list[i]->state_no);
+                 successor->trans_symbol->snode->symbol,
+                 successor->state_no);
     }
 }
 
@@ -634,7 +606,7 @@ write_state_conflict_list(int state)
         states_new_array->rs_count[state] == 0)
         return;
 
-    for (Conflict* c = states_new_array->conflict_list[state]; c != nullptr;
+    for (auto& c = states_new_array->conflict_list[state]; c != nullptr;
          c = c->next) {
         yyprintf("%d: ", c->state);
         if (c->s > 0) {
@@ -685,10 +657,10 @@ write_grammar_conflict_list()
 void
 write_grammar_conflict_list2()
 {
-    int i = 0, state = 0, diff = 0;
+    int state = 0, diff = 0;
     int final_rs_count = 0;
     int final_rr_count = 0;
-    State_array* a = states_new_array;
+    const auto& a = states_new_array;
 
     if (rs_count == 0 && rr_count == 0)
         return;
@@ -696,8 +668,8 @@ write_grammar_conflict_list2()
     yyprintf("Conflicts:");
     yyprintf("  %d shift/reduce, %d reduce/reduce]\n\n", rs_count, rr_count);
 
-    for (i = 0; i < ParsingTblRows; i++) {
-        if (is_reachable_state(i) == false)
+    for (int i = 0; i < ParsingTblRows; i++) {
+        if (!is_reachable_state(i))
             continue;
 
         state = get_actual_state(i);
@@ -744,10 +716,10 @@ write_state(State& s)
 
     yyprintf("--state %d-- config count:%d, core_config count:%d\n",
              s.state_no,
-             s.config_count,
+             s.config.size(),
              s.core_config_count);
-    for (int i = 0; i < s.config_count; i++) {
-        write_configuration(*s.config[i]);
+    for (const auto& config : s.config) {
+        write_configuration(*config);
     }
 
     write_successor_list(s);
@@ -763,11 +735,9 @@ write_state(State& s)
 void
 write_state_collection(StateCollection* c)
 {
-    State* s;
-
     yyprintf("==State Collection: (count=%d)\n", c->state_count);
 
-    s = c->states_head;
+    State* s = c->states_head;
     while (s != nullptr) {
         write_state(*s);
         s = s->next;
@@ -787,13 +757,10 @@ StateNode::destroy_state(State* s)
         // printf("destroyState warning: s is nullptr\n");
         return;
     }
-    for (int i = 0; i < s->config_count; i++) {
-        free_config(s->config[i]);
+    for (const auto& config : s->config) {
+        free_config(config);
     }
-    delete[] s->config;
-    delete s->trans_symbol; // TODO: or delete[] ?
-    delete[] s->successor_list;
-    StateList::destroy(s->parents_list);
+    delete s->trans_symbol;
     delete s;
 }
 
@@ -824,17 +791,13 @@ is_terminal(SymbolTblNode* s) -> bool
 auto
 add_symbol2_context(SymbolTblNode* snode, Context* c) -> bool
 {
-    SymbolNode *s, *t, *s_prev;
-    int cmp_val;
-
-    for (s_prev = nullptr, s = c->nContext; s != nullptr;
-         s_prev = s, s = s->next) {
-
-        cmp_val = strcmp(s->snode->symbol, snode->symbol);
+    SymbolNode *s = c->nContext, *s_prev = nullptr;
+    for (; s != nullptr; s_prev = s, s = s->next) {
+        int cmp_val = strcmp(s->snode->symbol, snode->symbol);
         if (cmp_val == 0)
             return false;  // already in context.
         if (cmp_val > 0) { // s_prev < snode < s
-            t = create_symbol_node(snode);
+            SymbolNode* t = SymbolNode::create(snode);
             t->next = s;
             if (s_prev == nullptr) {
                 c->nContext = t;
@@ -850,9 +813,9 @@ add_symbol2_context(SymbolTblNode* snode, Context* c) -> bool
 
     // insert at the end of list. now s == nullptr.
     if (s_prev == nullptr) {
-        c->nContext = create_symbol_node(snode);
+        c->nContext = SymbolNode::create(snode);
     } else {
-        s_prev->next = create_symbol_node(snode);
+        s_prev->next = SymbolNode::create(snode);
     }
     c->context_count++;
 
@@ -873,7 +836,7 @@ insert_symbol_list_unique_inc(SymbolList list,
 {
     *exist = false;
     if (list == nullptr)
-        return create_symbol_node(snode);
+        return SymbolNode::create(snode);
 
     SymbolNode *n = list, *n_prev = nullptr;
     for (; n != nullptr; n_prev = n, n = n->next) {
@@ -882,7 +845,7 @@ insert_symbol_list_unique_inc(SymbolList list,
             return list; // existing node.
         }
         if (strcmp(n->snode->symbol, snode->symbol) > 0) {
-            SymbolNode* new_node = create_symbol_node(snode);
+            SymbolNode* new_node = SymbolNode::create(snode);
             // insert new_snode before n.
 
             if (n_prev == nullptr) {
@@ -896,7 +859,7 @@ insert_symbol_list_unique_inc(SymbolList list,
     } // end of for.
 
     // insert as the last node.
-    n_prev->next = create_symbol_node(snode);
+    n_prev->next = SymbolNode::create(snode);
     return list;
 }
 
@@ -910,7 +873,7 @@ insert_unique_symbol_list(SymbolList list, SymbolTblNode* snode, bool* exist)
     *exist = false;
 
     if (list == nullptr)
-        return create_symbol_node(snode);
+        return SymbolNode::create(snode);
 
     SymbolNode *n = list, *n_prev = nullptr;
     for (; n != nullptr; n_prev = n, n = n->next) {
@@ -921,7 +884,7 @@ insert_unique_symbol_list(SymbolList list, SymbolTblNode* snode, bool* exist)
     } // end of for.
 
     // insert as the last node.
-    n_prev->next = create_symbol_node(snode);
+    n_prev->next = SymbolNode::create(snode);
     return list;
 }
 
@@ -937,17 +900,16 @@ write_symbol_node_array(SymbolNode* str)
 }
 
 void
-show_t_heads(SymbolList alpha, SymbolList theads)
+show_t_heads(const SymbolList alpha, const SymbolList theads)
 {
     yyprintf("string '");
 
-    SymbolNode* a = alpha;
-    for (a = alpha; a != nullptr; a = a->next)
+    for (SymbolNode* a = alpha; a != nullptr; a = a->next)
         yyprintf("%s ", a->snode->symbol);
 
     yyprintf("' has theads: ");
 
-    for (a = theads; a != nullptr; a = a->next)
+    for (SymbolNode* a = theads; a != nullptr; a = a->next)
         yyprintf("%s ", a->snode->symbol);
 
     yyprintf("\n");
@@ -1027,10 +989,9 @@ insert_rhs_to_heads(SymbolNode* s, SymbolNode* heads, SymbolNode* theads)
 auto
 get_theads(SymbolNode* alpha) -> SymbolNode*
 {
-
     // dummy header of the lists heads and theads.
-    SymbolNode* heads = create_symbol_node(hash_tbl_find(""));
-    SymbolNode* theads = create_symbol_node(hash_tbl_find(""));
+    SymbolNode* heads = SymbolNode::create(hash_tbl_find(""));
+    SymbolNode* theads = SymbolNode::create(hash_tbl_find(""));
 
     insert_alpha_to_heads(alpha, heads, theads);
 
@@ -1064,7 +1025,7 @@ get_theads(SymbolNode* alpha) -> SymbolNode*
  * This section of code is called three times.
  */
 void
-get_context_do(Configuration* cfg, Context* context)
+get_context_do(const Configuration* cfg, Context* context)
 {
     SymbolNode* a = cfg->context->nContext;
     while (a != nullptr) {
@@ -1077,7 +1038,7 @@ get_context_do(Configuration* cfg, Context* context)
  * Obtain the context for a configuration.
  */
 void
-get_context(Configuration* cfg, Context* context)
+get_context(const Configuration* cfg, Context* context)
 {
     SymbolList theads = nullptr;
     Production* production = grammar.rules[cfg->ruleID];
@@ -1118,17 +1079,15 @@ get_context(Configuration* cfg, Context* context)
 
 /*
  * Empty a context.
- * Note: if a is nullptr, free(a) causes crash.
  */
 void
-clear_context(Context* c)
+Context::clear()
 {
-    if (c == nullptr)
-        return;
-
-    c->context_count = 0;
-    free_symbol_node_list(c->nContext);
-    c->nContext = nullptr;
+    this->context_count = 0;
+    if (this->nContext != nullptr) {
+        free_symbol_node_list(this->nContext);
+        this->nContext = nullptr;
+    }
 }
 
 void
@@ -1136,24 +1095,22 @@ free_context(Context* c)
 {
     if (c == nullptr)
         return;
-    clear_context(c);
-    free(c);
+    c->clear();
+    delete c;
 }
 
 void
 clear_production(Production* p)
 {
-    SymbolNode *a, *b;
-
     if (p == nullptr)
         return;
     if (p->nLHS != nullptr)
-        free(p->nLHS);
+        delete p->nLHS;
     if (p->nRHS_head != nullptr) {
-        a = p->nRHS_head;
+        SymbolNode* a = p->nRHS_head;
         p->nRHS_head = nullptr;
         while (a != nullptr) {
-            b = a->next;
+            SymbolNode* b = a->next;
             free_symbol_node(a);
             a = b;
         }
@@ -1164,7 +1121,7 @@ void
 free_production(Production* p)
 {
     clear_production(p);
-    free(p);
+    delete p;
 }
 
 void
@@ -1172,8 +1129,8 @@ free_config(Configuration* c)
 {
     if (c == nullptr)
         return;
-    clear_context(c->context);
-    free(c);
+    c->context->clear();
+    delete c;
 }
 
 /*
@@ -1235,7 +1192,7 @@ is_same_config(const Configuration* con, const Configuration* c) -> bool
         return false;
     if (con->ruleID != c->ruleID)
         return false;
-    if (is_same_context(con->context, c->context) == false)
+    if (!is_same_context(con->context, c->context))
         return false;
     return true;
 }
@@ -1247,10 +1204,9 @@ auto
 is_existing_successor_config(const State* s, int rule_id, const Context* con)
   -> bool
 {
-    for (int i = 0; i < s->config_count; i++) {
-        const Configuration* c = s->config[i];
-        if (c->marker == 0 && rule_id == c->ruleID &&
-            is_same_context(con, c->context))
+    for (const auto& config : s->config) {
+        if (config->marker == 0 && rule_id == config->ruleID &&
+            is_same_context(con, config->context))
             return true; // existing config
     }
     return false;
@@ -1259,22 +1215,13 @@ is_existing_successor_config(const State* s, int rule_id, const Context* con)
 void
 add_successor_config_to_state(State* s, int rule_id, Context* con)
 {
-    if (s->config_count >= s->config_max_count - 1) {
-        s->config_max_count *= 2;
-        HYY_EXPAND(&s->config, s->config_max_count);
-
-        // printf("addSuccessorConfigToState: state size expanded to %d\n",
-        //       s->config_max_count);
-    }
-
     // marker = 0, isCoreConfig = 0.
     Configuration* c = create_config(rule_id, 0, 0);
     c->owner = s;
 
     copy_context(c->context, con);
 
-    s->config[s->config_count] = c;
-    s->config_count++;
+    s->config.push_back(c);
 }
 
 auto
@@ -1392,37 +1339,21 @@ config_cmp(const Configuration* c1, const Configuration* c2) -> int
 void
 add_core_config2_state(State* s, Configuration* new_config)
 {
-    if (s->config_count >= s->config_max_count - 1) {
-        s->config_max_count *= 2;
-        HYY_EXPAND(&s->config, s->config_max_count);
-        // printf("addCoreConfig2State: state size expanded to %d\n",
-        //       s->config_max_count);
-    }
-
-    int i = 0;
-    for (; i < s->config_count; i++) {
+    size_t i = 0;
+    for (; i < s->config.size(); i++) {
         const int cmp_val = config_cmp(s->config[i], new_config);
         if (cmp_val == 0) {
             // a core config shouldn't be added twice.
-            throw std::runtime_error(
-              "add_core_config2_state: a core config shouldn't be added "
-              "twice."); // should never happen.
+            throw std::runtime_error("add_core_config2_state: a core "
+                                     "config shouldn't be added "
+                                     "twice."); // should never happen.
         }
         if (cmp_val > 0)
             break; // found insertion point.
     }
-
-    for (int j = s->config_count; j > i; j--) {
-        s->config[j] = s->config[j - 1];
-    }
-
-    s->config[i] = new_config; // i == j is insert point.
-
-    s->config_count++;
+    s->config.insert(s->config.begin() + i, new_config);
     s->core_config_count++;
 }
-
-#if USE_CONFIG_QUEUE_FOR_GET_CLOSURE
 
 /////////////////////////////////////////////////////
 // Use config_queue when get closure for a state.
@@ -1435,7 +1366,7 @@ add_core_config2_state(State* s, Configuration* new_config)
 auto
 is_compatible_successor_config(const State* s, int rule_id) -> int
 {
-    for (int i = 0; i < s->config_count; i++) {
+    for (int i = 0; i < s->config.size(); i++) {
         const Configuration* c = s->config[i];
         if (c->marker == 0 && rule_id == c->ruleID)
             return i; // existing compatible config
@@ -1462,13 +1393,14 @@ get_config_successors(State* s)
 
             if (is_non_terminal(scanned_symbol)) {
 
-                clear_context(&tmp_context); // clear tmp_context
+                tmp_context.clear(); // clear tmp_context
                 get_context(config, &tmp_context);
 
                 for (const RuleIDNode* r = scanned_symbol->ruleIDList;
                      r != nullptr;
                      r = r->next) {
-                    // Grammar.rules[r->ruleID] starts with this scanned symbol.
+                    // Grammar.rules[r->ruleID] starts with this scanned
+                    // symbol.
 
                     // If not an existing config, add to state s.
                     const int index =
@@ -1477,14 +1409,14 @@ get_config_successors(State* s)
                     if (index == -1) { // new config.
                         add_successor_config_to_state(
                           s, r->ruleID, &tmp_context);
-                        queue_push(config_queue, s->config_count - 1);
+                        queue_push(config_queue, s->config.size() - 1);
 
                     } else if (combine_context(s->config[index]->context,
                                                &tmp_context) ==
                                true) { // compatible config
-                        // if this config has no successor, don't insert to
-                        // config_queue. This saves time.
-                        // marker = 0 here, no need to check marker >= 0.
+                        // if this config has no successor, don't insert
+                        // to config_queue. This saves time. marker = 0
+                        // here, no need to check marker >= 0.
                         if (is_final_configuration(s->config[index]))
                             continue;
                         if (is_terminal(get_scanned_symbol(s->config[index])) ==
@@ -1504,49 +1436,37 @@ get_config_successors(State* s)
     }             // end of while
 }
 
-void
-get_closure(State* s)
-{
-    int i;
-    // queue_clear(config_queue);
-    for (i = 0; i < s->config_count; i++) {
-        queue_push(config_queue, i);
-    }
-    get_config_successors(s);
-}
-
-#else
-
 //////////////////////////////////////////////////////
 // Not use config_queue, combine compatible
 // configurations after they are all generated.
 // This is much slower, and is used for testing only.
 //////////////////////////////////////////////////////
 
-void
-getSuccessorForConfig(State* s, Configuration* config)
+static void
+get_successor_for_config(State* s, const Configuration* config)
 {
-    RuleIDNode* r;
     SymbolTblNode* scanned_symbol = nullptr;
     static Context tmp_context;
     tmp_context.nContext = nullptr;
 
     if (config->marker >= 0 &&
         config->marker < grammar.rules[config->ruleID]->RHS_count) {
-        scanned_symbol = getScannedSymbol(config);
+        scanned_symbol = get_scanned_symbol(config);
 
-        if (isNonTerminal(scanned_symbol)) {
+        if (is_non_terminal(scanned_symbol)) {
 
-            clearContext(&tmp_context); // clear tmp_context
-            getContext(config, &tmp_context);
+            tmp_context.clear(); // clear tmp_context
+            get_context(config, &tmp_context);
 
-            for (r = scanned_symbol->ruleIDList; r != nullptr; r = r->next) {
-                // Grammar.rules[r->ruleID] starts with this scanned symbol.
+            for (const RuleIDNode* r = scanned_symbol->ruleIDList; r != nullptr;
+                 r = r->next) {
+                // Grammar.rules[r->ruleID] starts with this scanned
+                // symbol.
 
                 // If not an existing config, add to state s.
-                if (isExistingSuccessorConfig(s, r->ruleID, &tmp_context) ==
+                if (is_existing_successor_config(s, r->ruleID, &tmp_context) ==
                     false) {
-                    addSuccessorConfigToState(s, r->ruleID, &tmp_context);
+                    add_successor_config_to_state(s, r->ruleID, &tmp_context);
                 }
 
             } // end for
@@ -1561,32 +1481,30 @@ getSuccessorForConfig(State* s, Configuration* config)
  * production and marker, but different in contexts.
  */
 void
-combineCompatibleConfig(State* s)
+combine_compatible_config(State* s, bool debug_comb_comp_config)
 {
-    int i, j;
-    Configuration* c;
     if (s == nullptr) {
         // printf("combineCompatibleConfig: warning: s is nullptr\n");
         return;
     }
-    if (s->config_count <= 1)
+    if (s->config.size() <= 1)
         return;
 
-    if (DEBUG_COMB_COMP_CONFIG) {
+    if (debug_comb_comp_config) {
         yyprintf("combineCompatibleCfg (state %d). before: %d, ",
                  s->state_no,
-                 s->config_count);
+                 s->config.size());
         // writeState(s);
     }
 
-    for (i = 1; i < s->config_count; i++) {
-        c = s->config[i];
+    for (size_t i = 1; i < s->config.size(); i++) {
+        Configuration* c = s->config[i];
         if (c == nullptr)
             continue;
-        for (j = 0; j < i; j++) {
-            if (isCompatibleConfig(c, s->config[j])) {
+        for (size_t j = 0; j < i; j++) {
+            if (is_compatible_config(c, s->config[j])) {
                 combine_context(s->config[j]->context, c->context);
-                freeConfig(c); // combine config i to j, then remove i.
+                free_config(c); // combine config i to j, then remove i.
                 s->config[i] = nullptr;
                 break;
             } // end if
@@ -1595,22 +1513,22 @@ combineCompatibleConfig(State* s)
 
     // shrink state configs to remove those nullptr ones
     // after the last step.
-    i = 0;
-    j = 0;
-    while (j < s->config_count) {
+    size_t i = 0;
+    size_t j = 0;
+    while (j < s->config.size()) {
         while (s->config[j] == nullptr) {
             j++;
         }
-        if (j >= s->config_count)
+        if (j >= s->config.size())
             break;
         s->config[i] = s->config[j];
         j++;
         i++;
     }
-    s->config_count = i;
+    s->config.resize(i);
 
-    if (DEBUG_COMB_COMP_CONFIG) {
-        yyprintf("after: %d\n", s->config_count);
+    if (debug_comb_comp_config) {
+        yyprintf("after: %d\n", s->config.size());
         // writeState(s);
     }
 }
@@ -1622,8 +1540,11 @@ combineCompatibleConfig(State* s)
  * yyy - number of config in all stetes after combine,
  * zzz - max config count in all states after combine.
  */
-int xx, yy, zz;
-int yyy, zzz;
+static size_t xx = 0;
+static size_t yy = 0;
+static size_t zz = 0;
+static size_t yyy = 0;
+static size_t zzz = 0;
 
 /*
  * Get the configuration closure of a state s given its
@@ -1645,28 +1566,32 @@ int yyy, zzz;
  *         empty, then use the context of current config.
  */
 void
-getClosure(State* s)
+get_closure(State* s)
 {
-    int i;
+    if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
+        // queue_clear(config_queue);
+        for (int i = 0; i < s->config.size(); i++) {
+            queue_push(config_queue, i);
+        }
+        get_config_successors(s);
+    } else {
+        for (Configuration* config : s->config) {
+            get_successor_for_config(s, config);
+        }
 
-    for (i = 0; i < s->config_count; i++) {
-        getSuccessorForConfig(s, s->config[i]);
+        xx++;
+        yy += s->config.size();
+        if (zz < s->config.size())
+            zz = s->config.size();
+
+        if (Options::get().debug_comb_comp_config)
+            combine_compatible_config(s);
+
+        yyy += s->config.size();
+        if (zzz < s->config.size())
+            zzz = s->config.size();
     }
-
-    xx++;
-    yy += s->config_count;
-    if (zz < s->config_count)
-        zz = s->config_count;
-
-    if (USE_COMBINE_COMPATIBLE_CONFIG)
-        combineCompatibleConfig(s);
-
-    yyy += s->config_count;
-    if (zzz < s->config_count)
-        zzz = s->config_count;
 }
-
-#endif
 
 ///////////////////////////////////////////
 // StateCollection functions. START.
@@ -1813,9 +1738,9 @@ copy_context(Context* dest, const Context* src)
     dest->nContext = nullptr;
     if (src->nContext != nullptr) {
         SymbolNode* a = src->nContext;
-        SymbolNode* b = dest->nContext = create_symbol_node(a->snode);
+        SymbolNode* b = dest->nContext = SymbolNode::create(a->snode);
         while ((a = a->next) != nullptr) {
-            b->next = create_symbol_node(a->snode);
+            b->next = SymbolNode::create(a->snode);
             b = b->next;
         }
     }
@@ -1922,7 +1847,7 @@ is_compatible_state_a(const State* s1, const State* s2) -> bool
             if (i != j) {
                 const Context* c1 = s1->config[i]->context;
                 const Context* c2 = s2->config[j]->context;
-                if (has_empty_intersection(c1, c2) == false) {
+                if (!has_empty_intersection(c1, c2)) {
                     return false;
                 }
             }
@@ -1959,7 +1884,7 @@ auto
 is_compatible_states(const State* s1, const State* s2) -> bool
 {
 
-    if (has_common_core(s1, s2) == false)
+    if (!has_common_core(s1, s2))
         return false;
 
     const int count = s1->core_config_count;
@@ -1983,13 +1908,13 @@ is_compatible_states(const State* s1, const State* s2) -> bool
 void
 update_state_parsing_tbl_entry(const State* s)
 {
-    for (int i = 0; i < s->config_count; i++) {
-        SymbolTblNode* scanned_symbol = get_scanned_symbol(s->config[i]);
+    for (const auto& config : s->config) {
+        SymbolTblNode* scanned_symbol = get_scanned_symbol(config);
 
         // for final config and empty reduction.
-        if (is_final_configuration(s->config[i]) ||
+        if (is_final_configuration(config) ||
             strlen(scanned_symbol->symbol) == 0) {
-            insert_reduction_to_parsing_table(s->config[i], s->state_no);
+            insert_reduction_to_parsing_table(config, s->state_no);
         }
     }
 }
@@ -2011,7 +1936,8 @@ find_similar_core_config(const State* t,
     for (int i = 0; i < t->core_config_count; i++) {
         Configuration* tmp = t->config[i];
 
-        // don't compare context, it'll be compared in combine_context().
+        // don't compare context, it'll be compared in
+        // combine_context().
         if (tmp->marker == c->marker && tmp->ruleID == c->ruleID) {
             (*config_index) = i;
             return tmp;
@@ -2042,19 +1968,17 @@ find_similar_core_config(const State* t,
 void
 propagate_context_change(const State* s)
 {
-    State* t = nullptr; // successor.
     int config_index = 0;
 
-    if (s->successor_count == 0)
+    if (s->successor_list.empty())
         return;
 
-    for (int i = 0; i < s->successor_count; i++) {
-        t = s->successor_list[i];
+    for (State* t : s->successor_list) {
         const SymbolTblNode* trans_symbol = t->trans_symbol->snode;
         bool is_changed = false;
 
-        for (int j = 0; j < s->config_count; j++) {
-            Configuration* c = s->config[j]; // bug removed: i -> j. 3-4-2008.
+        for (const auto& config : s->config) {
+            Configuration* c = config; // bug removed: i -> j. 3-4-2008.
             if (is_final_configuration(c))
                 continue;
             // if not a successor on symbol, next.
@@ -2072,25 +1996,25 @@ propagate_context_change(const State* s)
                 // printf("context of state %d updated\n", t->state_no);
                 is_changed = true;
 
-#if USE_CONFIG_QUEUE_FOR_GET_CLOSURE
-                // queue_clear(config_queue);
-                queue_push(config_queue, config_index);
-                get_config_successors(t);
-#else
-                getSuccessorForConfig(t, d);
-#endif
+                if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
+                    // queue_clear(config_queue);
+                    queue_push(config_queue, config_index);
+                    get_config_successors(t);
+                } else {
+                    get_successor_for_config(t, d);
+                }
             }
         } // end of for
 
         if (is_changed) {
-#if USE_CONFIG_QUEUE_FOR_GET_CLOSURE
-#else
-            combineCompatibleConfig(t);
-#endif
+            if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
+            } else {
+                combine_compatible_config(t);
+            }
             update_state_parsing_tbl_entry(t);
             propagate_context_change(t);
         }
-    } // end of for
+    }
 }
 
 /*
@@ -2107,23 +2031,23 @@ combine_compatible_states(State* s_dest, const State* s_src) -> bool
                             s_src->config[i]->context)) {
             is_changed = true;
 
-#if USE_CONFIG_QUEUE_FOR_GET_CLOSURE
-            // queue_clear(config_queue);
-            queue_push(config_queue, i);
-            get_config_successors(s_dest);
-#else
-            getSuccessorForConfig(s_dest, s_dest->config[i]);
-#endif
+            if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
+                // queue_clear(config_queue);
+                queue_push(config_queue, i);
+                get_config_successors(s_dest);
+            } else {
+
+                get_successor_for_config(s_dest, s_dest->config[i]);
+            }
         }
     }
 
     // Now propagate the context change to successor states.
     if (is_changed) {
-#if USE_CONFIG_QUEUE_FOR_GET_CLOSURE
-#else
-        combineCompatibleConfig(s_dest);
-#endif
-
+        if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
+        } else {
+            combine_compatible_config(s_dest);
+        }
         update_state_parsing_tbl_entry(s_dest);
         propagate_context_change(s_dest);
     }
@@ -2149,7 +2073,7 @@ is_same_state(const State* s1, const State* s2) -> bool
     }
 
     for (int i = 0; i < s1->core_config_count; i++) {
-        if (is_same_config(s1->config[i], s2->config[i]) == false)
+        if (!is_same_config(s1->config[i], s2->config[i]))
             return false;
     }
 
@@ -2195,20 +2119,13 @@ create_state() -> State*
         throw std::runtime_error("create_state error: out of memory\n");
     }
     s->next = nullptr;
-    s->config_max_count = STATE_INIT_SIZE;
-    s->config = new Configuration*[s->config_max_count];
-    s->config_count = 0;
+    s->config.reserve(STATE_INIT_SIZE);
     s->state_no = -1;
-    s->trans_symbol = create_symbol_node(hash_tbl_find(""));
+    s->trans_symbol = SymbolNode::create(hash_tbl_find(""));
     s->core_config_count = 0;
 
     // Initialization for successor list.
-    s->successor_max_count = STATE_SUCCESSOR_INIT_MAX_COUNT;
-    s->successor_list = new State*[s->successor_max_count];
-    if (s->successor_list == nullptr) {
-        YYERR_EXIT("createState error: out of memory\n");
-    }
-    s->successor_count = 0;
+    s->successor_list.reserve(STATE_SUCCESSOR_INIT_MAX_COUNT);
 
     s->parents_list = StateList::create();
 
@@ -2243,25 +2160,14 @@ insert_reduction_to_parsing_table(const Configuration* c, int state_no)
 void
 add_successor(State* s, State* n)
 {
-    s->successor_list[s->successor_count] = n;
-    s->successor_count++;
-
-    // printf(":: state %d, succesor is state %d on symbol %s\n",
+    s->successor_list.push_back(n);
+    // printf(":: state %d, succesor is state %d on symbol
+    // %s\n",
     //    s->state_no, n->state_no, n->trans_symbol);
 
-    if (s->successor_count >= s->successor_max_count) {
-        s->successor_max_count *= 2; // there won't be many
-        delete[] s->successor_list;
-        s->successor_list = new State*[s->successor_max_count];
-        if (s->successor_list == nullptr) {
-            YYERR_EXIT("addSuccessor error: out of memory\n");
-        }
-        // printf("Successor list of State %d is expanded to %d\n",
-        //        s->state_no, s->successor_max_count);
-    }
-
     if (Options::get().use_lalr) {
-        // add s to the parents_list of n. To get originators in lane-tracing.
+        // add s to the parents_list of n. To get originators in
+        // lane-tracing.
         n->parents_list->add(s);
     }
 }
@@ -2281,7 +2187,7 @@ insert_state_to_pm(State* s)
     add_state_to_state_array(*states_new_array, s);
 
     // expand size of parsing table array if needed.
-    if (states_new->state_count >= PARSING_TABLE_SIZE) {
+    while (states_new->state_count >= PARSING_TABLE_SIZE) {
         expand_parsing_table();
     }
 }
@@ -2317,9 +2223,9 @@ add_transition_states2_new(StateCollection* coll, State* src_state) -> bool
         State* next = s->next;
         // is_compatible = 0;
 
-        // Two alternatives. search_state_hash_tbl is slightly faster.
-        // if ((os = isExistingState(states_new, s, & is_compatible)) ==
-        // nullptr) {
+        // Two alternatives. search_state_hash_tbl is slightly
+        // faster. if ((os = isExistingState(states_new, s, &
+        // is_compatible)) == nullptr) {
         int is_compatible = 0;
         State* os = search_state_hash_tbl(s, &is_compatible);
         if (os == nullptr) {
@@ -2341,7 +2247,8 @@ add_transition_states2_new(StateCollection* coll, State* src_state) -> bool
 
             State::destroy_state(s); // existing or compatible. No use.
 
-            // This should only happen for general practical method.
+            // This should only happen for general practical
+            // method.
             if (os == src_state && is_compatible == 1) {
                 src_state_changed = true;
                 // printf("src state is changed\n");
@@ -2371,8 +2278,8 @@ transition(State* s)
 {
     StateCollection* coll = create_state_collection();
 
-    for (int i = 0; i < s->config_count; i++) {
-        Configuration* c = s->config[i];
+    for (const auto& config : s->config) {
+        Configuration* c = config;
         if (is_final_configuration(c)) {
             // yyprintf("a final config. so reduce.\n");
             // writeConfiguration(c);
@@ -2388,8 +2295,9 @@ transition(State* s)
               find_state_for_scanned_symbol(coll, scanned_symbol);
             if (new_state == nullptr) {
                 new_state = create_state();
-                // record which symbol this state is a successor by.
-                new_state->trans_symbol = create_symbol_node(scanned_symbol);
+                // record which symbol this state is a successor
+                // by.
+                new_state->trans_symbol = SymbolNode::create(scanned_symbol);
                 coll->add_state2(new_state);
             }
             // create a new core config for new_state.
@@ -2497,7 +2405,7 @@ dump_state_collections()
 /*
  * Use a one-dimension array to store the matrix and
  * calculate the row and column number myself:
- * row i, col j is ParsingTable[col_no * i + j];
+ * row i, col j is ParsingTable.at(col_no * i + j);
  *
  * Here we have:
  * 0 <= i < total states count
@@ -2508,22 +2416,22 @@ init_parsing_table()
 {
     PARSING_TABLE_SIZE = PARSING_TABLE_INIT_SIZE;
     size_t total_cells = PARSING_TABLE_SIZE * ParsingTblCols;
-    auto* ParsingTable = new int[total_cells];
-    memset((void*)ParsingTable, 0, 4 * total_cells);
+    ParsingTable = std::vector<int>(4 * total_cells, 0);
 }
 
 void
 expand_parsing_table()
 {
     size_t total_cells = PARSING_TABLE_SIZE * ParsingTblCols;
-    HYY_EXPAND(&ParsingTable, 2 * total_cells);
-    memset((void*)(ParsingTable + total_cells), 0, 4 * total_cells);
-    PARSING_TABLE_SIZE *= 2;
+    ParsingTable = std::vector<int>(2 * total_cells, 0);
+    PARSING_TABLE_SIZE = PARSING_TABLE_SIZE *
+                         2; // TODO: who cares about thread safety anyways ? :p
 
-    // states_new_array->expand(PARSING_TABLE_SIZE); // useless now
+    StateArray::expand(states_new_array.get(), PARSING_TABLE_SIZE);
 
-    // yyprintf("expandParsingTable message: ");
-    // yyprintf("expand parsing table size to %d\n", PARSING_TABLE_SIZE);
+    // yyprintf("expand_parsing_table message: ");
+    // yyprintf("expand parsing table size to %d\n",
+    // PARSING_TABLE_SIZE);
 }
 
 /*
@@ -2541,7 +2449,7 @@ get_action(symbol_type symbol_type,
            char* action,
            int* state_dest)
 {
-    int x = ParsingTable[row * ParsingTblCols + col];
+    const int x = ParsingTable.at(row * ParsingTblCols + col);
 
     if (x == 0) {
         *action = 0;
@@ -2600,46 +2508,51 @@ insert_action(SymbolTblNode* lookahead, int row, int state_dest)
     int reduce = 0, shift = 0; // for shift/reduce conflict.
     struct TerminalProperty *tp_s = nullptr, *tp_r = nullptr;
 
-    int cell = row * ParsingTblCols + get_col(lookahead);
+    std::cout << "row = " << row << ", ParsingTblCols = " << ParsingTblCols
+              << ", get_col(*lookahead) = " << get_col(*lookahead) << std::endl;
+    int cell = row * ParsingTblCols + get_col(*lookahead);
 
-    if (ParsingTable[cell] == 0) {
-        ParsingTable[cell] = state_dest;
+    if (ParsingTable.at(cell) == 0) {
+        ParsingTable.at(cell) = state_dest;
         return;
     }
 
-    if (ParsingTable[cell] == state_dest)
+    if (ParsingTable.at(cell) == state_dest)
         return;
 
-    // ParsingTable[cell] != 0 && ParsingTable[cell] != state_dest.
-    // The following code process shift/reduce and reduce/reduce conflicts.
+    // ParsingTable.at(cell) != 0 && ParsingTable.at(cell) !=
+    // state_dest. The following code process shift/reduce and
+    // reduce/reduce conflicts.
 
-    if (ParsingTable[cell] == CONST_ACC || state_dest == CONST_ACC) {
-        if (options.use_lr0 && (ParsingTable[cell] < 0 || state_dest < 0)) {
-            ParsingTable[cell] = CONST_ACC; // ACC wins over reduce.
+    if (ParsingTable.at(cell) == CONST_ACC || state_dest == CONST_ACC) {
+        if (options.use_lr0 && (ParsingTable.at(cell) < 0 || state_dest < 0)) {
+            ParsingTable.at(cell) = CONST_ACC; // ACC wins over reduce.
             return;
         }
         throw std::runtime_error(
           std::string("warning: conflict between ACC and an action: ") +
-          std::to_string(ParsingTable[cell]) + ", " +
+          std::to_string(ParsingTable.at(cell)) + ", " +
           std::to_string(state_dest));
     }
 
     // printf("conflict (state %d, lookahead %s): %d v.s. %d\n",
-    //        row, lookahead->symbol, ParsingTable[cell], state_dest);
+    //        row, lookahead->symbol, ParsingTable.at(cell),
+    //        state_dest);
 
     // reduce/reduce conflict, use the rule appears first.
     // i.e., the ruleID is smaller, or when negated, is bigger.
-    if (ParsingTable[cell] < 0 && state_dest < 0) {
+    if (ParsingTable.at(cell) < 0 && state_dest < 0) {
         // printf("r/r conflict: [%d, %s] - %d v.s. %d\n",
-        //        row, lookahead->symbol, ParsingTable[cell], state_dest);
-        Conflict* c =
-          add_to_conflict_array(row, lookahead, ParsingTable[cell], state_dest);
+        //        row, lookahead->symbol, ParsingTable.at(cell),
+        //        state_dest);
+        std::shared_ptr<Conflict> c = add_to_conflict_array(
+          row, lookahead, ParsingTable.at(cell), state_dest);
 
-        if (state_dest > ParsingTable[cell])
-            ParsingTable[cell] = state_dest;
+        if (state_dest > ParsingTable.at(cell))
+            ParsingTable.at(cell) = state_dest;
 
         if (c != nullptr) {
-            c->decision = ParsingTable[cell];
+            c->decision = ParsingTable.at(cell);
         }
 
         // include r/r conflict for inadequate states.
@@ -2651,45 +2564,48 @@ insert_action(SymbolTblNode* lookahead, int row, int state_dest)
     }
 
     // shift/shift conflict.
-    if (ParsingTable[cell] > 0 && state_dest > 0) {
+    if (ParsingTable.at(cell) > 0 && state_dest > 0) {
         if (Options::get().show_ss_conflicts) {
             std::cerr << "warning: shift/shift conflict: " << state_dest
-                      << " v.s. " << ParsingTable[cell] << " @ (" << row << ", "
-                      << lookahead->symbol << ")" << std::endl;
+                      << " v.s. " << ParsingTable.at(cell) << " @ (" << row
+                      << ", " << lookahead->symbol << ")" << std::endl;
         }
         // exit(1);
-        // ParsingTable[cell] = state_dest; // change causes infinite loop.
+        // ParsingTable.at(cell) = state_dest; // change causes
+        // infinite loop.
         ss_count++;
         return;
     }
 
-    if (ParsingTable[cell] < 0) {
-        reduce = ParsingTable[cell];
+    if (ParsingTable.at(cell) < 0) {
+        reduce = ParsingTable.at(cell);
         shift = state_dest;
     } else {
         reduce = state_dest;
-        shift = ParsingTable[cell];
+        shift = ParsingTable.at(cell);
     }
 
     tp_s = lookahead->TP;
-    if (grammar.rules[(-1) * reduce]->lastTerminal != nullptr)
-        tp_r = grammar.rules[(-1) * reduce]->lastTerminal->TP;
+    if (grammar.rules.at((-1) * reduce)->lastTerminal != nullptr)
+        tp_r = grammar.rules.at((-1) * reduce)->lastTerminal->TP;
 
     if (tp_s == nullptr || tp_r == nullptr || tp_s->precedence == 0 ||
         tp_r->precedence == 0) {
         // printf("s/r conflict: [%d, %s] - %d v.s. %d\n",
-        //        row, lookahead->symbol, ParsingTable[cell], state_dest);
-        Conflict* c =
-          add_to_conflict_array(row, lookahead, ParsingTable[cell], state_dest);
+        //        row, lookahead->symbol, ParsingTable.at(cell),
+        //        state_dest);
+        std::shared_ptr<Conflict> c = add_to_conflict_array(
+          row, lookahead, ParsingTable.at(cell), state_dest);
 
-        ParsingTable[cell] = shift; // use shift over reduce by default.
-        // printf("default using %d\n", ParsingTable[cell]);
+        ParsingTable.at(cell) = shift; // use shift over reduce by default.
+        // printf("default using %d\n", ParsingTable.at(cell));
 
         if (c != nullptr) {
-            c->decision = ParsingTable[cell];
+            c->decision = ParsingTable.at(cell);
         }
 
-        // include s/r conflicts not handled by precedence/associativity.
+        // include s/r conflicts not handled by
+        // precedence/associativity.
         if (options.use_lalr) {
             add_state_no_array(states_inadequate, row);
         }
@@ -2700,18 +2616,20 @@ insert_action(SymbolTblNode* lookahead, int row, int state_dest)
     if (tp_r->precedence > tp_s->precedence ||
         (tp_r->precedence == tp_s->precedence &&
          tp_r->assoc == associativity::LEFT)) {
-        ParsingTable[cell] = reduce;
-        // printf("resolved by using %d\n", ParsingTable[cell]);
+        ParsingTable.at(cell) = reduce;
+        // printf("resolved by using %d\n",
+        // ParsingTable.at(cell));
         return;
     }
 
-    // include s/r conflicts not handled by precedence/associativity.
+    // include s/r conflicts not handled by
+    // precedence/associativity.
     if (options.use_lalr) {
         add_state_no_array(states_inadequate, row);
     }
 
-    ParsingTable[cell] = shift;
-    // printf("resolved by using %d\n", ParsingTable[cell]);
+    ParsingTable.at(cell) = shift;
+    // printf("resolved by using %d\n", ParsingTable.at(cell));
 }
 
 auto
@@ -2755,8 +2673,8 @@ print_parsing_table()
     for (int row = 0; row < row_size; row++) {
         yyprintf("%d\t", row);
         for (int col = 0; col < ParsingTblCols; col++) {
-            const SymbolTblNode* n = ParsingTblColHdr[col];
-            if (is_goal_symbol(n) == false) {
+            const SymbolTblNode* n = ParsingTblColHdr.at(col);
+            if (!is_goal_symbol(n)) {
                 char action = 0;
                 int state = 0;
                 get_action(n->type, col, row, &action, &state);
@@ -2782,18 +2700,17 @@ init_start_state()
 {
     int is_compatible = 0;
     State* state0 = create_state();
-    state0->config_count = 1;
-    state0->core_config_count = 1;
     state0->state_no = 0;
 
     // ruleID = 0, marker = 0, isCoreConfig = 1.
-    state0->config[0] = create_config(0, 0, 1);
+    state0->config.push_back(create_config(0, 0, 1));
+    state0->core_config_count = 1;
 
     state0->config[0]->owner = state0;
     state0->config[0]->context->context_count = 1;
     hash_tbl_insert(STR_END);
     state0->config[0]->context->nContext =
-      create_symbol_node(hash_tbl_find(STR_END));
+      SymbolNode::create(hash_tbl_find(STR_END));
 
     // writeState(state0);
 
@@ -2809,97 +2726,99 @@ init_start_state()
  * actions are a single reduction. Such states are called
  * final states.
  *
- * Use final state default reduction in the hyaccpar parse engine.
- * This significantly decreases the size of the generated parser
- * and overcomes the problem of always need to get the new lookahead
- * token to proceed parsing. Array final_state_list is
- * used in gen_compiler.c, and function writeParsingTblRow() of y.c.
+ * Use final state default reduction in the hyaccpar parse
+ * engine. This significantly decreases the size of the
+ * generated parser and overcomes the problem of always need to
+ * get the new lookahead token to proceed parsing. Array
+ * final_state_list is used in gen_compiler.c, and function
+ * writeParsingTblRow() of y.c.
  */
 void
 get_final_state_list()
 {
     SymbolTblNode* n = nullptr;
 
-    final_state_list = new int[ParsingTblRows];
+    final_state_list.clear();
+    final_state_list.reserve(ParsingTblRows);
     for (size_t i = 0; i < ParsingTblRows; i++) {
-        final_state_list[i] = 0;
+        final_state_list.push_back(0);
     }
 
-#if USE_REM_FINAL_STATE
+    if constexpr (USE_REM_FINAL_STATE) {
+        if (Options::get().use_remove_unit_production) {
 
-    if (USE_REMOVE_UNIT_PRODUCTION) {
-
-        for (int i = 0; i < ParsingTblRows; i++) {
-            if (is_reachable_state(i) == false)
-                continue;
-
-            int row_start = i * ParsingTblCols;
-            int action = 0, new_action = 0;
-            int j = 0;
-            for (; j < ParsingTblCols; j++) {
-                n = ParsingTblColHdr[j];
-
-                if (is_goal_symbol(n) || is_parent_symbol(n))
+            for (int i = 0; i < ParsingTblRows; i++) {
+                if (!is_reachable_state(i))
                     continue;
 
-                new_action = ParsingTable[row_start + j];
-                if (new_action > 0 || new_action == CONST_ACC)
-                    break;
-                if (new_action == 0)
-                    continue;
-                if (action == 0)
-                    action = new_action;
-                if (action != new_action)
-                    break;
+                int row_start = i * ParsingTblCols;
+                int action = 0, new_action = 0;
+                int j = 0;
+                for (; j < ParsingTblCols; j++) {
+                    n = ParsingTblColHdr.at(j);
+
+                    if (is_goal_symbol(n) || is_parent_symbol(n))
+                        continue;
+
+                    new_action = ParsingTable.at(row_start + j);
+                    if (new_action > 0 || new_action == CONST_ACC)
+                        break;
+                    if (new_action == 0)
+                        continue;
+                    if (action == 0)
+                        action = new_action;
+                    if (action != new_action)
+                        break;
+                }
+                if (j == ParsingTblCols)
+                    final_state_list.at(i) = action;
             }
-            if (j == ParsingTblCols)
-                final_state_list[i] = action;
-        }
 
-    } else {
-        for (int i = 0; i < ParsingTblRows; i++) {
-            int row_start = i * ParsingTblCols;
-            int action = 0, new_action = 0;
-            int j = 0;
-            for (; j < ParsingTblCols; j++) {
-                new_action = ParsingTable[row_start + j];
-                if (new_action > 0 || new_action == CONST_ACC)
-                    break;
-                if (new_action == 0)
-                    continue;
-                if (action == 0)
-                    action = new_action;
-                if (action != new_action)
-                    break;
+        } else {
+            for (int i = 0; i < ParsingTblRows; i++) {
+                int row_start = i * ParsingTblCols;
+                int action = 0, new_action = 0;
+                int j = 0;
+                for (; j < ParsingTblCols; j++) {
+                    new_action = ParsingTable.at(row_start + j);
+                    if (new_action > 0 || new_action == CONST_ACC)
+                        break;
+                    if (new_action == 0)
+                        continue;
+                    if (action == 0)
+                        action = new_action;
+                    if (action != new_action)
+                        break;
+                }
+                if (j == ParsingTblCols)
+                    final_state_list.at(i) = action;
             }
-            if (j == ParsingTblCols)
-                final_state_list[i] = action;
         }
     }
-
-#endif
 }
 
 void
 get_avg_config_count()
 {
-    int i = 0, sum = 0;
+    constexpr size_t LINE_LENGTH = 20;
+    size_t i = 0, sum = 0;
     const State* a = states_new->states_head;
-    int max = a->config_count;
-    int min = a->config_count;
+    size_t max = a->config.size();
+    size_t min = a->config.size();
     yyprintf("\n--No. of configurations for each state--\n");
     for (; a != nullptr; a = a->next) {
-        if ((++i) % 20 == 1)
+        if ((++i) % LINE_LENGTH == 1)
             yyprintf("\n%d: ", i);
-        yyprintf("%d ", a->config_count);
-        sum += a->config_count;
-        if (min > a->config_count)
-            min = a->config_count;
-        if (max < a->config_count)
-            max = a->config_count;
+        yyprintf("%d ", a->config.size());
+        sum += a->config.size();
+        if (min > a->config.size())
+            min = a->config.size();
+        if (max < a->config.size())
+            max = a->config.size();
     }
     yyprintf("\n");
-    yyprintf("Average configurations per state: %.2f (min: %d, max: %d)\n",
+    yyprintf("Average configurations per state: %.2f (min: %d, "
+             "max: %d)\n",
              ((double)sum / states_new->state_count),
              min,
              max);
@@ -2909,30 +2828,34 @@ void
 show_state_config_info()
 {
 
-#if USE_CONFIG_QUEUE_FOR_GET_CLOSURE
-    queue_info(config_queue);
-#else
-    yyprintf("%d states in total.\n", xx);
-    yyprintf("before combine: total cfg: %d, max cfg: %d, cfg/state: %.2f\n",
-             yy,
-             zz,
-             ((double)yy) / xx); // before combineCompatibleConfig.
-    yyprintf("after combine: total cfg: %d, max cfg: %d, cfg/state: %.2f\n",
-             yyy,
-             zzz,
-             ((double)yyy) / xx);
-#endif
+    if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
+        queue_info(config_queue);
+    } else {
+        yyprintf("%d states in total.\n", xx);
+        yyprintf("before combine: total cfg: %d, max cfg: %d, "
+                 "cfg/state: %.2f\n",
+                 yy,
+                 zz,
+                 ((double)yy) / xx); // before combineCompatibleConfig.
+        yyprintf("after combine: total cfg: %d, max cfg: %d, "
+                 "cfg/state: %.2f\n",
+                 yyy,
+                 zzz,
+                 ((double)yyy) / xx);
+    }
 
     get_avg_config_count();
     state_hash_tbl_dump();
 }
 
 /*
- * print size of different objects. For development use only.
+ * print size of different objects. For development use
+ * only.
  */
 void
 print_size()
 {
+    constexpr size_t PARSING_TBL_COL_HDR_ELEM_SIZE = sizeof(SymbolTblNode*);
     std::cout << "size of Grammar: " << sizeof(Grammar) << std::endl
               << "size of StateCollection: " << sizeof(StateCollection)
               << std::endl
@@ -2941,7 +2864,8 @@ print_size()
               << "size of Context: " << sizeof(Context) << std::endl
               << "size of Production: " << sizeof(Production) << std::endl
               << "size of Configuration: " << sizeof(Configuration) << std::endl
-              << "size of ParsingTblColHdr: " << sizeof(ParsingTblColHdr)
+              << "size of ParsingTblColHdr: "
+              << ParsingTblColHdr.size() * PARSING_TBL_COL_HDR_ELEM_SIZE
               << std::endl;
 }
 
@@ -2952,7 +2876,8 @@ show_conflict_count()
     if (rs_count == 0 && rr_count == 0 && ss_count == 0)
         return;
 
-    // no r/r conflicts, and s/r conflicts number is expected.
+    // no r/r conflicts, and s/r conflicts number is
+    // expected.
     if (rs_count == expected_sr_conflict && rr_count == 0 && ss_count == 0)
         return;
 
@@ -2971,12 +2896,13 @@ show_conflict_count()
                   << std::endl;
 }
 
-/* Show statistics of the grammar and it's parsing machine. */
+/* Show statistics of the grammar and it's parsing machine.
+ */
 void
 show_stat()
 {
     auto& options = Options::get();
-    if (options.use_verbose == false)
+    if (!options.use_verbose)
         return;
 
     write_state_transition_list();
@@ -2987,14 +2913,16 @@ show_stat()
 
     yyprintf("\n");
     // yyprintf("--statistics--\n");
-    // yyprintf("[Note: A first rule '$accept -> start_symbol' is added]\n\n");
-    // yyprintf("Symbols count: %d\n", n_symbol);
+    // yyprintf("[Note: A first rule '$accept ->
+    // start_symbol' is added]\n\n"); yyprintf("Symbols
+    // count: %d\n", n_symbol);
     yyprintf("%d terminals, %d nonterminals\n",
              grammar.terminal_count,
              grammar.non_terminal_count);
     yyprintf("%d grammar rules\n", n_rule);
     if (options.use_remove_unit_production) {
-        yyprintf("%d grammar rules after remove unit productions\n",
+        yyprintf("%d grammar rules after remove unit "
+                 "productions\n",
                  n_rule_opt);
     }
     if (options.use_combine_compatible_states) {
@@ -3008,7 +2936,8 @@ show_stat()
             yyprintf("%d states after remove unit productions\n",
                      n_state_opt12);
             if (options.use_remove_repeated_states)
-                yyprintf("%d states after remove repeated states\n",
+                yyprintf("%d states after remove repeated "
+                         "states\n",
                          n_state_opt123);
         }
     } else {
@@ -3016,7 +2945,8 @@ show_stat()
     }
 
     // conflicts summary.
-    yyprintf("%d shift/reduce conflict%s, %d reduce/reduce conflict%s\n",
+    yyprintf("%d shift/reduce conflict%s, %d reduce/reduce "
+             "conflict%s\n",
              rs_count,
              (rs_count > 1) ? "s" : "",
              rr_count,
@@ -3047,16 +2977,16 @@ write_parsing_tbl_row_lalr(int state)
     auto& options = Options::get();
 
     // write shift/acc actions.
-    // note if a state has acc action, then that's the only action.
-    // so don't have to put acc in a separate loop.
+    // note if a state has acc action, then that's the only
+    // action. so don't have to put acc in a separate loop.
     for (int col = 0; col < ParsingTblCols; col++) {
-        int v = ParsingTable[row_start + col];
-        const SymbolTblNode* s = ParsingTblColHdr[col];
+        int v = ParsingTable.at(row_start + col);
+        const SymbolTblNode* s = ParsingTblColHdr.at(col);
         if (v > 0) {
             if (options.use_remove_unit_production)
                 v = get_actual_state(v);
 
-            if (ParsingTblColHdr[col]->type == symbol_type::TERMINAL) {
+            if (ParsingTblColHdr.at(col)->type == symbol_type::TERMINAL) {
                 yyprintf("  %s [%d] shift %d\n", s->symbol, s->value, v);
             }
         } else if (v == CONST_ACC) {
@@ -3068,7 +2998,8 @@ write_parsing_tbl_row_lalr(int state)
             else if (reduction != v) {
                 only_one_reduction = false;
             }
-            // else, is the same as first reduction. do nothing.
+            // else, is the same as first reduction. do
+            // nothing.
         }
     }
 
@@ -3081,8 +3012,8 @@ write_parsing_tbl_row_lalr(int state)
         } // no reduction.
     } else {
         for (int col = 0; col < ParsingTblCols; col++) {
-            int v = ParsingTable[row_start + col];
-            const SymbolTblNode* s = ParsingTblColHdr[col];
+            int v = ParsingTable.at(row_start + col);
+            const SymbolTblNode* s = ParsingTblColHdr.at(col);
             if (v < 0 && v != CONST_ACC) {
                 yyprintf(
                   "  %s [%d] reduce (%d)\n", s->symbol, s->value, (-1) * v);
@@ -3093,13 +3024,13 @@ write_parsing_tbl_row_lalr(int state)
     // write goto action.
     yyprintf("\n");
     for (int col = 0; col < ParsingTblCols; col++) {
-        int v = ParsingTable[row_start + col];
-        const SymbolTblNode* s = ParsingTblColHdr[col];
+        int v = ParsingTable.at(row_start + col);
+        const SymbolTblNode* s = ParsingTblColHdr.at(col);
         if (v > 0) {
             if (options.use_remove_unit_production)
                 v = get_actual_state(v);
 
-            if (ParsingTblColHdr[col]->type == symbol_type::NONTERMINAL) {
+            if (ParsingTblColHdr.at(col)->type == symbol_type::NONTERMINAL) {
                 yyprintf("  %s [%d] goto %d\n", s->symbol, s->value, v);
             }
         }
@@ -3114,8 +3045,8 @@ write_parsing_tbl_row(int state)
 
     yyprintf("\n");
 
-    if (final_state_list[state] < 0) {
-        yyprintf("  . reduce (%d)\n", (-1) * final_state_list[state]);
+    if (final_state_list.at(state) < 0) {
+        yyprintf("  . reduce (%d)\n", (-1) * final_state_list.at(state));
         return;
     }
 
@@ -3125,13 +3056,13 @@ write_parsing_tbl_row(int state)
     }
 
     for (int col = 0; col < ParsingTblCols; col++) {
-        int v = ParsingTable[row_start + col];
-        const SymbolTblNode* s = ParsingTblColHdr[col];
+        int v = ParsingTable.at(row_start + col);
+        const SymbolTblNode* s = ParsingTblColHdr.at(col);
         if (v > 0) {
             if (options.use_remove_unit_production)
                 v = get_actual_state(v);
 
-            if (ParsingTblColHdr[col]->type == symbol_type::NONTERMINAL) {
+            if (ParsingTblColHdr.at(col)->type == symbol_type::NONTERMINAL) {
                 yyprintf("  %s [%d] goto %d\n", s->symbol, s->value, v);
             } else {
                 yyprintf("  %s [%d] shift %d\n", s->symbol, s->value, v);
@@ -3145,7 +3076,7 @@ write_parsing_tbl_row(int state)
 }
 
 void
-write_state_info(State& s)
+write_state_info(const State& s)
 {
     const auto& options = Options::get();
     write_state_conflict_list(s.state_no);
@@ -3155,14 +3086,15 @@ write_state_info(State& s)
     }
 
     yyprintf("state %d\n\n", s.state_no);
-    // yyprintf("  [config count : %d, core_config count : %d]\n\n",
+    // yyprintf("  [config count : %d, core_config count :
+    // %d]\n\n",
     yyprintf("  [config: %d, core config: %d]\n\n",
-             s.config_count,
+             s.config.size(),
              s.core_config_count);
 
-    for (int i = 0; i < s.config_count; i++) {
-        yyprintf("  (%d) ", s.config[i]->ruleID);
-        write_configuration(*s.config[i]);
+    for (const auto& i : s.config) {
+        yyprintf("  (%d) ", i->ruleID);
+        write_configuration(*i);
     }
 
     // writeSuccessorList(s);
@@ -3179,7 +3111,8 @@ write_state_info(State& s)
 void
 write_state_collection_info(StateCollection* c)
 {
-    // yyprintf("\n==State List: (count=%d)==\n\n", c->state_count);
+    // yyprintf("\n==State List: (count=%d)==\n\n",
+    // c->state_count);
     yyprintf("\n\n");
     State* s = c->states_head;
     while (s != nullptr) {
@@ -3195,7 +3128,8 @@ write_state_collection_info(StateCollection* c)
 void
 write_state_info_from_parsing_tbl()
 {
-    // yyprintf("\n==States (count = %d)==\n", actual_state_no_ct / 2);
+    // yyprintf("\n==States (count = %d)==\n",
+    // actual_state_no_ct / 2);
     for (int row = 0; row < ParsingTblRows; row++) {
         if (is_reachable_state(row)) {
             yyprintf("\n\nstate %d\n", get_actual_state(row));
@@ -3208,7 +3142,8 @@ write_state_info_from_parsing_tbl()
 }
 
 /*
- * A list like the list in AT&T yacc and Bison's y.output file.
+ * A list like the list in AT&T yacc and Bison's y.output
+ * file.
  */
 void
 write_state_transition_list()
@@ -3243,7 +3178,7 @@ lr1(int argc, char** argv) -> int
                                      y_output);
         }
         yyprintf("/* y.output. Generated by HYACC. */\n");
-        yyprintf("/* Input file: %s */\n", hyacc_filename);
+        yyprintf("/* Input file: %s */\n", hyacc_filename.c_str());
     }
 
     get_yacc_grammar(hyacc_filename);
@@ -3285,11 +3220,13 @@ lr1(int argc, char** argv) -> int
                 print_final_parsing_table();
             }
         }
-        get_actual_state_no(); /* update actual_state_no[]. */
+        get_actual_state_no(); /* update actual_state_no[].
+                                */
         if (options.show_parsing_tbl)
             print_condensed_final_parsing_table();
         if (options.show_grammar) {
-            yyprintf("\n--Grammar after removing unit productions--\n");
+            yyprintf("\n--Grammar after removing unit "
+                     "productions--\n");
             grammar.write(false);
         }
         if (options.use_graphviz) {
@@ -3324,7 +3261,7 @@ lr0(int argc, char** argv) -> int
                                      y_output);
         }
         yyprintf("/* y.output. Generated by HYACC. */\n");
-        yyprintf("/* Input file: %s */\n", hyacc_filename);
+        yyprintf("/* Input file: %s */\n", hyacc_filename.c_str());
     }
 
     get_yacc_grammar(hyacc_filename);
@@ -3371,11 +3308,13 @@ lr0(int argc, char** argv) -> int
                 print_final_parsing_table();
             }
         }
-        get_actual_state_no(); /* update actual_state_no[]. */
+        get_actual_state_no(); /* update actual_state_no[].
+                                */
         if (options.show_parsing_tbl)
             print_condensed_final_parsing_table();
         if (options.show_grammar) {
-            yyprintf("\n--Grammar after removing unit productions--\n");
+            yyprintf("\n--Grammar after removing unit "
+                     "productions--\n");
             grammar.write(false);
         }
         if (options.use_graphviz) {
@@ -3409,14 +3348,20 @@ main(int argc, char** argv) -> int
 {
     try {
         auto& options = Options::get();
+        std::vector<std::string> args;
+        for (size_t i = 0; i < argc; i++) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            args.emplace_back(argv[i]);
+        }
         int infile_index = 0;
         options.debug_expand_array = false;
 
         // test_x();
 
-        infile_index = get_options(argc, argv, options);
-        hyacc_filename = argv[infile_index];
-        // printf("file to open: %s\n", hyacc_filename);
+        infile_index = get_options(args, options);
+        hyacc_filename = args[infile_index];
+        // std::cout << "file to open: " << hyacc_filename
+        // << std::endl;
 
         if (options.use_lr0) {
             lr0(argc, argv);
@@ -3425,9 +3370,8 @@ main(int argc, char** argv) -> int
         }
 
         if (false) { // for reading memory.
-            char keyval = 0;
             std::cout << "press ENTER to end... ";
-            scanf("%c", &keyval); // stop here for reading memory.
+            int keyval = std::cin.get(); // stop here for reading memory.
         }
     } catch (std::runtime_error error) {
         std::cerr << error.what() << std::endl;

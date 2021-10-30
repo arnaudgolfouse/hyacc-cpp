@@ -18,6 +18,8 @@
  */
 
 #include "y.hpp"
+#include <memory>
+#include <vector>
 
 #ifndef _MRT_H_
 #define _MRT_H_
@@ -33,18 +35,41 @@
  * @Last modified: March 9, 2007
  */
 
+using MRLeaves = std::vector<std::shared_ptr<struct MRTreeNode>>;
+
 /*
  * MRTreeNode.parent is a dynamically allocated array.
  */
 struct MRTreeNode
 {
+  public:
     SymbolNode* symbol;
-    MRTreeNode** parent; // dynamic array.
-    int parent_count;
-    int parent_max_count; // expand parent array if reached.
+    std::vector<std::shared_ptr<MRTreeNode>> parent;
+
+    static auto create(SymbolTblNode* symbol) -> std::shared_ptr<MRTreeNode>;
+    // Prints out all node sequences starting from
+    // the given node to its ancestors.
+    void write_leaf_branch(SymbolList branch, SymbolNode* branch_tail);
+    //  Insert a child node of treeNode.
+    // The child node contains the given symbol.
+    static void insert_child(std::shared_ptr<MRTreeNode> self,
+                             MRLeaves& mr_leaves,
+                             SymbolTblNode* symbol);
+    void insert_parent(SymbolTblNode* symbol);
+    // Returns the index in array MRLeaves[] if given node
+    // is a leaf, otherwise returns -1.
+    auto is_mr_leaf(const MRLeaves& mr_leaves) noexcept -> int const;
+    // Both parent and child nodes are in the Multi-rooted
+    // forest already, just add the link between them.
+    static void insert_parent_child_relation(std::shared_ptr<MRTreeNode> parent,
+                                             MRTreeNode* child,
+                                             MRLeaves& mr_leaves);
+    static auto find_node_in_tree(const std::shared_ptr<MRTreeNode>& node,
+                                  const SymbolTblNode* symbol)
+      -> std::shared_ptr<MRTreeNode>;
 };
 
-constexpr size_t MRTreeNode_INIT_PARENT_COUNT = 8;
+constexpr size_t MR_TREE_NODE_INIT_PARENT_COUNT = 8;
 
 /*
  * The Multi-rooted forest grows upon this array.
@@ -52,10 +77,8 @@ constexpr size_t MRTreeNode_INIT_PARENT_COUNT = 8;
  * The leaves of the each tree are in this array,
  * the leaves then link to the internal nodes of the tree.
  */
-extern MRTreeNode** MRLeaves;
-extern int MRLeaves_count;
-extern int MRLeaves_max_count;
-constexpr size_t MRLeaves_INIT_MAX_COUNT = 8;
+// extern std::vector<std::shared_ptr<MRTreeNode>> MRLeaves;
+constexpr size_t MR_LEAVES_INIT_MAX_COUNT = 8;
 
 /*
  * Stores the parent symbols in all multirooted trees.
@@ -66,16 +89,11 @@ constexpr size_t MRLeaves_INIT_MAX_COUNT = 8;
  * each time.
  */
 
-constexpr size_t MRParents_INIT_MAX_COUNT = 8;
+constexpr size_t MR_PARENTS_INIT_MAX_COUNT = 8;
 
-struct MRParents
-{
-    SymbolNode** parents; // dynamic array.
-    int count;
-    int max_count;
-};
+using MRParents = std::vector<SymbolNode*>;
 
-extern MRParents* all_parents;
+extern std::shared_ptr<MRParents> all_parents;
 
 /*
  * Used in step 5.
@@ -89,9 +107,9 @@ extern MRParents* all_parents;
  * The correspondence relationship is:
  * all_parents[index] => MRLeaves[leafIndexForParent[index]]
  *
- * Has the same size as all_parents->max_count.
+ * Has the same size as all_parents->capacity().
  */
-extern int* leafIndexForParent;
+extern std::vector<int> leaf_index_for_parent;
 
 /*
  * leafIndexForParent[] array is build in function
@@ -105,19 +123,19 @@ extern int* leafIndexForParent;
  *
  * Used in functions getAllMRParents() and getNode().
  */
-extern bool leafIndexForParent_Done;
+extern bool leaf_index_for_parent_done;
 
 /* function declarations */
 
 extern auto
-create_mr_parents() -> MRParents*;
+create_mr_parents() -> std::shared_ptr<MRParents>;
 extern auto
-get_index_in_mr_parents(const SymbolTblNode* s, MRParents* p) -> int;
+get_index_in_mr_parents(const SymbolTblNode* s, const MRParents& p) -> int;
 extern void
-get_parents_for_mr_leaf(int leaf_index, MRParents* parents);
-extern void
-destroy_mr_parents(MRParents* p);
-extern void
-build_multirooted_tree();
+get_parents_for_mr_leaf(const MRLeaves& mr_leaves,
+                        size_t leaf_index,
+                        MRParents* parents);
+extern auto
+build_multirooted_tree() -> std::vector<std::shared_ptr<MRTreeNode>>;
 
 #endif

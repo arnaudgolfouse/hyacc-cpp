@@ -30,22 +30,24 @@
 
 #include "mrt.hpp"
 #include "y.hpp"
+#include <cstddef>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
+#include <vector>
 
-MRTreeNode** MRLeaves;
-int MRLeaves_count;
-int MRLeaves_max_count;
-MRParents* all_parents;
-int* leafIndexForParent;
-bool leafIndexForParent_Done;
+using MRLeaves = std::vector<std::shared_ptr<MRTreeNode>>;
+
+std::shared_ptr<MRParents> all_parents;
+std::vector<int> leaf_index_for_parent;
+bool leaf_index_for_parent_done;
 
 /* Function declarations. */
 
-void
-get_all_mr_parents();
-void
-write_all_mr_parents();
+static void
+get_all_mr_parents(const MRLeaves& mr_leaves);
+static void
+write_all_mr_parents(const MRLeaves& mr_leaves);
 
 ////////////////////////////////////////////
 // Functions for multi-rooted tree. START.
@@ -54,116 +56,50 @@ write_all_mr_parents();
 void
 init_array_leaf_index_for_parent()
 {
-    leafIndexForParent = new int[MRParents_INIT_MAX_COUNT];
-    if (leafIndexForParent == nullptr)
-        YYERR_EXIT("initArray_leafIndexForparent error: out of memory\n");
+    leaf_index_for_parent.clear();
+    leaf_index_for_parent.reserve(MR_PARENTS_INIT_MAX_COUNT);
 }
 
 void
 expand_array_leaf_index_for_parent()
 {
-    delete[] leafIndexForParent;
-    leafIndexForParent = new int[all_parents->max_count];
-    if (leafIndexForParent == nullptr)
-        YYERR_EXIT("expandArray_leafIndexForparent error: out of memory\n");
+    leaf_index_for_parent.clear();
+    leaf_index_for_parent.reserve(all_parents->capacity());
 
     if (Options::get().debug_expand_array)
-        std::cout << "leafIndexForParent size expanded to "
-                  << all_parents->max_count << std::endl;
+        std::cout << "leaf_index_for_parent size expanded to "
+                  << all_parents->capacity() << std::endl;
 }
 
 void
 destroy_leaf_index_for_parent()
 {
-    delete[] leafIndexForParent;
+    leaf_index_for_parent.clear();
 }
 
 auto
-create_mr_parents() -> MRParents*
+create_mr_parents() -> std::shared_ptr<MRParents>
 {
-    MRParents* p = (MRParents*)malloc(sizeof(MRParents));
-    if (p == nullptr)
-        YYERR_EXIT("createMRParents error: out of memory\n");
-
-    p->max_count = MRParents_INIT_MAX_COUNT;
-    p->parents = (SymbolNode**)malloc(sizeof(SymbolNode*) * p->max_count);
-    if (p->parents == nullptr)
-        YYERR_EXIT("createMRParents error: out of memory\n");
-    p->count = 0;
-
+    auto p = std::make_shared<MRParents>();
+    p->reserve(MR_PARENTS_INIT_MAX_COUNT);
     return p;
 }
 
-void
-check_array_size_mr_parents(MRParents* p)
+static void
+check_array_size_mr_parents(const MRParents* p)
 {
-    if (p->count < p->max_count)
-        return;
-
-    p->max_count *= 2;
-    delete[] p->parents;
-    p->parents = new SymbolNode*[p->max_count];
-
-    if (p->parents == nullptr)
-        YYERR_EXIT("checkArraySize_MRParents error: out of meory\n");
-
-    if (Options::get().debug_expand_array)
-        std::cout << "MRParents size expanded to " << p->max_count << std::endl;
-
     // if all_parents array is expanded, expand leafIndexForParent too.
-    if (p == all_parents)
+    if (p == all_parents.get())
         expand_array_leaf_index_for_parent();
-}
-
-void
-destroy_mr_parents(MRParents* p)
-{
-    if (p == nullptr)
-        return;
-    for (int i = 0; i < p->count; i++)
-        delete p->parents[i];
-    delete[] p->parents;
-    delete p;
-}
-
-void
-create_mr_leaves_array()
-{
-    MRLeaves_max_count = MRLeaves_INIT_MAX_COUNT;
-    MRLeaves = new MRTreeNode*[MRLeaves_max_count];
-    if (MRLeaves == nullptr)
-        YYERR_EXIT("createMRLeavesArray error: out of memory\n");
-}
-
-void
-check_mr_leaves_array_size()
-{
-    if (MRLeaves_count < MRLeaves_max_count)
-        return;
-
-    MRLeaves_max_count *= 2;
-    delete[] MRLeaves;
-    MRLeaves = new MRTreeNode*[MRLeaves_max_count];
-    if (MRLeaves == nullptr)
-        YYERR_EXIT("checkMRLeavesArraySize error: out of memory\n");
-
-    if (Options::get().debug_expand_array)
-        yyprintf("MRLeaves size expanded to %d\n", MRLeaves_max_count);
-}
-
-void
-destroy_mr_leaves_array()
-{
-    delete[] MRLeaves;
 }
 
 void
 write_leaf_index_for_parent()
 {
-    for (int i = 0; i < all_parents->count; i++) {
+    for (int i = 0; i < all_parents->size(); i++) {
         if (i > 0)
             yyprintf(", ");
-        yyprintf("%d", leafIndexForParent[i]);
+        yyprintf("%d", leaf_index_for_parent[i]);
     }
     yyprintf("\n");
 }
@@ -173,11 +109,13 @@ write_leaf_index_for_parent()
  * Returns the array index if found, -1 otherwise.
  */
 auto
-get_index_in_mr_parents(const SymbolTblNode* s, MRParents* p) -> int
+get_index_in_mr_parents(const SymbolTblNode* s, const MRParents& p) -> int
 {
-    for (int i = 0; i < p->count; i++) {
-        if (s == p->parents[i]->snode)
+    int i = 0;
+    for (const auto& parent : p) {
+        if (s == parent->snode)
             return i;
+        i++;
     }
     return -1;
 }
@@ -186,7 +124,7 @@ get_index_in_mr_parents(const SymbolTblNode* s, MRParents* p) -> int
  * Determines if string s is in an array a of length count.
  */
 auto
-is_in_mr_parents(const SymbolTblNode* s, MRParents* p) -> bool
+is_in_mr_parents(const SymbolTblNode* s, const MRParents& p) -> bool
 {
     return (get_index_in_mr_parents(s, p) >= 0);
 }
@@ -194,11 +132,13 @@ is_in_mr_parents(const SymbolTblNode* s, MRParents* p) -> bool
 auto
 is_parent_symbol(const SymbolTblNode* s) -> bool
 {
-    return is_in_mr_parents(s, all_parents);
+    return is_in_mr_parents(s, *all_parents);
 }
 
 auto
-find_node_in_tree(MRTreeNode* node, SymbolTblNode* symbol) -> MRTreeNode*
+MRTreeNode::find_node_in_tree(const std::shared_ptr<MRTreeNode>& node,
+                              const SymbolTblNode* symbol)
+  -> std::shared_ptr<MRTreeNode>
 {
     if (node == nullptr) {
         // printf("findNodeInTree warning: node is null\n");
@@ -207,8 +147,8 @@ find_node_in_tree(MRTreeNode* node, SymbolTblNode* symbol) -> MRTreeNode*
     if (node->symbol->snode == symbol) {
         return node;
     } // Search parent nodes.
-    for (int i = 0; i < node->parent_count; i++) {
-        MRTreeNode* p_node = find_node_in_tree(node->parent[i], symbol);
+    for (const auto& i : node->parent) {
+        const auto p_node = find_node_in_tree(i, symbol);
         if (p_node != nullptr)
             return p_node;
     }
@@ -216,10 +156,12 @@ find_node_in_tree(MRTreeNode* node, SymbolTblNode* symbol) -> MRTreeNode*
 }
 
 auto
-find_node_in_forest(SymbolTblNode* symbol) -> MRTreeNode*
+find_node_in_forest(const MRLeaves& mr_leaves, SymbolTblNode* symbol)
+  -> std::shared_ptr<MRTreeNode>
 {
-    for (int i = 0; i < MRLeaves_count; i++) {
-        MRTreeNode* node = find_node_in_tree(MRLeaves[i], symbol);
+    for (const auto& mr_leave : mr_leaves) {
+        const std::shared_ptr<MRTreeNode> node =
+          MRTreeNode::find_node_in_tree(mr_leave, symbol);
         if (node != nullptr)
             return node;
     }
@@ -227,30 +169,12 @@ find_node_in_forest(SymbolTblNode* symbol) -> MRTreeNode*
 }
 
 auto
-create_mr_tree_node(SymbolTblNode* symbol) -> MRTreeNode*
+MRTreeNode::create(SymbolTblNode* symbol) -> std::shared_ptr<MRTreeNode>
 {
-    MRTreeNode* node = new MRTreeNode;
-    if (node == nullptr) {
-        throw std::runtime_error("createMRTreeNode error: out of memory");
-    }
-    node->parent = new MRTreeNode*[MRTreeNode_INIT_PARENT_COUNT];
-    if (node->parent == nullptr) {
-        YYERR_EXIT("createMRTreeNode error: out of memory\n");
-    }
-    node->parent_count = 0;
-    node->parent_max_count = MRTreeNode_INIT_PARENT_COUNT;
-    node->symbol = create_symbol_node(symbol);
+    auto node = std::make_shared<MRTreeNode>();
+    node->parent.reserve(MR_TREE_NODE_INIT_PARENT_COUNT);
+    node->symbol = SymbolNode::create(symbol);
     return node;
-}
-
-void
-destroy_mr_tree_node(MRTreeNode* node)
-{
-    if (node == nullptr)
-        return;
-    delete node->symbol;
-    delete[] node->parent;
-    delete node;
 }
 
 /*
@@ -259,57 +183,28 @@ destroy_mr_tree_node(MRTreeNode* node)
  * and leaf node contains symbol child.
  */
 void
-insert_new_tree(SymbolTblNode* parent, SymbolTblNode* child)
+insert_new_tree(MRLeaves& mr_leaves,
+                SymbolTblNode* parent,
+                SymbolTblNode* child)
 {
-    MRTreeNode* leaf = create_mr_tree_node(child);
-    leaf->parent[0] = create_mr_tree_node(parent);
-    leaf->parent_count = 1;
+    std::shared_ptr<MRTreeNode> leaf = MRTreeNode::create(child);
+    leaf->parent.push_back(MRTreeNode::create(parent));
 
-    // Insert node leaf to the MRLeaves array.
-    check_mr_leaves_array_size();
-    MRLeaves[MRLeaves_count] = leaf;
-    MRLeaves_count++;
-}
-
-/*
- * If the parent array of node reaches size limit,
- * expand it.
- */
-void
-check_parent_array_size(MRTreeNode* node)
-{
-    if (node->parent_count < node->parent_max_count)
-        return;
-
-    node->parent_max_count *= 2;
-    delete[] node->parent;
-    node->parent = new MRTreeNode*[node->parent_max_count];
-    if (node->parent == nullptr)
-        YYERR_EXIT("checkParentArraySize: out of memory\n");
-
-    if (Options::get().debug_expand_array)
-        std::cout << "MRTreeNode.parent size expanded to "
-                  << node->parent_max_count << std::endl;
+    // Insert node leaf to the mr_leaves array.
+    mr_leaves.push_back(leaf);
 }
 
 void
-insert_parent(MRTreeNode* node, SymbolTblNode* symbol)
+MRTreeNode::insert_parent(SymbolTblNode* symbol)
 {
-    check_parent_array_size(node);
-    MRTreeNode* parent = create_mr_tree_node(symbol);
-    node->parent[node->parent_count] = parent;
-    node->parent_count++;
+    this->parent.push_back(MRTreeNode::create(symbol));
 }
 
-/*
- * Returns the index in array MRLeaves[] if given node
- * is a leaf, otherwise returns -1.
- */
 auto
-is_mr_leaf(MRTreeNode* node) -> int
+MRTreeNode::is_mr_leaf(const MRLeaves& mr_leaves) noexcept -> int const
 {
-    for (int i = 0; i < MRLeaves_count; i++) {
-        if (node == MRLeaves[i])
+    for (int i = 0; i < mr_leaves.size(); i++) {
+        if (this == mr_leaves[i].get())
             return i;
     }
     return -1;
@@ -328,20 +223,11 @@ write_branch(SymbolList branch)
         yyprintf(", ");
 }
 
-/*
- * Prints out all node sequences starting from
- * the given node to its ancestors.
- */
 void
-write_leaf_branch(MRTreeNode* node, SymbolList branch, SymbolNode* branch_tail)
+MRTreeNode::write_leaf_branch(SymbolList branch, SymbolNode* branch_tail)
 {
-
-    if (node == nullptr) {
-        // printf("writeLeafBranch warning: node is nullptr\n");
-        return;
-    }
-    yyprintf("%s", node->symbol->snode->symbol);
-    if (node->parent_count == 0) {
+    yyprintf("%s", this->symbol->snode->symbol);
+    if (this->parent.empty()) {
         yyprintf("\n");
         return;
     }
@@ -349,115 +235,108 @@ write_leaf_branch(MRTreeNode* node, SymbolList branch, SymbolNode* branch_tail)
 
     if (branch->next == nullptr) {
         branch_tail->next = branch->next =
-          create_symbol_node(node->symbol->snode);
+          SymbolNode::create(this->symbol->snode);
     } else {
-        branch_tail->next->next = create_symbol_node(node->symbol->snode);
+        branch_tail->next->next = SymbolNode::create(this->symbol->snode);
         branch_tail->next = branch_tail->next->next;
     }
 
-    for (int i = 0; i < node->parent_count; i++) {
+    for (int i = 0; i < this->parent.size(); i++) {
         if (i > 0)
             write_branch(branch->next);
-        write_leaf_branch(node->parent[i], branch, branch_tail);
+        this->parent[i]->write_leaf_branch(branch, branch_tail);
     }
 }
 
 void
-write_mr_forest()
+write_mr_forest(const MRLeaves& mr_leaves)
 {
-    SymbolList branch = create_symbol_node(hash_tbl_find(""));
-    SymbolNode* branch_tail = create_symbol_node(hash_tbl_find(""));
+    SymbolList branch = SymbolNode::create(hash_tbl_find(""));
+    SymbolNode* branch_tail = SymbolNode::create(hash_tbl_find(""));
 
-    yyprintf("\n==writeMRForest (MRLeaves_count: %d)==\n", MRLeaves_count);
-    for (int i = 0; i < MRLeaves_count; i++) {
-        write_leaf_branch(MRLeaves[i], branch, branch_tail);
+    yyprintf("\n==writeMRForest (mr_leaves_count: %d)==\n", mr_leaves.size());
+    for (const auto& mr_leave : mr_leaves) {
+        mr_leave->write_leaf_branch(branch, branch_tail);
     }
 
     free_symbol_node_list(branch);
     free_symbol_node(branch_tail);
 }
 
-/*
- * Insert a child node of treeNode.
- * The child node contains the given symbol.
- */
 void
-insert_child(MRTreeNode* tree_node, SymbolTblNode* symbol)
+MRTreeNode::insert_child(const std::shared_ptr<MRTreeNode> self,
+                         MRLeaves& mr_leaves,
+                         SymbolTblNode* symbol)
 {
-    MRTreeNode* child = create_mr_tree_node(symbol);
-    int leaf_index = is_mr_leaf(tree_node);
+    std::shared_ptr<MRTreeNode> child = MRTreeNode::create(symbol);
+    int leaf_index = self->is_mr_leaf(mr_leaves);
 
     if (leaf_index == -1) {
         // treeNode not a leaf, just insert child as a leaf.
-        check_mr_leaves_array_size();
-        MRLeaves[MRLeaves_count] = child;
-        MRLeaves_count++;
+        mr_leaves.push_back(child);
     } else {
         // change the pointer to treeNode to point to child
-        MRLeaves[leaf_index] = child;
+        mr_leaves[leaf_index] = child;
     }
-
-    child->parent[0] = tree_node;
-    child->parent_count = 1;
+    child->parent.push_back(self);
 }
 
-/*
- * Both parent and child nodes are in the Multi-rooted
- * forest already, just add the link between them.
- */
 void
-insert_parent_child_relation(MRTreeNode* parent, MRTreeNode* child)
+MRTreeNode::insert_parent_child_relation(
+  const std::shared_ptr<MRTreeNode> parent,
+  MRTreeNode* child,
+  MRLeaves& mr_leaves)
 {
-    check_parent_array_size(child);
-    child->parent[child->parent_count] = parent;
-    child->parent_count++;
+    child->parent.push_back(parent);
 
     // if parent node is a leaf, remove it from the leaves array.
-    int leaf_index = is_mr_leaf(parent);
+    int leaf_index = parent->is_mr_leaf(mr_leaves);
     if (leaf_index != -1) {
-        for (int i = leaf_index; i < MRLeaves_count - 1; i++) {
-            MRLeaves[i] = MRLeaves[i + 1];
-        }
-        MRLeaves_count--;
+        mr_leaves.erase(mr_leaves.begin() + leaf_index);
     }
 }
 
-void
-build_multirooted_tree()
+auto
+build_multirooted_tree() -> MRLeaves
 {
     // initialization.
     all_parents = create_mr_parents();
     init_array_leaf_index_for_parent();
-    create_mr_leaves_array();
+    MRLeaves mr_leaves;
+    mr_leaves.reserve(MR_LEAVES_INIT_MAX_COUNT);
 
     for (int i = 1; i < grammar.rules.size(); i++) {
-        if (is_unit_production(i) == true) {
-            MRTreeNode* lhs =
-              find_node_in_forest(grammar.rules[i]->nLHS->snode);
-            MRTreeNode* rhs =
-              find_node_in_forest(grammar.rules[i]->nRHS_head->snode);
+        if (is_unit_production(i)) {
+            std::shared_ptr<MRTreeNode> lhs =
+              find_node_in_forest(mr_leaves, grammar.rules[i]->nLHS->snode);
+            std::shared_ptr<MRTreeNode> rhs = find_node_in_forest(
+              mr_leaves, grammar.rules[i]->nRHS_head->snode);
             if (lhs != nullptr && rhs == nullptr) {
                 // insert rhs as child of lhs.
-                insert_child(lhs, grammar.rules[i]->nRHS_head->snode);
+                MRTreeNode::insert_child(
+                  lhs, mr_leaves, grammar.rules[i]->nRHS_head->snode);
             } else if (lhs == nullptr && rhs != nullptr) {
                 // insert lhs as parent of rhs.
-                insert_parent(rhs, grammar.rules[i]->nLHS->snode);
+                rhs->insert_parent(grammar.rules[i]->nLHS->snode);
             } else if (lhs == nullptr && rhs == nullptr) {
                 // insert as new tree.
-                insert_new_tree(grammar.rules[i]->nLHS->snode,
+                insert_new_tree(mr_leaves,
+                                grammar.rules[i]->nLHS->snode,
                                 grammar.rules[i]->nRHS_head->snode);
             } else { // just add this relationship.
-                insert_parent_child_relation(lhs, rhs);
+                MRTreeNode::insert_parent_child_relation(
+                  lhs, rhs.get(), mr_leaves);
             } // end if
         }     // end if
     }         // end for
 
-    get_all_mr_parents();
+    get_all_mr_parents(mr_leaves);
 
     if (Options::get().debug_build_multirooted_tree) {
-        write_mr_forest();
-        write_all_mr_parents();
+        write_mr_forest(mr_leaves);
+        write_all_mr_parents(mr_leaves);
     }
+    return mr_leaves;
 }
 
 /*
@@ -474,22 +353,18 @@ get_node(int leaf_index, MRTreeNode* node, MRParents* parents)
         return;
     }
 
-    if (is_in_mr_parents(node->symbol->snode, parents) == false) {
+    if (is_in_mr_parents(node->symbol->snode, *parents) == false) {
         check_array_size_mr_parents(parents); // expand size if needed.
 
-        if (leafIndexForParent_Done == false) {
-            leafIndexForParent[parents->count] = leaf_index;
+        if (leaf_index_for_parent_done == false) {
+            leaf_index_for_parent[parents->size()] = leaf_index;
         }
 
-        parents->parents[parents->count] =
-          create_symbol_node(node->symbol->snode);
-        parents->count++;
+        parents->push_back(SymbolNode::create(node->symbol->snode));
     }
 
-    if (node->parent_count > 0) {
-        for (int i = 0; i < node->parent_count; i++) {
-            get_node(leaf_index, node->parent[i], parents);
-        }
+    for (const auto& parent : node->parent) {
+        get_node(leaf_index, parent.get(), parents);
     }
 }
 
@@ -501,14 +376,12 @@ get_node(int leaf_index, MRTreeNode* node, MRParents* parents)
  *       so may not be very efficient.
  */
 void
-get_parents_for_mr_leaf(int leaf_index, MRParents* parents)
+get_parents_for_mr_leaf(const MRLeaves& mr_leaves,
+                        size_t leaf_index,
+                        MRParents* parents)
 {
-    MRTreeNode* node = MRLeaves[leaf_index];
-    if (node->parent_count == 0)
-        return;
-
-    for (int i = 0; i < node->parent_count; i++) {
-        get_node(leaf_index, node->parent[i], parents);
+    for (const auto& parent : mr_leaves[leaf_index]->parent) {
+        get_node(leaf_index, parent.get(), parents);
     }
 }
 
@@ -516,15 +389,15 @@ get_parents_for_mr_leaf(int leaf_index, MRParents* parents)
  * Get all the parent nodes in the multi-rooted forest.
  */
 void
-get_all_mr_parents()
+get_all_mr_parents(const MRLeaves& mr_leaves)
 {
-    leafIndexForParent_Done = false;
+    leaf_index_for_parent_done = false;
 
-    for (int i = 0; i < MRLeaves_count; i++) {
-        get_parents_for_mr_leaf(i, all_parents);
+    for (int i = 0; i < mr_leaves.size(); i++) {
+        get_parents_for_mr_leaf(mr_leaves, i, all_parents.get());
     }
 
-    leafIndexForParent_Done = true;
+    leaf_index_for_parent_done = true;
 }
 
 /*
@@ -533,33 +406,14 @@ get_all_mr_parents()
  * of each parent in parenthesis.
  */
 void
-write_all_mr_parents()
+write_all_mr_parents(const MRLeaves& mr_leaves)
 {
     yyprintf("\n==all MR Parents (inside '()' is a corresponding leaf):\n");
-    for (int i = 0; i < all_parents->count; i++) {
+    for (int i = 0; i < all_parents->size(); i++) {
         yyprintf("%s (=>%s)\n",
-                 all_parents->parents[i]->snode->symbol,
-                 MRLeaves[leafIndexForParent[i]]->symbol->snode->symbol);
+                 (*all_parents)[i]->snode->symbol,
+                 mr_leaves[leaf_index_for_parent[i]]->symbol->snode->symbol);
     }
     yyprintf("\n");
     // writeLeafIndexForParent();
-}
-
-/*
- * Prints a list of all the parent nodes of leaf.
- *
- * Pre-assumption: the list of parent nodes of the given
- * leaf is contained the array parents[].
- */
-void
-write_mr_parents(MRTreeNode* leaf, MRParents* parents)
-{
-    int i;
-    yyprintf("parents for leaf '%s': ", leaf->symbol->snode->symbol);
-    for (i = 0; i < parents->count; i++) {
-        if (i > 0)
-            yyprintf(", ");
-        yyprintf("%s", parents->parents[i]->snode->symbol);
-    }
-    yyprintf("\n");
 }

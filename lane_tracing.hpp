@@ -114,7 +114,7 @@ cluster_contain_state(const LtCluster* c, int state_no) -> int;
 extern auto
 llist_int2_find_n2(LlistInt2* list, int n2) -> LlistInt2*;
 extern void
-llist_int_dump( LlistInt* list);
+llist_int_dump(LlistInt* list);
 
 /*
  * Data structures in lrk.c
@@ -231,15 +231,23 @@ struct List
     int count;
     ObjectItem* head;
     ObjectItem* tail;
+
+    static auto create() -> std::shared_ptr<List>;
+    // insert new object at tail of list t,
+    // without checking if the object already exists.
+    void insert_tail(void* object);
+    // Remove from list t all strings whose j-th symbol is non-terminal.
+    void lrk_theads_rm_nt(int j);
+    // Remove from t all strings whose k-heads consist entirely
+    // of terminals, and add the k-heads to set t_heads;
+    void lrk_theads_rm_theads(int k, List* t_heads);
+    // Add to the end of list the result of applying all possible
+    // productions to the j-th symbol, omitting existing strings,
+    // and truncate until it contains no more than k non-vanishable
+    // symbols.
+    void add_derivatives(ObjectItem* o, int j, int k);
+    void dump(void (*list_item_dump)(void*)) const;
 };
-extern auto
-list_create() -> List*;
-extern void
-list_insert_tail(List* t, void* object);
-extern void
-list_destroy(List* t);
-extern void
-list_dump(List* t, void (*list_item_dump)(void*));
 
 extern void
 print_symbol_list(void* object);
@@ -331,7 +339,7 @@ cfg_ctxt_dump(const CfgCtxt* cc);
 
 // for LR(k) theads.
 extern auto
-lrk_theads(SymbolList alpha, int k) -> List*;
+lrk_theads(SymbolList alpha, int k) -> std::shared_ptr<List>;
 
 // in the lane_tracing of edge_pushing.
 extern bool IN_EDGE_PUSHING_LANE_TRACING;

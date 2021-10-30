@@ -49,7 +49,7 @@ void show_manpage()\n\
 
 static const char* const S2 = "/lib/hyacc/hyaccmanpage\");\n\
 }\n\n\
-const char * HYACC_PATH = \n\
+std::string HYACC_PATH = \n\
 \"";
 
 static const char* const S3 = "/lib/hyacc/hyaccpar\";\n\n";

@@ -32,6 +32,7 @@
 #include "y.hpp"
 #include <cstddef>
 #include <iostream>
+#include <memory>
 
 #define DEBUG_LRK 0
 
@@ -52,7 +53,7 @@ print_string(void* object)
     std::cout << static_cast<char*>(object) << std::endl;
 }
 void
-print_symbolList(void* object)
+print_symbol_list(void* object)
 {
     auto* n = static_cast<SymbolNode*>(object);
     write_symbol_list(n, "");
@@ -117,24 +118,24 @@ static void
 test_lrk_theads()
 {
     puts("test_lrk_theads(), on G_thead.");
-    SymbolList alpha = create_symbol_node(hash_tbl_find("X"));
+    SymbolList alpha = SymbolNode::create(hash_tbl_find("X"));
     SymbolNode* t = alpha;
-    t->next = create_symbol_node(hash_tbl_find("Y"));
+    t->next = SymbolNode::create(hash_tbl_find("Y"));
     t = t->next;
-    t->next = create_symbol_node(hash_tbl_find("Z"));
+    t->next = SymbolNode::create(hash_tbl_find("Z"));
     t = t->next;
-    t->next = create_symbol_node(hash_tbl_find("U"));
+    t->next = SymbolNode::create(hash_tbl_find("U"));
     t = t->next;
 
-    List* th = lrk_theads(alpha, 2);
-    list_dump(th, &print_symbolList);
+    std::shared_ptr<List> th = lrk_theads(alpha, 2);
+    th->dump(&print_symbol_list);
     exit(0);
 }
 
 static void
-dump_conflict_list(Conflict* c)
+dump_conflict_list(const Conflict* c)
 {
-    for (; c != nullptr; c = c->next) {
+    for (; c != nullptr; c = c->next.get()) {
         std::cout << "state " << c->state << ", token " << c->lookahead->symbol
                   << ", actions: [" << c->r << ", " << c->s
                   << "], decision: " << c->decision << std::endl;
@@ -152,7 +153,7 @@ test_dump_p_conflict()
             std::cout << "state " << i
                       << " rr_count: " << states_new_array->rr_count[i]
                       << std::endl;
-            dump_conflict_list(states_new_array->conflict_list[i]);
+            dump_conflict_list(states_new_array->conflict_list[i].get());
         }
     }
 }
@@ -246,14 +247,14 @@ insert_lrk_pt(int state_no,
         if (exist == false || c0 == nullptr) { // no conflict.
             lrk_pt_add_reduction(pt, state_no, token->snode, col, c, c_tail);
         } else { // exist is true, and c0 != nullptr.
-            CfgCtxt* cc = cfg_ctxt_create(c, create_symbol_node(col), c_tail);
+            CfgCtxt* cc = cfg_ctxt_create(c, SymbolNode::create(col), c_tail);
             set_c2 = insert_cfg_ctxt_to_set(cc, set_c2);
             if (c0->end ==
                 reinterpret_cast<Configuration*>(CONST_CONFLICT_SYMBOL)) {
                 // do nothing.
             } else {
                 cc =
-                  cfg_ctxt_create(c0->start, create_symbol_node(col), c0->end);
+                  cfg_ctxt_create(c0->start, SymbolNode::create(col), c0->end);
                 set_c2 = insert_cfg_ctxt_to_set(cc, set_c2);
                 // set this entry to CONST_CONFLICT_SYMBOL.
                 lrk_pt_add_reduction(
@@ -297,7 +298,8 @@ get_config_conflict_context(Configuration* c) -> SymbolList
     if (nullptr == c)
         return ret_list;
 
-    Conflict* n = states_new_array->conflict_list[c->owner->state_no];
+    std::shared_ptr<Conflict>& n =
+      states_new_array->conflict_list[c->owner->state_no];
     for (; n != nullptr; n = n->next) {
         if (n->r < 0 && n->s < 0) { // is r/r conflict.
             for (SymbolList contxt = c->context->nContext; contxt != nullptr;
@@ -355,12 +357,10 @@ edge_pushing(int state_no)
     Set* set_c = nullptr;
     Set* set_c2 = nullptr;
     int k = 1;
-    int len = s->config_count;
-
     // note, need to get conflict symbols for each final config also.
 
-    for (int i = 0; i < len; i++) {
-        c = s->config[i];
+    for (const auto& i : s->config) {
+        c = i;
         if (true == is_final_configuration(c)) {
             // check if this final config's context contains conflict symbol,
             // if so add it to set_c, together with the conflict symbol(s).
@@ -391,7 +391,7 @@ edge_pushing(int state_no)
                 puts("Error: c->nMarker is nullptr. ");
                 continue;
             }
-            List* phi = lrk_theads(c->nMarker->next, k1);
+            std::shared_ptr<List> phi = lrk_theads(c->nMarker->next, k1);
             if (phi == nullptr) {
                 // puts("phi is nullptr. should not!");
                 continue;
@@ -454,17 +454,15 @@ edge_pushing(int state_no)
 static void
 remove_rr_conflict_from_list(int state_no)
 {
-    Conflict* c_prev = nullptr;
-    Conflict* c = states_new_array->conflict_list[state_no];
+    std::shared_ptr<Conflict> c_prev = nullptr;
+    std::shared_ptr<Conflict>& c = states_new_array->conflict_list[state_no];
     while (nullptr != c) {
         if (c->r < 0 && c->s < 0) {  // remove this node.
             if (c_prev == nullptr) { // remove at head.
                 states_new_array->conflict_list[state_no] = c->next;
-                Conflict::destroy_node(c);
                 c = states_new_array->conflict_list[state_no];
             } else { // remove in the middle.
                 c_prev->next = c->next;
-                Conflict::destroy_node(c);
                 c = c_prev->next;
             }
             states_new_array->rr_count[state_no]--;
@@ -477,9 +475,9 @@ remove_rr_conflict_from_list(int state_no)
 
     // if list is empty, remove this conflict.
     if (states_new_array->conflict_list[state_no] == nullptr) {
-        for (int i = 0; i < states_inadequate->count; i++) {
-            if (state_no == states_inadequate->states[i]) {
-                states_inadequate->states[i] = -1;
+        for (int& state : states_inadequate->states) {
+            if (state_no == state) {
+                state = -1;
                 states_inadequate->count_unresolved--;
             }
         }
@@ -494,9 +492,11 @@ remove_rr_conflict_from_list(int state_no)
 static void
 update_lr1_parsing_table(int state_no)
 {
-    for (Conflict* c = states_new_array->conflict_list[state_no]; c != nullptr;
+    for (std::shared_ptr<Conflict>& c =
+           states_new_array->conflict_list[state_no];
+         c != nullptr;
          c = c->next) {
-        update_action(get_col(c->lookahead),
+        update_action(get_col(*c->lookahead),
                       state_no,
                       static_cast<int>(CONST_CONFLICT_SYMBOL));
     }
@@ -518,9 +518,7 @@ lane_tracing_lrk()
               << "lane head/tail pairs:" << std::endl;
     config_pair_list_dump(lane_head_tail_pairs);
 
-    int ct = states_inadequate->count;
-    for (int i = 0; i < ct; i++) {
-        int state_no = states_inadequate->states[i];
+    for (const int state_no : states_inadequate->states) {
         int ct_rr = states_new_array->rr_count[state_no];
 
         if (state_no >= 0 && ct_rr > 0) {

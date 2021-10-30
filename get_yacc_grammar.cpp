@@ -29,11 +29,14 @@
 
 #include "y.hpp"
 #include <array>
+#include <fstream>
+#include <ios>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
-#define DEBUG_YACC_INPUT_PARSER 0
+constexpr bool DEBUG_YACC_INPUT_PARSER = false;
 
 //////////////////////////////////////////////////////////////////
 // Basically, there are 3 sections in a yacc input file.
@@ -57,7 +60,6 @@ static SymbolTblNode* curLHS;
 static YACC_STATE yacc_sec2_state;
 static int CODE_level;
 
-static FILE* fp; // The yacc input file.
 static SymbolTblNode* start_symbol;
 
 static int n_line; // count the line number of yacc input file.
@@ -193,29 +195,27 @@ get_terminal_precedence(SymbolTblNode* n, yacc_section1_state state)
 /*
  * Add a token to the tokens list.
  */
-void
-addToken(SymbolTblNode* n)
+static void
+add_token(SymbolNode* tokens_tail, SymbolTblNode* n)
 {
     if (tokens_tail == nullptr) {
-        tokens_tail = tokens = create_symbol_node(n);
+        tokens_tail = tokens = SymbolNode::create(n);
     } else {
-        tokens_tail->next = create_symbol_node(n);
+        tokens_tail->next = SymbolNode::create(n);
         tokens_tail = tokens_tail->next;
     }
 
     tokens_ct++;
 }
 
-static SymbolTblNode*
-get_symbol(symbol_type t)
+static auto
+get_symbol(symbol_type t) -> SymbolTblNode*
 {
-    SymbolTblNode* n;
-
     if (ysymbol_pt == 0)
         return nullptr;
 
     ysymbol[ysymbol_pt] = 0;
-    n = hash_tbl_insert(ysymbol);
+    SymbolTblNode* n = hash_tbl_insert(ysymbol);
     ysymbol_pt = 0;
 
     if (t != symbol_type::NEITHER)
@@ -231,29 +231,28 @@ get_symbol(symbol_type t)
  * These are declared in the first section of yacc input file.
  * empty string is not allowed.
  */
-void
-output_terminal(yacc_section1_state state,
+static void
+output_terminal(SymbolNode* tokens_tail,
+                yacc_section1_state state,
                 yacc_section1_state prev_state,
-                char* token_type)
+                const char* token_type)
 {
-    SymbolTblNode* n;
-    int add_token;
+    bool must_add_token = false;
 
     if (ysymbol_pt == 0) {
         if (state == IS_QUOTED_TERMINAL) {
-            printf("error [line %d, col %d]: empty token is not allowed\n",
-                   n_line,
-                   n_col);
-            exit(1);
+            throw std::runtime_error(
+              std::string("error [line ") + std::to_string(n_line) + ", col " +
+              std::to_string(n_col) + "]: empty token is not allowed");
         }
         return;
     }
 
-    n = get_symbol(symbol_type::NEITHER);
+    SymbolTblNode* n = get_symbol(symbol_type::NEITHER);
 
     switch (n->type) {
         case symbol_type::TERMINAL: /* already entered */
-            add_token = 0;
+            must_add_token = false;
             if (n->token_type == nullptr && token_type != nullptr)
                 n->token_type = token_type;
             break;
@@ -261,12 +260,12 @@ output_terminal(yacc_section1_state state,
         case symbol_type::NEITHER: /* new symbol */
             n->type = symbol_type::TERMINAL;
             n->token_type = token_type;
-            add_token = 1;
+            must_add_token = true;
             break;
 
         default:
-            printf("error %s used a terminal", n->symbol);
-            exit(1);
+            throw std::runtime_error(std::string("error ") + n->symbol +
+                                     " used a terminal");
     }
 
     // get property of this terminal.
@@ -289,8 +288,8 @@ output_terminal(yacc_section1_state state,
         get_terminal_precedence(n, state);
     }
 
-    if (add_token)
-        addToken(n);
+    if (must_add_token)
+        add_token(tokens_tail, n);
 }
 
 void
@@ -430,8 +429,8 @@ my_perror(const char* msg, int c)
  *
  * Currently this only gets the "%start" line if there is one.
  */
-void
-process_yacc_file_input_section1()
+auto
+process_yacc_file_input_section1(std::ifstream& fp) -> SymbolNode*
 {
     yacc_section1_state state = IS_NONE,
                         prev_state = static_cast<yacc_section1_state>(-1);
@@ -440,14 +439,15 @@ process_yacc_file_input_section1()
     off_t union_start = 0;
 
     ysymbol_pt = 0;
-    tokens = tokens_tail = nullptr;
+    tokens = nullptr;
+    SymbolNode* tokens_tail = nullptr;
 
     tokens_ct = 0;
     n_line = 1;
     n_col = 1;
 
     char c = 0, last_c = '\n', last_last_c = 0;
-    while ((c = static_cast<char>(getc(fp))) != EOF) {
+    while (fp.get(c)) {
 
         if (state != IS_COMMENT && last_c == '\n' && c == '%') {
             // do nothing.
@@ -486,7 +486,7 @@ process_yacc_file_input_section1()
         } else if (c == '/' && state != IS_QUOTED_TERMINAL) {
             // '/' is not a valid char in a unquoted token.
             if (state == IS_TOKEN && ysymbol_pt > 0) {
-                output_terminal(state, prev_state, token_type);
+                output_terminal(tokens_tail, state, prev_state, token_type);
             }
         } else if (state == IS_DIRECTIVE) {
             if (isspace(c)) {
@@ -505,7 +505,8 @@ process_yacc_file_input_section1()
             if (c == '\'' &&
                 (last_c != '\\' || (ysymbol_pt == 2 && ysymbol[0] == '\\'))) {
                 // printf("] terminal ends\n");
-                output_terminal(state,
+                output_terminal(tokens_tail,
+                                state,
                                 prev_state,
                                 token_type); // output quoted terminal.
                 state = prev_state;
@@ -524,7 +525,7 @@ process_yacc_file_input_section1()
                 // printf("token type [%d, %d]: %s\n", n_line, n_col, ysymbol);
 
                 token_type = new char[strlen(ysymbol) + 1];
-                if (token_type == nullptr) {
+                if (token_type != nullptr) {
                     strcpy(token_type, ysymbol);
                 } else {
                     throw std::runtime_error("Out of memory");
@@ -540,7 +541,7 @@ process_yacc_file_input_section1()
             if (isspace(c) && ysymbol_pt == 0) {
                 // do nothing, ignore space
             } else if (isspace(c)) { // output another token
-                output_terminal(state, prev_state, token_type);
+                output_terminal(tokens_tail, state, prev_state, token_type);
             } else if (c == '\'') {
                 // printf("terminal starts: ['");
                 prev_state = state;
@@ -575,24 +576,23 @@ process_yacc_file_input_section1()
         } else if (state == IS_UNION) {
             if (c == '{') { // union starts.
                 if (union_depth++ == 0)
-                    union_start = ftello(fp) - 1; /* to include the { */
-            } else if (c == '}') {                // union ends.
+                    union_start =
+                      static_cast<off_t>(fp.tellg()) - 1; // to include the {
+            } else if (c == '}') {                        // union ends.
                 if (--union_depth == 0) {
-                    static const char STR1[] = "typedef union YYSTYPE\n";
-                    static const char STR2[] = "\n        YYSTYPE;";
-                    off_t size = ftello(fp) - union_start;
-                    off_t malloc_size = size + sizeof(STR1) + sizeof(STR2) - 1;
-                    extern char* yystype_definition;
+                    constexpr const char* const STR1 =
+                      "typedef union YYSTYPE\n";
+                    constexpr const char* const STR2 = "\n        YYSTYPE;";
+                    off_t size = static_cast<off_t>(fp.tellg()) - union_start;
+                    extern std::string yystype_definition;
 
-                    yystype_definition = new char[malloc_size + 1];
-                    if (yystype_definition == nullptr) {
-                        throw std::runtime_error("out of memory");
-                    }
-                    strcpy(yystype_definition, STR1);
-                    fseeko(fp, union_start, SEEK_SET);
-                    fread(yystype_definition + sizeof(STR1) - 1, size, 1, fp);
-                    strcpy(yystype_definition + sizeof(STR1) - 1 + size, STR2);
-                    yystype_definition[malloc_size] = '\0';
+                    yystype_definition = STR1;
+                    fp.seekg(union_start, std::ios_base::beg);
+                    std::vector<char> fp_string(size, ' ');
+                    fp.read(fp_string.data(), size);
+                    yystype_definition += fp_string.data();
+                    yystype_definition += STR2;
+
                     state = IS_NONE;
                 }
             } else { // get union content.
@@ -625,7 +625,7 @@ process_yacc_file_input_section1()
             n_col = 1;
         }
     }
-
+    return tokens_tail;
     // writeTokens();
 }
 
@@ -644,7 +644,7 @@ create_empty_production() -> Production*
         throw std::runtime_error(
           "create_empty_production error: output memory");
     }
-    p->nLHS = create_symbol_node(hash_tbl_find(""));
+    p->nLHS = SymbolNode::create(hash_tbl_find(""));
 
     p->RHS_count = 0;
     p->isUnitProduction = 0;
@@ -685,7 +685,7 @@ insert_mid_prod_rule(int ct)
     sprintf(name_lhs.data(), "$$%d_@%d", rule_id - 1, ct);
     SymbolTblNode* n = hash_tbl_insert(name_lhs.data());
     n->type = symbol_type::NONTERMINAL;
-    p->nLHS = create_symbol_node(n);
+    p->nLHS = SymbolNode::create(n);
     p->hasCode = 1;
 
     add_rhs_symbol(n);
@@ -696,7 +696,7 @@ add_lhs_symbol(SymbolTblNode* symbol)
 {
     // printf("\n==add LHS symbol: %s\n", symbol);
     Production* p = grammar.rules.back();
-    p->nLHS = create_symbol_node(symbol);
+    p->nLHS = SymbolNode::create(symbol);
 }
 
 void
@@ -706,7 +706,7 @@ add_rhs_symbol(SymbolTblNode* symbol)
     Production* p = grammar.rules.back();
     p->RHS_count++;
 
-    SymbolNode* s = create_symbol_node(symbol);
+    SymbolNode* s = SymbolNode::create(symbol);
     if (p->nRHS_head == nullptr) {
         p->nRHS_head = p->nRHS_tail = s;
     } else {
@@ -815,9 +815,9 @@ get_vanish_symbols(Grammar* g)
 
             if (tail == nullptr) {
                 tail = g->vanish_symbol_list =
-                  create_symbol_node(rule->nLHS->snode);
+                  SymbolNode::create(rule->nLHS->snode);
             } else {
-                tail->next = create_symbol_node(rule->nLHS->snode);
+                tail->next = SymbolNode::create(rule->nLHS->snode);
                 tail = tail->next;
             }
 
@@ -838,10 +838,10 @@ get_vanish_symbols(Grammar* g)
                 // y is not yet a vanish symbol, then:
                 if (flag_y(rule)) {
                     // we know tail != nullptr
-                    tail->next = create_symbol_node(rule->nLHS->snode);
+                    tail->next = SymbolNode::create(rule->nLHS->snode);
                     tail = tail->next;
 
-                    rule->nLHS->snode->vanishable = 1; // 12-6-2008
+                    rule->nLHS->snode->vanishable = true;
 
                     g->vanish_symbol_count++;
                     new_vanish_symbol_found = true;
@@ -874,9 +874,9 @@ get_non_terminals(Grammar* g)
             continue;
         }
         if (tail == nullptr) {
-            tail = g->non_terminal_list = create_symbol_node(rule->nLHS->snode);
+            tail = g->non_terminal_list = SymbolNode::create(rule->nLHS->snode);
         } else {
-            tail->next = create_symbol_node(rule->nLHS->snode);
+            tail->next = SymbolNode::create(rule->nLHS->snode);
             tail = tail->next;
         }
 
@@ -937,9 +937,9 @@ get_terminals(Grammar* g)
                 continue;
 
             if (tail == nullptr) {
-                tail = g->terminal_list = create_symbol_node(s->snode);
+                tail = g->terminal_list = SymbolNode::create(s->snode);
             } else {
-                tail->next = create_symbol_node(s->snode);
+                tail->next = SymbolNode::create(s->snode);
                 tail = tail->next;
             }
             s->snode->type = symbol_type::TERMINAL;
@@ -1059,7 +1059,7 @@ get_tokens_value(Grammar* g)
 void
 get_goal_symbol(Grammar* g)
 {
-    g->goal_symbol = create_symbol_node(g->rules[0]->nLHS->snode);
+    g->goal_symbol = SymbolNode::create(g->rules[0]->nLHS->snode);
 }
 
 /*
@@ -1100,18 +1100,18 @@ get_symbol_parsing_tbl_col(Grammar* g)
 void
 get_parsing_tbl_col_hdr(Grammar* g)
 {
-    ParsingTblColHdr =
-      new SymbolTblNode*[1 + g->terminal_count + g->non_terminal_count];
+    ParsingTblColHdr = std::vector<SymbolTblNode*>(
+      1 + g->terminal_count + g->non_terminal_count, nullptr);
 
-    ParsingTblColHdr[0] = hash_tbl_find(STR_END);
+    ParsingTblColHdr.at(0) = hash_tbl_find(STR_END);
     ParsingTblCols = 1;
 
     for (SymbolNode* a = grammar.terminal_list; a != nullptr; a = a->next) {
-        ParsingTblColHdr[ParsingTblCols++] = a->snode;
+        ParsingTblColHdr.at(ParsingTblCols++) = a->snode;
     }
 
     for (SymbolNode* a = g->non_terminal_list; a != nullptr; a = a->next) {
-        ParsingTblColHdr[ParsingTblCols++] = a->snode;
+        ParsingTblColHdr.at(ParsingTblCols++) = a->snode;
     }
 }
 
@@ -1199,7 +1199,7 @@ get_grammar_params()
  * Empty string is not allowed.
  */
 auto
-output_nonterminal(YACC_STATE state) -> SymbolTblNode*
+output_nonterminal(SymbolNode* tokens_tail, YACC_STATE state) -> SymbolTblNode*
 {
     if (ysymbol_pt == 0) {
         if (state == TERMINAL) {
@@ -1228,9 +1228,9 @@ output_nonterminal(YACC_STATE state) -> SymbolTblNode*
     }
     // printf("anoterh symbol: %s\n", ysymbol);
 
-#if DEBUG_YACC_INPUT_PARSER
-    printf("%s ", ysymbol);
-#endif
+    if constexpr (DEBUG_YACC_INPUT_PARSER) {
+        std::cout << ysymbol << ' ';
+    }
 
     SymbolTblNode* n = hash_tbl_find(ysymbol);
 
@@ -1260,7 +1260,7 @@ output_nonterminal(YACC_STATE state) -> SymbolTblNode*
                 n->TP->is_quoted = true;
 
                 // add this to the tokens list.
-                addToken(n);
+                add_token(tokens_tail, n);
             } else {
                 n->type = symbol_type::NONTERMINAL;
             }
@@ -1295,7 +1295,7 @@ get_cur_lhs(SymbolTblNode* n)
  * of a yacc input file.
  */
 void
-process_yacc_file_input_section2()
+process_yacc_file_input_section2(SymbolNode* tokens_tail, std::ifstream& fp)
 {
     // for mid-production actions.
     int mid_prod_code_ct = 0;
@@ -1305,7 +1305,7 @@ process_yacc_file_input_section2()
     ysymbol_pt = 0;
 
     char c = 0, last_c = 0;
-    while ((c = static_cast<char>(getc(fp))) != EOF) {
+    while (fp.get(c)) {
         if (last_c == '%' && c == '%')
             return;
 
@@ -1314,16 +1314,18 @@ process_yacc_file_input_section2()
                 if (isspace(c) && ysymbol_pt == 0) {
                     // Ignore empty spaces before LHS symbol.
                 } else if (c == ':') {
-                    get_cur_lhs(output_nonterminal(LHS)); // OUTPUT LHS SYMBOL.
-#if DEBUG_YACC_INPUT_PARSER
-                    printf("-> ");
-#endif
+                    get_cur_lhs(output_nonterminal(tokens_tail,
+                                                   LHS)); // OUTPUT LHS SYMBOL.
+                    if constexpr (DEBUG_YACC_INPUT_PARSER) {
+                        std::cout << "-> ";
+                    }
                     yacc_sec2_state = RHS;
                 } else if (isspace(c)) {
-                    get_cur_lhs(output_nonterminal(LHS)); // OUTPUT LHS SYMBOL.
-#if DEBUG_YACC_INPUT_PARSER
-                    printf("-> ");
-#endif
+                    get_cur_lhs(output_nonterminal(tokens_tail,
+                                                   LHS)); // OUTPUT LHS SYMBOL.
+                    if constexpr (DEBUG_YACC_INPUT_PARSER) {
+                        std::cout << "-> ";
+                    }
                     yacc_sec2_state = COLON;
                 } else if (last_c == '/' && c == '*') {
                     yacc_sec2_state = LHS_COMMENT;
@@ -1364,13 +1366,15 @@ process_yacc_file_input_section2()
             case RHS:
                 if (isspace(c)) {
                     if (ysymbol_pt != 0) {
-                        output_nonterminal(RHS); // OUTPUT NEXT RHS SYMBOL.
+                        output_nonterminal(tokens_tail,
+                                           RHS); // OUTPUT NEXT RHS SYMBOL.
                     }
                     // else, ignore empty space.
                 } else if (c == '\'') {
                     // printf("terminal starts(line %d): [%c", n_line, c);
                     if (ysymbol_pt != 0) {
-                        output_nonterminal(RHS); // OUTPUT NEXT RHS SYMBOL.
+                        output_nonterminal(tokens_tail,
+                                           RHS); // OUTPUT NEXT RHS SYMBOL.
                     }
                     yacc_sec2_state = TERMINAL;
                     if (end_of_code) { // for mid-prod action.
@@ -1388,10 +1392,11 @@ process_yacc_file_input_section2()
                           "]: forgot the symbol after %prec?");
                     }
                     if (ysymbol_pt != 0)
-                        output_nonterminal(RHS); // OUTPUT NEXT RHS SYMBOL.
-#if DEBUG_YACC_INPUT_PARSER
-                    printf("\n");
-#endif
+                        output_nonterminal(tokens_tail,
+                                           RHS); // OUTPUT NEXT RHS SYMBOL.
+                    if constexpr (DEBUG_YACC_INPUT_PARSER) {
+                        std::cout << std::endl;
+                    }
                     yacc_sec2_state = LHS;
                 } else if (c == '|') {   // another rule with same LHS.
                     end_of_code = false; // for mid-prod action.
@@ -1403,10 +1408,11 @@ process_yacc_file_input_section2()
                           "]: forgot the symbol after %prec?");
                     }
                     if (ysymbol_pt != 0)
-                        output_nonterminal(RHS); // OUTPUT NEXT RHS SYMBOL.
-#if DEBUG_YACC_INPUT_PARSER
-                    printf("\n%s -> ", curLHS->symbol);
-#endif
+                        output_nonterminal(tokens_tail,
+                                           RHS); // OUTPUT NEXT RHS SYMBOL.
+                    if constexpr (DEBUG_YACC_INPUT_PARSER) {
+                        std::cout << std::endl << curLHS->symbol << " -> ";
+                    }
                     // printf("\n");
                     create_new_rule(); // CREATE NEW RULE HERE.
                     add_lhs_symbol(curLHS);
@@ -1440,11 +1446,12 @@ process_yacc_file_input_section2()
                                   (ysymbol_pt == 2 && ysymbol[0] == '\\'))) {
                     // printf("] terminal ends\n");
                     yacc_sec2_state = RHS;
-                    output_nonterminal(
-                      TERMINAL); // OUTPUT NEXT RHS SYMBOL. is terminal.
+                    output_nonterminal(tokens_tail,
+                                       TERMINAL); // OUTPUT NEXT RHS SYMBOL. is
+                                                  // terminal.
                 } else {
-                    /* if (isspace(c)) printf("hit space here %d %d\n", n_line,
-                     * n_col); */
+                    /* if (isspace(c)) printf("hit space here %d
+                     * %d\n", n_line, n_col); */
                     add_char_to_symbol(c);
                 }
                 break;
@@ -1519,10 +1526,10 @@ get_goal_rule_rhs()
     if (grammar.rules.size() > 1) {
         if (start_symbol != nullptr) {
             grammar.rules[0]->nRHS_head = grammar.rules[0]->nRHS_tail =
-              create_symbol_node(start_symbol);
+              SymbolNode::create(start_symbol);
         } else {
             grammar.rules[0]->nRHS_head = grammar.rules[0]->nRHS_tail =
-              create_symbol_node(grammar.rules[1]->nLHS->snode);
+              SymbolNode::create(grammar.rules[1]->nLHS->snode);
         }
         grammar.rules[0]->RHS_count = 1;
     } else {
@@ -1536,7 +1543,7 @@ get_goal_rule_lhs()
 {
     SymbolTblNode* n = hash_tbl_insert(STR_ACCEPT);
     create_new_rule(); // goal production rule.
-    grammar.rules[0]->nLHS = create_symbol_node(n);
+    grammar.rules[0]->nLHS = SymbolNode::create(n);
     n->type = symbol_type::NONTERMINAL;
 }
 
@@ -1569,14 +1576,14 @@ post_modification(Grammar* g)
             p->RHS_count++;
             p->isUnitProduction = 0;
             // add one more symbol to the end of RHS:
-            p->nRHS_tail->next = create_symbol_node(n);
+            p->nRHS_tail->next = SymbolNode::create(n);
             p->nRHS_tail = p->nRHS_tail->next;
         }
     }
 
     if (count > 0) {
         Production* p = create_new_rule(); // $PlaceHolder -> epsilon
-        p->nLHS = create_symbol_node(n);
+        p->nLHS = SymbolNode::create(n);
 
         p->RHS_count = 0;
         p->isUnitProduction = 0;
@@ -1617,28 +1624,30 @@ get_yacc_grammar_init()
  * Called by function main() in y.c.
  */
 void
-get_yacc_grammar(char* infile)
+get_yacc_grammar(const std::string& infile)
 {
-#if DEBUG_YACC_INPUT_PARSER
-    printf("input file: %s\n", infile);
-#endif
+    if constexpr (DEBUG_YACC_INPUT_PARSER) {
+        std::cout << "input file: " << infile << std::endl;
+    }
 
-    if ((fp = fopen(infile, "r")) == nullptr) {
+    std::ifstream fp{};
+    fp.open(infile);
+    if (!fp.is_open()) {
         throw std::runtime_error(std::string("can't open file ") + infile);
     }
 
     get_yacc_grammar_init();
 
-    if (ADD_GOAL_RULE) {
+    if constexpr (ADD_GOAL_RULE) {
         get_goal_rule_lhs();
     }
 
-    process_yacc_file_input_section1();
-    process_yacc_file_input_section2();
+    SymbolNode* tokens_tail = process_yacc_file_input_section1(fp);
+    process_yacc_file_input_section2(tokens_tail, fp);
 
-    fclose(fp);
+    fp.close();
 
-    if (ADD_GOAL_RULE) {
+    if constexpr (ADD_GOAL_RULE) {
         get_goal_rule_rhs();
     }
     post_modification(&grammar);

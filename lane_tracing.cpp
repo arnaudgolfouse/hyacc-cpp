@@ -27,20 +27,22 @@
 
 #include "lane_tracing.hpp"
 #include "stack_config.hpp"
+#include "y.hpp"
+#include <cstddef>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 
-#define DEBUG_PHASE_1 0
-#define DEBUG_RESOLVE_CONFLICT 0
-#define DEBUG_PHASE_2 0
-#define DEBUG_GET_LANEHEAD 0
-#define DEBUG_PHASE_2_GET_TBL 0
-#define DEBUG_PHASE_2_REGENERATE2 0
-#define DEBUG_PHASE_2_REGENERATE 0
-#define DEBUG_GET_ORIGINATOR 0
+constexpr bool DEBUG_PHASE_1 = false;
+constexpr bool DEBUG_RESOLVE_CONFLICT = false;
+constexpr bool DEBUG_PHASE_2 = false;
+constexpr bool DEBUG_GET_LANEHEAD = false;
+constexpr bool DEBUG_PHASE_2_GET_TBL = false;
+constexpr bool DEBUG_PHASE_2_REGENERATE2 = false;
+constexpr bool DEBUG_PHASE_2_REGENERATE = false;
+constexpr bool DEBUG_GET_ORIGINATOR = false;
 
-#define DEBUG_ORIGIN 0
+constexpr bool DEBUG_ORIGIN = false;
 
 LRkPtEntry* LRk_PT = nullptr;
 
@@ -188,7 +190,7 @@ llist_context_set_clone(LlistContextSet* c) -> LlistContextSet*
 
     if (nullptr == c)
         return nullptr;
-    // printf("clone c: "); dump_LlistContextSet(c); puts("");
+    // printf("clone c: "); dump_LlistContextSet(c); std::cout << std::endl;
 
     LlistContextSet* d = llist_context_set_create(c->config);
     LlistContextSet* d_next = d;
@@ -201,7 +203,7 @@ llist_context_set_clone(LlistContextSet* c) -> LlistContextSet*
         d_next = d_next->next;
     }
 
-    // printf("result d: "); dump_LlistContextSet(d); puts("");
+    // printf("result d: "); dump_LlistContextSet(d); std::cout << std::endl;
     return d;
 }
 
@@ -612,7 +614,7 @@ dump_lt_tbl_entry(LtTblEntry* e)
     dump_llist_context_set(e->ctxt_set);
     std::cout << "\t| ";
     llist_int_dump(e->to_states);
-    puts("");
+    std::cout << std::endl;
 }
 
 void
@@ -902,28 +904,19 @@ clone_state(const State* s) -> State*
     auto* t = new State;
 
     t->next = s->next;
-    t->config_max_count = s->config_max_count;
-    t->config = new Configuration*[t->config_max_count];
-    t->config_count = s->config_count;
+    t->config = s->config;
     t->core_config_count = s->core_config_count;
 
-    int ct = t->config_count;
-    for (int i = 0; i < ct; i++) {
+    for (size_t i = 0; i < t->config.size(); i++) {
         t->config[i] = create_config(-1, 0, 1);
         copy_config_lalr(t->config[i], s->config[i]);
         t->config[i]->owner = t;
     }
 
     t->state_no = s->state_no;
-    t->trans_symbol = create_symbol_node(s->trans_symbol->snode);
+    t->trans_symbol = SymbolNode::create(s->trans_symbol->snode);
 
-    t->successor_max_count = s->successor_max_count;
-    t->successor_list = new State*[t->successor_max_count];
-    t->successor_count = s->successor_count;
-    ct = t->successor_count;
-    for (int i = 0; i < ct; i++) {
-        t->successor_list[i] = s->successor_list[i];
-    }
+    t->successor_list = s->successor_list;
 
     t->parents_list = s->parents_list->clone();
 
@@ -944,26 +937,26 @@ replace_successor(State* src_state, State* s_new, State* s_old)
     if (s_new == s_old)
         return;
 
-#if DEBUG_PHASE_2_REGENERATE2
-    printf("replace successor of state %d: %d replaced by %d: ",
-           src_state->state_no,
-           s_old->state_no,
-           s_new->state_no);
-#endif
+    if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+        printf("replace successor of state %d: %d replaced by %d: ",
+               src_state->state_no,
+               s_old->state_no,
+               s_new->state_no);
+    }
 
-    for (int i = 0, ct = src_state->successor_count; i < ct; i++) {
-        if (src_state->successor_list[i] == s_old) {
-            src_state->successor_list[i] = s_new;
-#if DEBUG_PHASE_2_REGENERATE2
-            puts("done");
-#endif
+    for (auto& successor : src_state->successor_list) {
+        if (successor == s_old) {
+            successor = s_new;
+            if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+                std::cout << "done" << std::endl;
+            }
             return;
         }
     }
 
-#if DEBUG_PHASE_2_REGENERATE2
-    puts("NOT done");
-#endif
+    if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+        puts("NOT done");
+    }
 }
 
 /*
@@ -1011,7 +1004,7 @@ lane_head_tail_pairs_replace(LtCluster* c,
             llist_int2_find_n2(c->states, n->start->owner->state_no) !=
               nullptr) {
             // do replacement for n->end: from that in s to s_copy.
-            for (int i = 0; i < s->config_count; i++) {
+            for (int i = 0; i < s->config.size(); i++) {
                 if (s->config[i] == n->end) {
                     n->end = s_copy->config[i];
                     break;
@@ -1051,9 +1044,9 @@ cluster_add_lt_tbl_entry(LtCluster* c,
 
         state_no = s_copy->state_no;
 
-#if DEBUG_PHASE_2_REGENERATE2
-        printf("clone state %d to %d\n", s->state_no, state_no);
-#endif
+        if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+            printf("clone state %d to %d\n", s->state_no, state_no);
+        }
 
         if (Options::get().use_lr_k) {
             // For LR(k), replace entry in lane_head_tail_pairs!
@@ -1090,10 +1083,10 @@ find_containing_cluster(LtCluster* c, int state_no) -> LtCluster*
 {
     c = (nullptr == c) ? all_clusters : c->next;
 
-#if DEBUG_PHASE_2_REGENERATE2
-    if (nullptr != c)
-        printf("c: current state: %d/%d\n", c->states->n1, c->states->n2);
-#endif
+    if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+        if (nullptr != c)
+            printf("c: current state: %d/%d\n", c->states->n1, c->states->n2);
+    }
 
     for (; c != nullptr; c = c->next) {
         if (cluster_contain_state(c, state_no) >= 0) {
@@ -1199,7 +1192,7 @@ clear_regenerate(int state_no)
     if (0 == (state_no)) {
         hash_tbl_insert(STR_END);
         s->config[0]->context->nContext =
-          create_symbol_node(hash_tbl_find(STR_END));
+          SymbolNode::create(hash_tbl_find(STR_END));
         s->config[0]->context->context_count = 1;
     }
     get_closure(s);
@@ -1222,9 +1215,9 @@ lt_phase2_propagate_context_change(int state_no, LtCluster* c, LtTblEntry* e)
     // in cluster c, state_no has a corresponding true state_no,
     // so are its to_states which can be found from e.
 
-#if DEBUG_PHASE_2_REGENERATE2
-    printf("lt_p2_propagateContextChange from state %d\n", state_no);
-#endif
+    if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+        printf("lt_p2_propagateContextChange from state %d\n", state_no);
+    }
 
     for (const LlistInt* t = e->to_states; t != nullptr; t = t->next) {
         LtTblEntry* f = lt_tbl_find_entry(t->n);
@@ -1232,15 +1225,15 @@ lt_phase2_propagate_context_change(int state_no, LtCluster* c, LtTblEntry* e)
             // need to replace t->n with the true state_no in cluster c.
             const LlistInt2* t2 = llist_int2_find_n1(c->states, t->n);
             if (t2 == nullptr) {
-#if DEBUG_PHASE_2_REGENERATE2
-                printf("--to state %d, not found in cluster.\n", t->n);
-                // cluster_dump(c);
-#endif
+                if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+                    printf("--to state %d, not found in cluster.\n", t->n);
+                    // cluster_dump(c);
+                }
                 continue; // if not found, just ignore this to state.
             }
-#if DEBUG_PHASE_2_REGENERATE2
-            printf("--to state: %d, actual: %d\n", t->n, t2->n2);
-#endif
+            if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+                printf("--to state: %d, actual: %d\n", t->n, t2->n2);
+            }
             inherit_propagate(t2->n2, state_no, c, f);
         }
     }
@@ -1252,23 +1245,21 @@ inherit_parent_context(State* s, State* parent) -> bool
     if (s == nullptr || parent == nullptr)
         return false;
 
-#if DEBUG_PHASE_2_REGENERATE2
-    printf("state %d: to inherit context from parent state %d\n",
-           s->state_no,
-           parent->state_no);
+    if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+        printf("state %d: to inherit context from parent state %d\n",
+               s->state_no,
+               parent->state_no);
 
-    if (0 && s->state_no == 39) {
-        printf("before: \n");
-        my_writeState(s);
-        my_writeState(parent);
+        if (0 && s->state_no == 39) {
+            printf("before: \n");
+            my_write_state(s);
+            my_write_state(parent);
+        }
     }
-#endif
 
     bool is_changed = false;
     const SymbolTblNode* trans_symbol = s->trans_symbol->snode;
-    const int ct = parent->config_count;
-    for (int i = 0; i < ct; i++) {
-        Configuration* c_p = parent->config[i];
+    for (const auto& c_p : parent->config) {
         if (is_final_configuration(c_p))
             continue;
         if (trans_symbol != get_scanned_symbol(c_p))
@@ -1287,12 +1278,12 @@ inherit_parent_context(State* s, State* parent) -> bool
         }
     }
 
-#if DEBUG_PHASE_2_REGENERATE2
-    if (0 && s->state_no == 39) {
-        printf("after: \n");
-        my_writeState(s);
+    if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+        if (0 && s->state_no == 39) {
+            printf("after: \n");
+            my_write_state(s);
+        }
     }
-#endif
 
     return is_changed;
 }
@@ -1306,9 +1297,8 @@ clear_state_context(State* s)
     if (nullptr == s)
         return;
 
-    const int ct = s->config_count;
-    for (int i = 0; i < ct; i++) {
-        clear_context(s->config[i]->context); // defined in y.c.
+    for (const auto& i : s->config) {
+        i->context->clear(); // defined in y.c.
     }
 }
 
@@ -1331,27 +1321,28 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
     bool is_new_chain = true;
     LtCluster* c = new_cluster;
 
-#if DEBUG_PHASE_2_REGENERATE2
-    printf("cluster: %d. next state on chain: %d\n", c, state_no);
-#endif
+    if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+        std::cout << "cluster: " << c << ". next state on chain: " << state_no
+                  << std::endl;
+    }
 
     // e will be used no matter what happen.
     LtTblEntry* e = lt_tbl_find_entry(state_no);
     if (nullptr == e) { // Is this possible? YES IT IS.
-#if DEBUG_PHASE_2_REGENERATE2
-        printf("END of chain - state_no: %d\n", state_no);
-#endif
+        if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+            std::cout << "END of chain - state_no: " << state_no << std::endl;
+        }
     }
     LlistContextSet* e_ctxt = (e == nullptr) ? nullptr : e->ctxt_set;
 
     // state in in cluster c.
     int ret_state = cluster_contain_state(c, state_no);
     if (ret_state >= 0) {
-#if DEBUG_PHASE_2_REGENERATE2
-        printf("=>2. state %d: inherit context from state %d & propagate\n",
-               ret_state,
-               parent_state_no);
-#endif
+        if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+            std::cout << "=>2. state " << ret_state
+                      << ": inherit context from state " << parent_state_no
+                      << " & propagate" << std::endl;
+        }
         inherit_propagate(ret_state, parent_state_no, c, e);
 
         replace_successor(states_new_array->state_list[parent_state_no],
@@ -1375,9 +1366,10 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
         if (first_container == nullptr)
             first_container = container;
 
-#if DEBUG_PHASE_2_REGENERATE2
-        printf("2. state %d is in a cluster %d\n", state_no, container);
-#endif
+        if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+            std::cout << "2. state " << state_no << " is in a cluster "
+                      << container << std::endl;
+        }
 
         if (container->pairwise_disjoint) {
             LlistContextSet* x = llist_context_set_clone(c->ctxt_set);
@@ -1386,9 +1378,11 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
             llist_context_set_destroy(x);
 
             if (is_pairwise_disjoint) {
-#if DEBUG_PHASE_2_REGENERATE2
-                puts("3. combine 2 clusters result is pairwise disjoint");
-#endif
+                if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+                    std::cout
+                      << "3. combine 2 clusters result is pairwise disjoint"
+                      << std::endl;
+                }
                 combine_cluster(c, container); // container is the result.
                 is_new_chain = false;          // not a new chain.
 
@@ -1396,12 +1390,12 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
                 // of this function can return correct value once c is changed.
                 c = new_cluster = container;
 
-#if DEBUG_PHASE_2_REGENERATE2
-                printf(
-                  "=>3. state %d: inherit context from state %d, propagate\n",
-                  state_no,
-                  parent_state_no);
-#endif
+                if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+                    printf("=>3. state %d: inherit context from state %d, "
+                           "propagate\n",
+                           state_no,
+                           parent_state_no);
+                }
                 inherit_propagate(state_no, parent_state_no, container, e);
 
                 container_not_found = false;
@@ -1413,9 +1407,9 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
 
     if (container_not_found) {
         if (first_container == nullptr) { // always add.
-#if DEBUG_PHASE_2_REGENERATE2
-            printf("4. state %d is NOT in any cluster yet\n", state_no);
-#endif
+            if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+                printf("4. state %d is NOT in any cluster yet\n", state_no);
+            }
             ret_state = cluster_add_lt_tbl_entry(
               c, state_no, e_ctxt, parent_state_no, false);
 
@@ -1427,12 +1421,12 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
             if (nullptr != e)
                 e->processed = true;
 
-#if DEBUG_PHASE_2_REGENERATE2
-            printf("=>4. state %d: clear, inherit context from state %d, "
-                   "regenerate\n",
-                   state_no,
-                   parent_state_no);
-#endif
+            if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+                printf("=>4. state %d: clear, inherit context from state %d, "
+                       "regenerate\n",
+                       state_no,
+                       parent_state_no);
+            }
             clear_inherit_regenerate(state_no, parent_state_no);
 
         } else {
@@ -1445,12 +1439,12 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
                 false) {
                 all_pairwise_disjoint = false;
             }
-#if DEBUG_PHASE_2_REGENERATE2
-            printf("=>5. state %d: clear, inherit context from state %d, "
-                   "regenerate\n",
-                   ret_state,
-                   parent_state_no);
-#endif
+            if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+                printf("=>5. state %d: clear, inherit context from state %d, "
+                       "regenerate\n",
+                       ret_state,
+                       parent_state_no);
+            }
             clear_inherit_regenerate(ret_state, parent_state_no);
         }
 
@@ -1510,11 +1504,11 @@ phase2_regeneration2()
         LtTblEntry* x = e; // start state of another chain/cluster of states.
         new_cluster = cluster_create(x);
 
-#if DEBUG_PHASE_2_REGENERATE2
-        printf("== chain head state: %d\n", e->from_state);
-        printf("=>1. clear and regenerate context for state %d\n",
-               x->from_state);
-#endif
+        if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+            printf("== chain head state: %d\n", e->from_state);
+            printf("=>1. clear and regenerate context for state %d\n",
+                   x->from_state);
+        }
         clear_regenerate(x->from_state);
 
         x->processed = true;
@@ -1527,9 +1521,9 @@ phase2_regeneration2()
         }
     }
 
-#if DEBUG_PHASE_2_REGENERATE2
-    all_clusters_dump(); // dump if is new chain.
-#endif
+    if constexpr (DEBUG_PHASE_2_REGENERATE2) {
+        all_clusters_dump(); // dump if is new chain.
+    }
 
     // if the parsing machine is expanded, update the parsing table.
     if (states_new->state_count > ParsingTblRows) {
@@ -1744,18 +1738,8 @@ auto
 create_state_no_array() -> StateNoArray*
 {
     auto* sa = new StateNoArray;
-    sa->size = 2; // start value.
-    sa->count = 0;
-    sa->states = new int[sa->size];
-
+    sa->states.reserve(2);
     return sa;
-}
-
-static void
-expand_state_no_array(StateNoArray* sa)
-{
-    sa->size *= 2;
-    HYY_EXPAND(&sa->states, sa->size);
 }
 
 /*
@@ -1764,18 +1748,13 @@ expand_state_no_array(StateNoArray* sa)
 void
 add_state_no_array(StateNoArray* sa, int state_no)
 {
-    if (sa->count == sa->size) {
-        expand_state_no_array(sa);
-    }
-
-    const int ct = sa->count;
-    for (int i = 0; i < ct; i++) {
-        if (sa->states[i] == state_no) {
+    for (int s : sa->states) {
+        if (s == state_no) {
             return;
         } // exists.
     }
     // printf("state %d is added to list. \n", state_no);
-    sa->states[sa->count++] = state_no;
+    sa->states.push_back(state_no);
 }
 
 void
@@ -1784,9 +1763,8 @@ dump_state_no_array(const StateNoArray* sa)
     if (sa == nullptr)
         return;
 
-    const int ct = sa->count;
-    for (int i = 0; i < ct; i++) {
-        std::cout << sa->states[i] << " ";
+    for (const int state : sa->states) {
+        std::cout << state << " ";
     }
     std::cout << std::endl;
 }
@@ -1889,9 +1867,8 @@ my_write_state(const State* s)
     std::cout << "state_no: " << s->state_no
               << " (core: " << s->core_config_count << ")" << std::endl;
 
-    const int ct = s->config_count;
-    for (int i = 0; i < ct; i++) {
-        stdout_write_config(s->config[i]);
+    for (const auto& config : s->config) {
+        stdout_write_config(config);
     }
 }
 
@@ -1950,21 +1927,19 @@ my_write_config_originators(const Configuration* c)
 static void
 get_inadequate_state_reduce_config_context(const State* s)
 {
-    const int ct = s->config_count;
-#if DEBUG_PHASE_1
-    printf("state %d [%d configurations, trans_symbol: %s]: \n",
-           s->state_no,
-           ct,
-           s->trans_symbol->snode->symbol);
-#endif
+    if constexpr (DEBUG_PHASE_1) {
+        std::cout << "state " << s->state_no << " [" << s->config.size()
+                  << " configurations, trans_symbol: "
+                  << s->trans_symbol->snode->symbol << "]: " << std::endl;
+    }
 
-    for (int i = 0; i < ct; i++) {
-        Configuration* c = s->config[i];
+    for (const auto& config : s->config) {
+        Configuration* c = config;
         if (is_final_configuration(c)) {
             lane_tracing_reduction(c);
-#if DEBUG_PHASE_1
-            puts(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
-#endif
+            if constexpr (DEBUG_PHASE_1) {
+                puts(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
+            }
         }
     }
 }
@@ -1972,14 +1947,12 @@ get_inadequate_state_reduce_config_context(const State* s)
 static void
 lane_tracing_phase1()
 {
-    const int ct = states_inadequate->count;
+    if constexpr (DEBUG_PHASE_1) {
+        std::cout << states_inadequate->states.size()
+                  << " inadequate states: " << std::endl;
+    }
 
-#if DEBUG_PHASE_1
-    printf("%d inadequate states: \n", ct);
-#endif
-
-    for (int i = 0; i < ct; i++) {
-        const int state_no = states_inadequate->states[i];
+    for (const int state_no : states_inadequate->states) {
         const State* s = states_new_array->state_list[state_no];
         get_inadequate_state_reduce_config_context(s);
     }
@@ -1994,9 +1967,9 @@ static auto
 find_successor_state_no(int state_no, const SymbolTblNode* snode) -> int
 {
     const State* state = states_new_array->state_list[state_no];
-
-    for (int i = state->successor_count - 1; i >= 0; i--) {
-        const State* successor = state->successor_list[i];
+    auto it = state->successor_list.rbegin();
+    while (it != state->successor_list.rend()) {
+        const State* successor = *it;
         if (snode == successor->trans_symbol->snode) {
             return successor->state_no;
         }
@@ -2011,12 +1984,15 @@ find_successor_state_no(int state_no, const SymbolTblNode* snode) -> int
 /*
  * Clear a parsing table row where lookahead is terminal.
  */
-#define clearStateTerminalTransitions(state_no)                                \
-    {                                                                          \
-        memset((void*)(ParsingTable + state_no * ParsingTblCols),              \
-               0,                                                              \
-               (grammar.terminal_count + 1) * 4);                              \
+inline void
+clear_state_terminal_transitions(int state_no)
+{
+    size_t start = (static_cast<size_t>(state_no) * ParsingTblCols);
+    size_t end = (state_no * ParsingTblCols) + (grammar.terminal_count + 1);
+    for (size_t i = start; i < end; ++i) {
+        ParsingTable.at(i) = 0;
     }
+}
 
 /*
  * clear all the conflicts from states_new_array->conflict_list.
@@ -2024,21 +2000,6 @@ find_successor_state_no(int state_no, const SymbolTblNode* snode) -> int
 static void
 clear_state_conflicts(int state_no)
 {
-    Conflict* list = states_new_array->conflict_list[state_no];
-
-    while (list != nullptr) {
-        Conflict* tmp = list->next;
-        if (list->s > 0) {
-            states_new_array->rs_count[state_no]--;
-            rs_count--;
-        } else {
-            states_new_array->rr_count[state_no]--;
-            rr_count--;
-        }
-        Conflict::destroy_list(list);
-        list = tmp;
-    }
-
     states_new_array->conflict_list[state_no] = nullptr;
 }
 
@@ -2056,13 +2017,13 @@ clear_state_conflicts(int state_no)
 static void
 resolve_lalr1_conflicts()
 {
-#if DEBUG_RESOLVE_CONFLICT
-    printParsingTable();
-#endif
+    if constexpr (DEBUG_RESOLVE_CONFLICT) {
+        print_parsing_table();
+    }
 
-    states_inadequate->count_unresolved = states_inadequate->count;
+    states_inadequate->count_unresolved = states_inadequate->states.size();
 
-    const int ct = states_inadequate->count;
+    const size_t ct = states_inadequate->states.size();
     for (int i = 0; i < ct; i++) {
         const int state_no = states_inadequate->states[i];
         if (state_no < 0)
@@ -2071,16 +2032,17 @@ resolve_lalr1_conflicts()
         const State* state = states_new_array->state_list[state_no];
 
         // clear the parsing table row for S where lookahead is terminal.
-#if DEBUG_RESOLVE_CONFLICT
-        printf("-----clear state[%d] = %d. len=%d\n", i, state_no, ct);
-#endif
-        clearStateTerminalTransitions(state_no);
+        if constexpr (DEBUG_RESOLVE_CONFLICT) {
+            std::cout << "-----clear state[" << i << "] = " << state_no
+                      << ". len=" << ct << std::endl;
+        }
+        clear_state_terminal_transitions(state_no);
 
         // clear all the conflicts associated with S.
         clear_state_conflicts(state_no);
 
         // re-insert actions into parsing table for this state.
-        for (int j = state->config_count - 1; j >= 0; j--) {
+        for (int j = static_cast<int>(state->config.size() - 1); j >= 0; j--) {
             const Configuration* config = state->config[j];
             if (is_final_configuration(config) && config->context != nullptr) {
                 // insert reduce
@@ -2099,7 +2061,8 @@ resolve_lalr1_conflicts()
                   find_successor_state_no(state_no, config->nMarker->snode));
             }
         }
-        const Conflict* c = states_new_array->conflict_list[state_no];
+        std::shared_ptr<Conflict>& c =
+          states_new_array->conflict_list[state_no];
         if (c == nullptr) {
             states_inadequate->states[i] = -1;
             states_inadequate->count_unresolved--;
@@ -2108,15 +2071,15 @@ resolve_lalr1_conflicts()
         }
     }
 
-#if DEBUG_RESOLVE_CONFLICT
-    printParsingTable();
-#endif
+    if constexpr (DEBUG_RESOLVE_CONFLICT) {
+        print_parsing_table();
+    }
 }
 
 void
 write_conflicting_context(int state_no)
 {
-    const Conflict* c = states_new_array->conflict_list[state_no];
+    std::shared_ptr<Conflict>& c = states_new_array->conflict_list[state_no];
     if (c == nullptr)
         return;
 
@@ -2132,13 +2095,14 @@ remove_pass_through_states(laneHead* lh_list) -> laneHead*
 {
     laneHead *h = lh_list, *h_prev = nullptr;
     for (; h != nullptr;) {
-#if DEBUG_PHASE_2
-        printf("state %d, PASS_THRU: %d\n", h->s->state_no, h->s->PASS_THRU);
-#endif
-        if (h->s->PASS_THRU == 1) {
-#if DEBUG_PHASE_2
-            puts("Is pass thru state! Remove it from laneHead list");
-#endif
+        if constexpr (DEBUG_PHASE_2) {
+            std::cout << "state " << h->s->state_no
+                      << ", PASS_THRU: " << h->s->PASS_THRU << std::endl;
+        }
+        if (h->s->PASS_THRU == 1u) {
+            if constexpr (DEBUG_PHASE_2) {
+                puts("Is pass thru state! Remove it from laneHead list");
+            }
             // now remove this state from lh_list.
             laneHead* tmp = h;
             if (h_prev == nullptr) { // first node
@@ -2197,9 +2161,8 @@ write_state_no_array(const StateNoArray* a, char* name)
     if (name != nullptr) {
         std::cout << name << ": ";
     }
-    const int ct = a->count;
-    for (int i = 0; i < ct; i++) {
-        std::cout << a->states[i] << " ";
+    for (const int state : a->states) {
+        std::cout << state << " ";
     }
     std::cout << std::endl;
 }
@@ -2212,8 +2175,7 @@ get_state_successors(const State* s) -> StateCollection*
 {
     StateCollection* coll = create_state_collection();
 
-    for (int i = 0; i < s->config_count; i++) {
-        Configuration* c = s->config[i];
+    for (const auto& c : s->config) {
         if (is_final_configuration(c)) {
             // do nothing.
         } else { // do transit operation.
@@ -2226,7 +2188,7 @@ get_state_successors(const State* s) -> StateCollection*
             if (new_state == nullptr) {
                 new_state = create_state();
                 // record which symbol this state is a successor by.
-                new_state->trans_symbol = create_symbol_node(scanned_symbol);
+                new_state->trans_symbol = SymbolNode::create(scanned_symbol);
                 coll->add_state2(new_state);
             }
             // create a new core config for new_state.
@@ -2253,8 +2215,7 @@ get_state_successors(const State* s) -> StateCollection*
 static auto
 get_successor_index(const State* s, const SymbolTblNode* trans_symbol) -> int
 {
-    const int len = s->successor_count;
-    for (int i = 0; i < len; i++) {
+    for (int i = 0; i < s->successor_list.size(); i++) {
         if (s->successor_list[i]->trans_symbol->snode == trans_symbol) {
             return i; // s->successor_list[i];
         }
@@ -2277,31 +2238,31 @@ get_successor_index(const State* s, const SymbolTblNode* trans_symbol) -> int
  *          false if an existing state is found.
  */
 static auto
-add_split_state(State* y, const State* s, int successor_index) -> bool
+add_split_state(State* y, State* s, int successor_index) -> bool
 {
     int is_compatible = 0;
     State* os = search_state_hash_tbl(y, &is_compatible); // same or compatible.
 
     if (os == nullptr) { // No existing state found. Add Y as a new state.
         y->state_no = states_new->state_count;
-#if DEBUG_PHASE_2_REGENERATE
-        // puts("split - new state");
-        printf("split - add new state %d\n", Y->state_no);
-#endif
+        if constexpr (DEBUG_PHASE_2_REGENERATE) {
+            // puts("split - new state");
+            printf("split - add new state %d\n", y->state_no);
+        }
         states_new->add_state2(y);
         add_state_to_state_array(*states_new_array, y);
         // update shift action.
         update_action(
-          get_col(y->trans_symbol->snode), s->state_no, y->state_no);
+          get_col(*y->trans_symbol->snode), s->state_no, y->state_no);
         // update the Y0 successor link of S to Y.
         s->successor_list[successor_index] = y;
-        if (states_new->state_count >= PARSING_TABLE_SIZE) {
+        while (states_new->state_count >= PARSING_TABLE_SIZE) {
             expand_parsing_table();
         }
         return true;
     } // same or compatible with an existing state.
     // puts("split - old state");
-    update_action(get_col(os->trans_symbol->snode), s->state_no, os->state_no);
+    update_action(get_col(*os->trans_symbol->snode), s->state_no, os->state_no);
     s->successor_list[successor_index] = os;
     State::destroy_state(y);
     return false;
@@ -2315,17 +2276,17 @@ add_unique_queue(State* s, laneHead* lh_list) -> laneHead*
         return create_lane_head(s, nullptr);
 
     if (h->s == s) { // exists, is the first node.
-#if DEBUG_PHASE_2_REGENERATE
-        printf("state %d already on laneHead queue\n", s->state_no);
-#endif
+        if constexpr (DEBUG_PHASE_2_REGENERATE) {
+            printf("state %d already on laneHead queue\n", s->state_no);
+        }
         return lh_list;
     }
 
     for (; h->next != nullptr; h = h->next) {
         if (h->next->s == s) { // exists already.
-#if DEBUG_PHASE_2_REGENERATE
-            printf("state %d already on laneHead queue\n", s->state_no);
-#endif
+            if constexpr (DEBUG_PHASE_2_REGENERATE) {
+                printf("state %d already on laneHead queue\n", s->state_no);
+            }
             return lh_list;
         }
     }
@@ -2349,17 +2310,17 @@ regenerate_state_context(State* s, State* t)
     }
 
     // clear the context of S.
-    int ct = s->config_count;
-    for (int i = 0; i < ct; i++) { // -> if final config, remove p.t. entry.
-        Context* c = s->config[i]->context;
+    for (const auto& config :
+         s->config) { // -> if final config, remove p.t. entry.
+        Context* c = config->context;
         free_symbol_node_list(c->nContext);
         c->nContext = nullptr;
         c->context_count = 0;
     }
 
     // copy the context from T to S.
-    ct = t->core_config_count;
-    for (int i = 0; i < ct; i++) {
+    const size_t ct = t->core_config_count;
+    for (size_t i = 0; i < ct; i++) {
         copy_context(s->config[i]->context, t->config[i]->context);
     }
 }
@@ -2391,22 +2352,20 @@ update_state_reduce_action(State* s)
     int state_dest = 0;
     char action = 0;
 
-    const int ct = s->config_count;
-    for (int i = 0; i < ct; i++) {
+    for (const auto& c : s->config) {
         // update reduce action for final/empty production.
-        Configuration* c = s->config[i];
         if (is_final_configuration(c) ||
             strlen(get_scanned_symbol(c)->symbol) == 0) {
             const SymbolNode* lookahead = c->context->nContext;
             for (; lookahead != nullptr; lookahead = lookahead->next) {
                 get_action(lookahead->snode->type,
-                           get_col(lookahead->snode),
+                           get_col(*lookahead->snode),
                            s->state_no,
                            &action,
                            &state_dest);
                 if (state_dest != c->ruleID) {
                     if (action == 0 || action == 'r') {
-                        update_action(get_col(lookahead->snode),
+                        update_action(get_col(*lookahead->snode),
                                       s->state_no,
                                       (-1) * c->ruleID);
                     } else { // else, is "s" or "acc".
@@ -2462,10 +2421,10 @@ phase2_regeneration(laneHead* lh_list)
         get_closure(s); // get_closure() is defined in y.c
         update_state_reduce_action(s);
 
-#if DEBUG_PHASE_2_REGENERATE
-        printf("\n==regenerate state %d\n", S->state_no);
-        my_writeState(S);
-#endif
+        if constexpr (DEBUG_PHASE_2_REGENERATE) {
+            printf("\n==regenerate state %d\n", s->state_no);
+            my_write_state(s);
+        }
         const StateCollection* coll = get_state_successors(s);
 
         for (State* y = coll->states_head; y != nullptr; y = y->next) {
@@ -2476,21 +2435,22 @@ phase2_regeneration(laneHead* lh_list)
             State* y0 = s->successor_list[successor_index];
 
             if (y0->PASS_THRU == 0u) {
-#if DEBUG_PHASE_2_REGENERATE
-                printf("state %d PASS_THRU == 0 - NOT on lane\n", Y0->state_no);
-#endif
+                if constexpr (DEBUG_PHASE_2_REGENERATE) {
+                    printf("state %d PASS_THRU == 0 - NOT on lane\n",
+                           y0->state_no);
+                }
                 continue; // NOT on 'conflicting' lane.
             }
-#if DEBUG_PHASE_2_REGENERATE
-            printf("state %d PASS_THRU == 1 - on lane\n", Y0->state_no);
-            printf("%s successor isOnConflictingLane\n",
-                   Y->trans_symbol->snode->symbol);
-#endif
+            if constexpr (DEBUG_PHASE_2_REGENERATE) {
+                printf("state %d PASS_THRU == 1 - on lane\n", y0->state_no);
+                printf("%s successor isOnConflictingLane\n",
+                       y->trans_symbol->snode->symbol);
+            }
 
             if (y0->REGENERATED == 0u) { // is original.
-#if DEBUG_PHASE_2_REGENERATE
-                printf("replace - replace old state %d\n", Y0->state_no);
-#endif
+                if constexpr (DEBUG_PHASE_2_REGENERATE) {
+                    printf("replace - replace old state %d\n", y0->state_no);
+                }
                 // replace the context of Y0 with those of Y.
                 regenerate_state_context(y0, y);
                 y0->REGENERATED = 1;
@@ -2499,9 +2459,10 @@ phase2_regeneration(laneHead* lh_list)
                 exists = is_compatible_states(y0, y);
 
                 if (exists) {
-#if DEBUG_PHASE_2_REGENERATE
-                    printf("combine to compatible state %d\n", Y0->state_no);
-#endif
+                    if constexpr (DEBUG_PHASE_2_REGENERATE) {
+                        printf("combine to compatible state %d\n",
+                               y0->state_no);
+                    }
                     combine_state_context(y0, y);
                     lh_list = add_unique_queue(y0, lh_list);
                 } else {
@@ -2509,9 +2470,9 @@ phase2_regeneration(laneHead* lh_list)
                         if (new_state == nullptr) {
                             new_state = y;
                         }
-#if DEBUG_PHASE_2_REGENERATE
-                        puts("split - new state added");
-#endif
+                        if constexpr (DEBUG_PHASE_2_REGENERATE) {
+                            puts("split - new state added");
+                        }
                     }
                 }
             }
@@ -2521,9 +2482,9 @@ phase2_regeneration(laneHead* lh_list)
     // 2) handle the new added states.
     //    If there are any new split states, do GPM on them.
     if (new_state != nullptr) {
-#if DEBUG_PHASE_2_REGENERATE
-        puts("GRM(new_state) now.");
-#endif
+        if constexpr (DEBUG_PHASE_2_REGENERATE) {
+            puts("GRM(new_state) now.");
+        }
         gpm(new_state);
     }
 }
@@ -2563,15 +2524,16 @@ get_the_context(const Configuration* o) -> SymbolNode*
     gamma_theads =
       remove_from_symbol_list(gamma_theads, hash_tbl_find(""), &exist);
 
-#if DEBUG_PHASE_2_GET_TBL
-    if (gamma_theads != nullptr) {
-        printf("C: Add context to entry state %d: ", o->owner->state_no);
-        printf(
-          "[%d.%d] ", cur_red_config->owner->state_no, cur_red_config->ruleID);
-        writeTheSymbolList(gamma_theads);
-        printf("\n");
+    if constexpr (DEBUG_PHASE_2_GET_TBL) {
+        if (gamma_theads != nullptr) {
+            printf("C: Add context to entry state %d: ", o->owner->state_no);
+            printf("[%d.%d] ",
+                   cur_red_config->owner->state_no,
+                   cur_red_config->ruleID);
+            write_the_symbol_list(gamma_theads);
+            printf("\n");
+        }
     }
-#endif
 
     lt_tbl_entry_add_context(o->owner, gamma_theads); // add context.
 
@@ -2598,25 +2560,26 @@ trace_back(const Configuration* c0, Configuration* c, laneHead* lh_list)
     c->LANE_CON = 1; // set as config on conflicting lane.
 
     if (c->LANE_END == 1) {
-#if DEBUG_PHASE_2
-        printf("END config FOUND: %d.%d\n\n", c->owner->state_no, c->ruleID);
-        printf("=ADD another head state: %d\n", c->owner->state_no);
-#endif
+        if constexpr (DEBUG_PHASE_2) {
+            printf(
+              "END config FOUND: %d.%d\n\n", c->owner->state_no, c->ruleID);
+            printf("=ADD another head state: %d\n", c->owner->state_no);
+        }
 
-#if DEBUG_PHASE_2_GET_TBL
-        printf("D: END of config lane FOUND: %d.%d \n",
-               c->owner->state_no,
-               c->ruleID);
-#endif
-
-        if (Options::get().use_lr_k) { // for LR(k) use only.
-#if DEBUG_PHASE_2_GET_TBL
-            printf("config_red_config: %d.%d, LANE_END: %d.%d\n",
-                   cur_red_config->owner->state_no,
-                   cur_red_config->ruleID,
+        if constexpr (DEBUG_PHASE_2_GET_TBL) {
+            printf("D: END of config lane FOUND: %d.%d \n",
                    c->owner->state_no,
                    c->ruleID);
-#endif
+        }
+
+        if (Options::get().use_lr_k) { // for LR(k) use only.
+            if constexpr (DEBUG_PHASE_2_GET_TBL) {
+                printf("config_red_config: %d.%d, LANE_END: %d.%d\n",
+                       cur_red_config->owner->state_no,
+                       cur_red_config->ruleID,
+                       c->owner->state_no,
+                       c->ruleID);
+            }
             // Don't use goal production. As it is the augmented rule, and
             // it generates no context at all.
             if (!(c->owner->state_no == 0 && c->ruleID == 0))
@@ -2639,21 +2602,23 @@ trace_back(const Configuration* c0, Configuration* c, laneHead* lh_list)
 
         set_transitors_pass_thru_on(c, o); // set PASS_THRU ON.
         if (o->LANE_CON == 0) {
-#if DEBUG_PHASE_2
-            printf("config on lane: %d.%d\n", o->owner->state_no, o->ruleID);
-#endif
+            if constexpr (DEBUG_PHASE_2) {
+                printf(
+                  "config on lane: %d.%d\n", o->owner->state_no, o->ruleID);
+            }
             if (c->owner != o->owner) {
                 c->owner->PASS_THRU = 1;
-#if DEBUG_PHASE_2
-                printf("set state %d PASS_THRU ON\n", c->owner->state_no);
-#endif
+                if constexpr (DEBUG_PHASE_2) {
+                    printf("set state %d PASS_THRU ON\n", c->owner->state_no);
+                }
             }
 
             lh_list = trace_back(c, o, lh_list);
         } else {
-#if DEBUG_PHASE_2
-            printf("already traced: %d.%d\n", o->owner->state_no, o->ruleID);
-#endif
+            if constexpr (DEBUG_PHASE_2) {
+                printf(
+                  "already traced: %d.%d\n", o->owner->state_no, o->ruleID);
+            }
         }
     }
 
@@ -2671,18 +2636,19 @@ trace_back_lrk(const Configuration* c0, Configuration* c)
     c->LANE_CON = 1; // set as config on conflicting lane.
 
     if (c->LANE_END == 1) {
-#if DEBUG_PHASE_2
-        printf("END config FOUND: %d.%d\n\n", c->owner->state_no, c->ruleID);
-        printf("=ADD another head state: %d\n", c->owner->state_no);
-#endif
+        if constexpr (DEBUG_PHASE_2) {
+            printf(
+              "END config FOUND: %d.%d\n\n", c->owner->state_no, c->ruleID);
+            printf("=ADD another head state: %d\n", c->owner->state_no);
+        }
 
-#if DEBUG_PHASE_2_GET_TBL
-        printf("config_red_config: %d.%d, LANE_END: %d.%d\n",
-               cur_red_config->owner->state_no,
-               cur_red_config->ruleID,
-               c->owner->state_no,
-               c->ruleID);
-#endif
+        if constexpr (DEBUG_PHASE_2_GET_TBL) {
+            printf("config_red_config: %d.%d, LANE_END: %d.%d\n",
+                   cur_red_config->owner->state_no,
+                   cur_red_config->ruleID,
+                   c->owner->state_no,
+                   c->ruleID);
+        }
         // Don't use goal production. As it is the augmented rule, and
         // it generates no context at all.
         if (!(c->owner->state_no == 0 && c->ruleID == 0))
@@ -2695,7 +2661,8 @@ trace_back_lrk(const Configuration* c0, Configuration* c)
     // get_originators(c, c);
 
     if (c->originators == nullptr) {
-        puts("trace_back: c->originators is nullptr. error? report bug");
+        std::cout << "trace_back: c->originators is nullptr. error? report bug"
+                  << std::endl;
         return; // should NEVER happen.
     }
 
@@ -2703,16 +2670,18 @@ trace_back_lrk(const Configuration* c0, Configuration* c)
     for (int i = 0; i < len; i++) {
         Configuration* o = c->originators->list[i];
 
-        if (o->LANE_CON == 0) {
-#if DEBUG_PHASE_2
-            printf("config on lane: %d.%d\n", o->owner->state_no, o->ruleID);
-#endif
+        if (o->LANE_CON == 0u) {
+            if constexpr (DEBUG_PHASE_2) {
+                std::cout << "config on lane: " << o->owner->state_no << "."
+                          << o->ruleID << std::endl;
+            }
 
             trace_back_lrk(c, o);
         } else {
-#if DEBUG_PHASE_2
-            printf("already traced: %d.%d\n", o->owner->state_no, o->ruleID);
-#endif
+            if constexpr (DEBUG_PHASE_2) {
+                std::cout << "already traced: " << o->owner->state_no << "."
+                          << o->ruleID << std::endl;
+            }
         }
     }
 }
@@ -2728,7 +2697,7 @@ trace_back_lrk_clear(const Configuration* c0, Configuration* c)
 {
     c->LANE_CON = 0; // set as config on conflicting lane.
 
-    if (c->LANE_END == 1) {
+    if (c->LANE_END == 1u) {
         return;
     }
     if (c->originators == nullptr) {
@@ -2739,7 +2708,7 @@ trace_back_lrk_clear(const Configuration* c0, Configuration* c)
     for (int i = 0; i < len; i++) {
         Configuration* o = c->originators->list[i];
 
-        if (o->LANE_CON == 1) {
+        if (o->LANE_CON == 1u) {
             trace_back_lrk_clear(c, o);
         }
     }
@@ -2755,17 +2724,19 @@ static auto
 get_state_conflict_lane_head(int state_no, laneHead* lh_list) -> laneHead*
 {
     const State* s = states_new_array->state_list[state_no];
-    const int len = s->config_count;
-    for (int i = 0; i < len; i++) {
-        Configuration* con = s->config[i];
+    for (const auto& con : s->config) {
         if (is_final_configuration(con)) {
-#if DEBUG_PHASE_2
-            printf("\nfinal config: %d.%d\n", state_no, con->ruleID);
-#endif
+            if constexpr (DEBUG_PHASE_2) {
+                std::cout << std::endl
+                          << "final config: " << state_no << '.' << con->ruleID
+                          << std::endl;
+            }
 
-#if DEBUG_PHASE_2_GET_TBL
-            printf("\nA: final config: %d.%d\n", state_no, con->ruleID);
-#endif
+            if constexpr (DEBUG_PHASE_2_GET_TBL) {
+                std::cout << std::endl
+                          << "A: final config: " << state_no << '.'
+                          << con->ruleID << std::endl;
+            }
             cur_red_config = con;
             lh_list = trace_back(nullptr, con, lh_list);
         }
@@ -2783,32 +2754,31 @@ get_conflict_lane_head() -> laneHead*
 {
     laneHead* lane_head_list = nullptr;
 
-    for (int i = 0; i < states_inadequate->count; i++) {
-        const int state_no = states_inadequate->states[i];
+    for (const int state_no : states_inadequate->states) {
         if (state_no >= 0) {
-#if DEBUG_GET_LANEHEAD
-            printf("inadequate state: %d. ", state_no);
-            writeConflictingContext(state_no);
-#endif
+            if constexpr (DEBUG_GET_LANEHEAD) {
+                std::cout << "inadequate state: " << state_no << ". ";
+                write_conflicting_context(state_no);
+            }
 
             if (states_new_array->rr_count[state_no] > 0) {
-#if DEBUG_GET_LANEHEAD
-                printf(" [%d r/r conflicts]",
-                       states_new_array->rr_count[state_no]);
-#endif
+                if constexpr (DEBUG_GET_LANEHEAD) {
+                    std::cout << " [" << states_new_array->rr_count[state_no]
+                              << " r/r conflicts]";
+                }
                 lane_head_list =
                   get_state_conflict_lane_head(state_no, lane_head_list);
             }
 
-#if DEBUG_GET_LANEHEAD
-            puts("");
-#endif
+            if constexpr (DEBUG_GET_LANEHEAD) {
+                std::cout << std::endl;
+            }
         }
     }
 
-#if DEBUG_PHASE_2
-    dumpLaneHeadList(laneHeadList);
-#endif
+    if constexpr (DEBUG_PHASE_2) {
+        dump_lane_head_list(lane_head_list);
+    }
 
     lane_head_list = remove_pass_through_states(lane_head_list);
 
@@ -2822,9 +2792,9 @@ lane_tracing_phase2()
     LT_tbl = nullptr;               // initialize the LT_tbl.
 
     const int ct = states_inadequate->count_unresolved;
-#if DEBUG_PHASE_2
-    printf("phase 2. unresolved inadequate states: %d\n", ct);
-#endif
+    if constexpr (DEBUG_PHASE_2) {
+        printf("phase 2. unresolved inadequate states: %d\n", ct);
+    }
 
     laneHead* lane_head_list = get_conflict_lane_head();
     if (lane_head_list == nullptr) {
@@ -2832,13 +2802,13 @@ lane_tracing_phase2()
         return;
     }
 
-#if DEBUG_PHASE_2_GET_TBL
-    dump_LT_tbl();
-#endif
+    if constexpr (DEBUG_PHASE_2_GET_TBL) {
+        dump_lt_tbl();
+    }
 
-#if DEBUG_PHASE_2_REGENERATE
-    puts("Now do regeneration");
-#endif
+    if constexpr (DEBUG_PHASE_2_REGENERATE) {
+        puts("Now do regeneration");
+    }
 
     if (!Options::get().use_combine_compatible_states) {
         phase2_regeneration2(); // using all_clusters.
@@ -2947,7 +2917,7 @@ insert_symbol_list_unique(SymbolList list, SymbolTblNode* snode, bool* exist)
     *exist = false;
 
     if (list == nullptr)
-        return create_symbol_node(snode);
+        return SymbolNode::create(snode);
 
     SymbolNode *n = list, *n_prev = nullptr;
     for (; n != nullptr; n_prev = n, n = n->next) {
@@ -2956,7 +2926,7 @@ insert_symbol_list_unique(SymbolList list, SymbolTblNode* snode, bool* exist)
             return list; // existing node.
         }
         if (strcmp(n->snode->symbol, snode->symbol) > 0) {
-            SymbolNode* new_node = create_symbol_node(snode);
+            SymbolNode* new_node = SymbolNode::create(snode);
             // insert new_snode before n.
 
             if (n_prev == nullptr) {
@@ -2970,7 +2940,7 @@ insert_symbol_list_unique(SymbolList list, SymbolTblNode* snode, bool* exist)
     } // end of for.
 
     // insert as the last node.
-    n_prev->next = create_symbol_node(snode);
+    n_prev->next = SymbolNode::create(snode);
     return list;
 }
 
@@ -3018,9 +2988,9 @@ stack_operation(int* fail_ct, Configuration* o)
 
     (*fail_ct)++;
 
-#if DEBUG_PHASE_1
-    printf("---------------fail_ct = %d\n", *fail_ct);
-#endif
+    if constexpr (DEBUG_PHASE_1) {
+        printf("---------------fail_ct = %d\n", *fail_ct);
+    }
 
     switch (*fail_ct) {
         case 1:
@@ -3041,9 +3011,9 @@ stack_operation(int* fail_ct, Configuration* o)
             break;
     }
 
-#if DEBUG_PHASE_1
-    dump_stacks();
-#endif
+    if constexpr (DEBUG_PHASE_1) {
+        dump_stacks();
+    }
 }
 
 static void
@@ -3087,10 +3057,10 @@ move_markers(Configuration* o)
 static void
 context_adding(SymbolList context_generated, int cur_config_index)
 {
-#if DEBUG_PHASE_1
-    puts("CONTEXT ADDING ROUTINE: ");
-    writeSymbolList(CONTEXT_GENERATED, "CONTEXT_GENERATED");
-#endif
+    if constexpr (DEBUG_PHASE_1) {
+        puts("CONTEXT ADDING ROUTINE: ");
+        write_symbol_list(context_generated, "CONTEXT_GENERATED");
+    }
 
     SymbolNode* n = context_generated;
 
@@ -3098,9 +3068,10 @@ context_adding(SymbolList context_generated, int cur_config_index)
         for (int ct = cur_config_index; ct >= 0; ct--) {
             Configuration* c = LANE->array[ct];
             if (c != LT_ZERO && c != LT_MARKER) {
-#if DEBUG_PHASE_1
-                printf("add context to %d.%d\n", c->owner->state_no, c->ruleID);
-#endif
+                if constexpr (DEBUG_PHASE_1) {
+                    printf(
+                      "add context to %d.%d\n", c->owner->state_no, c->ruleID);
+                }
                 bool exist = false;
                 c->context->nContext = insert_symbol_list_unique(
                   c->context->nContext, n->snode, &exist);
@@ -3126,19 +3097,19 @@ context_adding_routine(SymbolList context_generated,
 
     if (TRACE_FURTHER == FLAG_ON) {
 
-#if DEBUG_PHASE_1
-        puts("__TRACE_FURTHER is ON");
-#endif
+        if constexpr (DEBUG_PHASE_1) {
+            std::cout << "__TRACE_FURTHER is ON" << std::endl;
+        }
 
         TRACE_FURTHER = FLAG_OFF;
         stack_operation(fail_ct, o);
     }
 
-#if DEBUG_PHASE_1
-    else {
-        puts("__TRACE_FURTHER is OFF");
+    if constexpr (DEBUG_PHASE_1) {
+        if (TRACE_FURTHER != FLAG_ON) {
+            std::cout << "__TRACE_FURTHER is OFF" << std::endl;
+        }
     }
-#endif
 }
 
 /*
@@ -3151,10 +3122,10 @@ lane_tracing_reduction(Configuration* c)
     if (nullptr == c)
         return;
 
-#if DEBUG_PHASE_1
-    printf("work on reduce config: ");
-    stdout_writeConfig(c);
-#endif
+    if constexpr (DEBUG_PHASE_1) {
+        std::cout << "work on reduce config: ";
+        stdout_write_config(c);
+    }
 
     if (c->COMPLETE == 1) {
 #if DEBUG_EdgePushing
@@ -3260,13 +3231,13 @@ set_transitors_pass_thru_on(const Configuration* cur_config, Configuration* o)
         if (is_on_transitor_chain(c, o)) {
 
             if (false == Options::get().use_combine_compatible_states) {
-#if DEBUG_PHASE_2_GET_TBL
-                printf("B: next entry in entry_table: (%d.%d, %d.%d)\n",
-                       c->owner->state_no,
-                       c->ruleID,
-                       cur_config->owner->state_no,
-                       cur_config->ruleID);
-#endif
+                if constexpr (DEBUG_PHASE_2_GET_TBL) {
+                    printf("B: next entry in entry_table: (%d.%d, %d.%d)\n",
+                           c->owner->state_no,
+                           c->ruleID,
+                           cur_config->owner->state_no,
+                           cur_config->ruleID);
+                }
                 // add another entry to LT_tbl.
                 lt_tbl_entry_add(c->owner, cur_config->owner);
             }
@@ -3276,10 +3247,10 @@ set_transitors_pass_thru_on(const Configuration* cur_config, Configuration* o)
                 // handled here since it's already handled in trace_back().
                 // you also don't want to set o->owner to be PASS_THRU, since
                 // it may be the end state.
-#if DEBUG_PHASE_2_GET_TBL
-                printf("==state %d: set pass_thru ON. 2.\n",
-                       c->owner->state_no);
-#endif
+                if constexpr (DEBUG_PHASE_2_GET_TBL) {
+                    printf("==state %d: set pass_thru ON. 2.\n",
+                           c->owner->state_no);
+                }
                 c->owner->PASS_THRU = 1;
             }
             set_transitors_pass_thru_on(c, o);
@@ -3299,7 +3270,7 @@ set_transitors_pass_thru_on(const Configuration* cur_config, Configuration* o)
 static void
 get_transitors(Configuration* c0, Configuration* c)
 {
-    StateList* l = c->owner->parents_list;
+    const auto& l = c->owner->parents_list;
     if (l == nullptr) {
         std::cout << "Error: get_transitors() - L is nullptr" << std::endl;
         return;
@@ -3307,27 +3278,27 @@ get_transitors(Configuration* c0, Configuration* c)
     if (l->state_list.size() == 0)
         return;
 
-#if DEBUG_GET_ORIGINATOR
-    printf(
-      "get transitor for %d.%d.%d\n", c->owner->state_no, c->ruleID, c->marker);
-#endif
+    if constexpr (DEBUG_GET_ORIGINATOR) {
+        printf("get transitor for %d.%d.%d\n",
+               c->owner->state_no,
+               c->ruleID,
+               c->marker);
+    }
 
-    for (int i = 0; i < l->state_list.size(); i++) {
-        State* p = l->state_list[i];
+    for (const auto& p : l->state_list) {
         // now get transitor for c.
-        for (int j = 0; j < p->config_count; j++) {
-            Configuration* t = p->config[j];
+        for (const auto& t : p->config) {
             if (t->ruleID == c->ruleID && t->marker == c->marker - 1) {
                 // is a transitor.
-#if DEBUG_GET_ORIGINATOR
-                printf("++ ++ transitor found for [%d.%d.%d]: [%d.%d.%d]\n",
-                       c->owner->state_no,
-                       c->ruleID,
-                       c->marker,
-                       p->state_no,
-                       t->ruleID,
-                       t->marker);
-#endif
+                if constexpr (DEBUG_GET_ORIGINATOR) {
+                    printf("++ ++ transitor found for [%d.%d.%d]: [%d.%d.%d]\n",
+                           c->owner->state_no,
+                           c->ruleID,
+                           c->marker,
+                           p->state_no,
+                           t->ruleID,
+                           t->marker);
+                }
                 insert_transitor_list(c, t);
                 get_originators(c0, t);
             }
@@ -3350,18 +3321,17 @@ get_transitors(Configuration* c0, Configuration* c)
 static void
 get_originators(Configuration* c0, Configuration* c)
 {
-#if DEBUG_GET_ORIGINATOR
-    printf("-- current config: %d.%d.%d\n",
-           c->owner->state_no,
-           c->ruleID,
-           c->marker);
-#endif
+    if constexpr (DEBUG_GET_ORIGINATOR) {
+        printf("-- current config: %d.%d.%d\n",
+               c->owner->state_no,
+               c->ruleID,
+               c->marker);
+    }
 
-    if (c->isCoreConfig == 1) { // core config, search parent states.
+    if (c->isCoreConfig == 1u) { // core config, search parent states.
         get_transitors(c0, c);
     } else { // not core config. find originators in current state.
-        for (int i = 0; i < c->owner->config_count; i++) {
-            Configuration* d = c->owner->config[i];
+        for (const auto& d : c->owner->config) {
             if (c == d) {
                 continue;
             } // ignore c.
@@ -3369,15 +3339,16 @@ get_originators(Configuration* c0, Configuration* c)
                 continue;
             }
             if (d->nMarker->snode == grammar.rules[c->ruleID]->nLHS->snode) {
-#if DEBUG_GET_ORIGINATOR
-                printf("-- -- originator found for [%d.%d.%d]: [%d.%d.%d]\n",
-                       c0->owner->state_no,
-                       c0->ruleID,
-                       c0->marker,
-                       d->owner->state_no,
-                       d->ruleID,
-                       d->marker);
-#endif
+                if constexpr (DEBUG_GET_ORIGINATOR) {
+                    printf(
+                      "-- -- originator found for [%d.%d.%d]: [%d.%d.%d]\n",
+                      c0->owner->state_no,
+                      c0->ruleID,
+                      c0->marker,
+                      d->owner->state_no,
+                      d->ruleID,
+                      d->marker);
+                }
                 insert_originator_list(c0, d, 1);
             }
         }
@@ -3389,39 +3360,36 @@ get_originators(Configuration* c0, Configuration* c)
 static void
 do_loop()
 {
-    SymbolNode* CONTEXTS_GENERATED;
-    int fail_ct;
-    int cur_config_index;
-
     Configuration* cur_config = LANE->top();
-    cur_config_index = LANE->count() - 1;
+    const size_t cur_config_index = LANE->count() - 1;
 
     if (cur_config == LT_MARKER || cur_config == LT_ZERO ||
         cur_config == nullptr) { // should never happen.
-        puts("DO_LOOP cur_config error");
-        exit(1);
+        throw std::runtime_error("DO_LOOP cur_config error");
     }
 
-#if DEBUG_GET_ORIGINATOR
-    printf("==call get_originators(cur_config) in DO_LOOP()==\n");
-#endif
+    if constexpr (DEBUG_GET_ORIGINATOR) {
+        std::cout << "==call get_originators(cur_config) in DO_LOOP()=="
+                  << std::endl;
+    }
     get_originators(cur_config, cur_config);
 
     const int ct = cur_config->originators->count;
-    fail_ct = 0;
+    int fail_ct = 0;
 
-#if DEBUG_PHASE_1
-    printf("++++++++++TOP of LANE is: ");
-    stdout_writeConfig(cur_config);
-#endif
+    if constexpr (DEBUG_PHASE_1) {
+        std::cout << "++++++++++TOP of LANE is: ";
+        stdout_write_config(cur_config);
+    }
 
     for (int i = 0; i < ct; i++) {
 
-#if DEBUG_PHASE_1
-        puts("________NEXT ORIGINATOR___________________");
-#endif
+        if constexpr (DEBUG_PHASE_1) {
+            std::cout << "________NEXT ORIGINATOR___________________"
+                      << std::endl;
+        }
 
-        CONTEXTS_GENERATED = nullptr;
+        SymbolNode* contexts_generated = nullptr;
         Configuration* o = cur_config->originators->list[i];
 
         SymbolNode* scanned_symbol = o->nMarker;
@@ -3431,21 +3399,21 @@ do_loop()
         else
             gamma = scanned_symbol->next;
 
-#if DEBUG_PHASE_1
-        stdout_writeConfig(o);
-        printf("gamma: %s\n",
-               gamma == nullptr ? "nullptr" : gamma->snode->symbol);
-#endif
+        if constexpr (DEBUG_PHASE_1) {
+            stdout_write_config(o);
+            printf("gamma: %s\n",
+                   gamma == nullptr ? "nullptr" : gamma->snode->symbol);
+        }
 
         SymbolNode* gamma_theads = nullptr;
         if (gamma != nullptr) { // if not nullptr, get theads.
-#if DEBUG_PHASE_1
-            puts("gamma not nullptr, get theads.");
-#endif
+            if constexpr (DEBUG_PHASE_1) {
+                puts("gamma not nullptr, get theads.");
+            }
             gamma_theads = get_theads(gamma); // get Heads.
-#if DEBUG_PHASE_1
-            my_showTHeads(gamma, gamma_theads);
-#endif
+            if constexpr (DEBUG_PHASE_1) {
+                my_show_t_heads(gamma, gamma_theads);
+            }
         } else {
             // gamma is nullptr, check if this is goal production.
             // NOTE that there are only TWO goal production in all states.
@@ -3454,76 +3422,77 @@ do_loop()
             // won't be traced in lane-tracing at all.
             // if (o->owner->state_no == 0 && o->ruleID == 0) {
             if (is_goal(*o)) {
-#if DEBUG_PHASE_1
-                puts("GOAL PRODUCTION - generate context: $end");
-#endif
-                gamma_theads = create_symbol_node(hash_tbl_find(STR_END));
+                if constexpr (DEBUG_PHASE_1) {
+                    puts("GOAL PRODUCTION - generate context: $end");
+                }
+                gamma_theads = SymbolNode::create(hash_tbl_find(STR_END));
             }
         }
 
-#if DEBUG_PHASE_1
-        dumpLaneStartStates(o, gamma_theads);
-#endif
+        if constexpr (DEBUG_PHASE_1) {
+            dump_lane_start_states(o, gamma_theads);
+        }
 
         if (test_a(gamma_theads)) {
-#if DEBUG_PHASE_1
-            puts("testA true, get CONTEXTS_GENERATED");
-#endif
+            if constexpr (DEBUG_PHASE_1) {
+                puts("testA true, get CONTEXTS_GENERATED");
+            }
             bool null_possible = false;
-            CONTEXTS_GENERATED =
+            contexts_generated =
               get_contexts_generated(gamma_theads, &null_possible);
 
             if (IN_EDGE_PUSHING_LANE_TRACING) { /// 12-19-2008.
-                EDGE_PUSHING_CONTEXT_GENERATED = CONTEXTS_GENERATED;
+                EDGE_PUSHING_CONTEXT_GENERATED = contexts_generated;
             }
 
             if (null_possible) {
-#if DEBUG_PHASE_1
-                puts("null possible true");
-#endif
+                if constexpr (DEBUG_PHASE_1) {
+                    puts("null possible true");
+                }
                 if (test_b(o)) { // if (o->COMPLETE == FLAG_ON) {
-#if DEBUG_PHASE_1
-                    puts("COMPLETE ON");
-#endif
+                    if constexpr (DEBUG_PHASE_1) {
+                        puts("COMPLETE ON");
+                    }
 
-                    CONTEXTS_GENERATED = combine_context_list(
-                      CONTEXTS_GENERATED, o->context->nContext);
+                    contexts_generated = combine_context_list(
+                      contexts_generated, o->context->nContext);
                 } else {
-#if DEBUG_PHASE_1
-                    puts("COMPLETE OFF");
-#endif
+                    if constexpr (DEBUG_PHASE_1) {
+                        puts("COMPLETE OFF");
+                    }
 
                     if (test_d(o)) { // if (o->IN_LANE == FLAG_ON) {
-#if DEBUG_PHASE_1
-                        puts("IN_LANE ON");
-                        puts("GRAMMAR is AMBIGUOUS");
-#endif
+                        if constexpr (DEBUG_PHASE_1) {
+                            puts("IN_LANE ON");
+                            puts("GRAMMAR is AMBIGUOUS");
+                        }
                         GRAMMAR_AMBIGUOUS = true;
                         /// exit(1); //////////////// exit prematurely.
                         move_markers(o);
                     } else {
-#if DEBUG_PHASE_1
-                        puts("IN_LANE OFF. set TRACE_FURTHER ON");
-#endif
+                        if constexpr (DEBUG_PHASE_1) {
+                            puts("IN_LANE OFF. set TRACE_FURTHER ON");
+                        }
 
                         TRACE_FURTHER = FLAG_ON;
                     }
                 }
             } else {
-#if DEBUG_PHASE_1
-                puts("possible null is: false");
-#endif
+                if constexpr (DEBUG_PHASE_1) {
+                    puts("possible null is: false");
+                }
                 o->LANE_END = 1; // set LANE_END to be true.
 
-#if DEBUG_PHASE_1
-                printf(
-                  "Found lane_end: %d.%d\n", o->owner->state_no, o->ruleID);
-                printf("conflict config: %d.%d, lane head state %d, contexts: ",
-                       LANE->array[0]->owner->state_no,
-                       LANE->array[0]->ruleID,
-                       o->owner->state_no);
-                writeSymbolList(gamma_theads, "contexts");
-#endif
+                if constexpr (DEBUG_PHASE_1) {
+                    printf(
+                      "Found lane_end: %d.%d\n", o->owner->state_no, o->ruleID);
+                    printf(
+                      "conflict config: %d.%d, lane head state %d, contexts: ",
+                      LANE->array[0]->owner->state_no,
+                      LANE->array[0]->ruleID,
+                      o->owner->state_no);
+                    write_symbol_list(gamma_theads, "contexts");
+                }
                 // if is in edge_pushing, ignore the context adding routine.
                 if (IN_EDGE_PUSHING_LANE_TRACING) {
                     continue;
@@ -3531,42 +3500,42 @@ do_loop()
             }
             // CONTEXT adding routine.
             context_adding_routine(
-              CONTEXTS_GENERATED, o, cur_config_index, &fail_ct);
+              contexts_generated, o, cur_config_index, &fail_ct);
 
         } else {
-#if DEBUG_PHASE_1
-            puts("testA false");
-#endif
+            if constexpr (DEBUG_PHASE_1) {
+                puts("testA false");
+            }
 
             if (test_b(o)) { // testB
-#if DEBUG_PHASE_1
-                puts("testB true");
-#endif
+                if constexpr (DEBUG_PHASE_1) {
+                    puts("testB true");
+                }
 
-                CONTEXTS_GENERATED = combine_context_list(CONTEXTS_GENERATED,
+                contexts_generated = combine_context_list(contexts_generated,
                                                           o->context->nContext);
                 context_adding_routine(
-                  CONTEXTS_GENERATED, o, cur_config_index, &fail_ct);
+                  contexts_generated, o, cur_config_index, &fail_ct);
             } else {
-#if DEBUG_PHASE_1
-                puts("testB false");
-#endif
+                if constexpr (DEBUG_PHASE_1) {
+                    puts("testB false");
+                }
 
                 if (test_c(o)) { // test_c
-#if DEBUG_PHASE_1
-                    puts("test_c true");
-#endif
+                    if constexpr (DEBUG_PHASE_1) {
+                        puts("test_c true");
+                    }
 
                     move_markers(o);
 
-                    CONTEXTS_GENERATED = combine_context_list(
-                      CONTEXTS_GENERATED, o->context->nContext);
+                    contexts_generated = combine_context_list(
+                      contexts_generated, o->context->nContext);
                     context_adding_routine(
-                      CONTEXTS_GENERATED, o, cur_config_index, &fail_ct);
+                      contexts_generated, o, cur_config_index, &fail_ct);
                 } else {
-#if DEBUG_PHASE_1
-                    puts("test_c false");
-#endif
+                    if constexpr (DEBUG_PHASE_1) {
+                        puts("test_c false");
+                    }
 
                     stack_operation(&fail_ct, o);
                 }
@@ -3575,14 +3544,14 @@ do_loop()
 
     } // end of for.
 
-#if DEBUG_PHASE_1
-    puts("________END OF DO_LOOP____________________");
-#endif
+    if constexpr (DEBUG_PHASE_1) {
+        puts("________END OF DO_LOOP____________________");
+    }
 
     if (TEST_FAILED == FLAG_ON) {
-#if DEBUG_PHASE_1
-        puts("__TEST_FAILED is ON__");
-#endif
+        if constexpr (DEBUG_PHASE_1) {
+            puts("__TEST_FAILED is ON__");
+        }
 
         TEST_FAILED = FLAG_OFF;
         do_loop();
@@ -3595,9 +3564,9 @@ static void
 pop_lane()
 {
 
-#if DEBUG_PHASE_1
-    puts("POP_LANE");
-#endif
+    if constexpr (DEBUG_PHASE_1) {
+        puts("POP_LANE");
+    }
 
     LANE->pop();
     check_lane_top();
@@ -3609,29 +3578,29 @@ check_stack_top()
     Configuration* top = STACK->top();
 
     if (top == LT_MARKER) {
-#if DEBUG_PHASE_1
-        puts("__check_stack_top true");
-#endif
+        if constexpr (DEBUG_PHASE_1) {
+            puts("__check_stack_top true");
+        }
 
         STACK->pop();
         pop_lane();
 
     } else {
-#if DEBUG_PHASE_1
-        puts("__check_stack_top false");
-#endif
+        if constexpr (DEBUG_PHASE_1) {
+            puts("__check_stack_top false");
+        }
 
         if (top->COMPLETE == FLAG_ON) {
-#if DEBUG_PHASE_1
-            puts("__top COMPLETE ON");
-#endif
+            if constexpr (DEBUG_PHASE_1) {
+                puts("__top COMPLETE ON");
+            }
 
             STACK->pop();
             check_stack_top();
         } else {
-#if DEBUG_PHASE_1
-            puts("__top COMPLETE OFF");
-#endif
+            if constexpr (DEBUG_PHASE_1) {
+                puts("__top COMPLETE OFF");
+            }
 
             STACK->pop();
             LANE->push(top);
@@ -3644,23 +3613,19 @@ check_stack_top()
 static void
 propogate_context_sets(Configuration* c)
 {
-    State* s;
-    Configuration* f;
-    int i, ct;
-    if (c == nullptr || c->COMPLETE == 0 || c->isCoreConfig == 1)
+    if (c == nullptr || c->COMPLETE == 0u || c->isCoreConfig == 1u)
         return;
 
-#if DEBUG_PHASE_1
-    printf("===config %d.%d heuristic propogate context sets===\n",
-           c->owner->state_no,
-           c->ruleID);
-    stdout_writeConfig(c);
-#endif
+    if constexpr (DEBUG_PHASE_1) {
+        printf("===config %d.%d heuristic propogate context sets===\n",
+               c->owner->state_no,
+               c->ruleID);
+        stdout_write_config(c);
+    }
 
-    s = c->owner;
-    ct = s->config_count;
-    for (i = 0; i < ct; i++) {
-        f = s->config[i];
+    State* s = c->owner;
+    for (const auto& config : s->config) {
+        Configuration* f = config;
         if (f == c)
             continue;
         if (grammar.rules[f->ruleID]->nLHS->snode !=
@@ -3668,7 +3633,7 @@ propogate_context_sets(Configuration* c)
             continue;
         if (f->marker > 0)
             continue;
-        if (f->COMPLETE == 1)
+        if (f->COMPLETE == 1u)
             continue; // x-transition of conflict states.
 
         // otherwise, heuristically propagate context sets.
@@ -3684,20 +3649,20 @@ check_lane_top()
     Configuration* lane_top = LANE->top();
 
     if (lane_top == LT_MARKER) {
-#if DEBUG_PHASE_1
-        puts("check lane top true");
-#endif
+        if constexpr (DEBUG_PHASE_1) {
+            puts("check lane top true");
+        }
 
         check_stack_top();
     } else {
-#if DEBUG_PHASE_1
-        puts("check lane top false");
-#endif
+        if constexpr (DEBUG_PHASE_1) {
+            puts("check lane top false");
+        }
 
         if (lane_top == LT_ZERO) {
-#if DEBUG_PHASE_1
-            puts("lane top is ZERO.");
-#endif
+            if constexpr (DEBUG_PHASE_1) {
+                puts("lane top is ZERO.");
+            }
 
             pop_lane();
         } else {
@@ -3710,9 +3675,9 @@ check_lane_top()
             }
             if (LANE->count() == 1) { // the starting reduction
                                       /////////// END PROGRAMING ///////////////
-#if DEBUG_PHASE_1
-                puts("=====REDUCTION LANE TRACING ENDS=====");
-#endif
+                if constexpr (DEBUG_PHASE_1) {
+                    puts("=====REDUCTION LANE TRACING ENDS=====");
+                }
             } else {
                 pop_lane();
             }

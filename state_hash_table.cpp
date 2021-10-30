@@ -55,7 +55,7 @@
 struct StateTableNode
 {
     State* state;
-    struct StateTableNode* next;
+    StateTableNode* next;
 };
 using StateTblNode = struct StateTableNode;
 
@@ -92,12 +92,16 @@ init_state_hash_tbl()
     }
 }
 
+/// The result is garanteed to be strictly less than `SHT_SIZE`.
 static auto
-get_state_hash_val(State* s) -> int
+get_state_hash_val(const State& s) -> size_t
 {
-    int sum = 0;
-    for (int i = 0; i < s->core_config_count; i++) {
-        sum = (sum + s->config[i]->ruleID * 97 + s->config[i]->marker * 7 + i) %
+    constexpr int MAGIC_1 = 97;
+    constexpr int MAGIC_2 = 7;
+    size_t sum = 0;
+    for (size_t i = 0; i < s.core_config_count; i++) {
+        sum = (sum + s.config[i]->ruleID * MAGIC_1 +
+               s.config[i]->marker * MAGIC_2 + i) %
               static_cast<int>(SHT_SIZE);
     }
     return sum;
@@ -113,25 +117,26 @@ extern bool in_lanetracing;
 auto
 search_state_hash_tbl(State* s, int* is_compatible) -> State*
 {
-    int v = get_state_hash_val(s);
-    StateTblNode* n = StateHashTbl[v].next;
+    const size_t v = get_state_hash_val(*s);
+    auto& cell = StateHashTbl[v];
+    StateTblNode* n = cell.next;
     StateTblNode* n_prev = nullptr;
 
     (*is_compatible) = 0; // default to 0 - false.
 
     if (n == nullptr) {
-        StateHashTbl[v].next = create_state_node(s);
-        StateHashTbl[v].count = 1;
+        cell.next = create_state_node(s);
+        cell.count = 1;
         return nullptr;
     }
 
     while (n != nullptr) {
         n_prev = n;
-        if (is_same_state(n->state, s) == true) {
+        if (is_same_state(n->state, s) ) {
             return n->state;
         }
         if (Options::get().use_combine_compatible_states) {
-            if (is_compatible_states(n->state, s) == true) {
+            if (is_compatible_states(n->state, s) ) {
                 combine_compatible_states(n->state, s);
                 (*is_compatible) = 1;
                 return n->state;
@@ -141,7 +146,7 @@ search_state_hash_tbl(State* s, int* is_compatible) -> State*
     }
     // n == nullptr, s does not exist. insert at end.
     n_prev->next = create_state_node(s);
-    StateHashTbl[v].count++;
+    cell.count++;
 
     return nullptr;
 }
@@ -157,26 +162,27 @@ search_state_hash_tbl(State* s, int* is_compatible) -> State*
 auto
 search_same_state_hash_tbl(State* s) -> State*
 {
-    int v = get_state_hash_val(s);
-    StateTblNode* n = StateHashTbl.at(v).next;
+    const size_t v = get_state_hash_val(*s);
+    auto& cell = StateHashTbl[v];
+    StateTblNode* n = cell.next;
     StateTblNode* n_prev = nullptr;
 
     if (n == nullptr) {
-        StateHashTbl.at(v).next = create_state_node(s);
-        StateHashTbl.at(v).count = 1;
+        cell.next = create_state_node(s);
+        cell.count = 1;
         return nullptr;
     }
 
     while (n != nullptr) {
         n_prev = n;
-        if (is_same_state(n->state, s) == true) {
+        if (is_same_state(n->state, s) ) {
             return n->state;
         }
         n = n->next;
     }
     // n == nullptr, s does not exist. insert at end.
     n_prev->next = create_state_node(s);
-    StateHashTbl.at(v).count++;
+    cell.count++;
 
     return nullptr;
 }

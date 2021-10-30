@@ -97,7 +97,7 @@ insert_label_to_list(GvNode* n, SymbolTblNode* snode)
         return; // should not happen.
 
     if (nullptr == n->labels) {
-        n->labels = n->labels_tail = create_symbol_node(snode);
+        n->labels = n->labels_tail = SymbolNode::create(snode);
     } else {
         SymbolNode* m = n->labels;
         while (m->next != nullptr) {
@@ -109,7 +109,7 @@ insert_label_to_list(GvNode* n, SymbolTblNode* snode)
         if (m->snode == snode)
             return; // exists as the last one.
         // else, not exist.
-        m->next = create_symbol_node(snode);
+        m->next = SymbolNode::create(snode);
     }
 }
 
@@ -130,7 +130,7 @@ add_gv_node_to_list(GvNode* list, int target_state, SymbolTblNode* snode)
           "target state %d not found (label %s)\n", targetState, snode->symbol);
 #endif
         n = create_gv_node(target_state);
-        n->labels = n->labels_tail = create_symbol_node(snode);
+        n->labels = n->labels_tail = SymbolNode::create(snode);
         if (nullptr == list) { // first node in list.
             list = n;
         } else { // add to tail of list.

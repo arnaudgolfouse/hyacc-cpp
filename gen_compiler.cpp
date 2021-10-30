@@ -35,13 +35,13 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
-
-static int n_line; // count number of lines in yacc input file.
-static int n_col;
+#include <vector>
 
 constexpr size_t MAX_RULE_LENGTH = 0xfffff;
+constexpr int INTEGER_PADDING = 6;
+constexpr int ITEM_PER_LINE = 10;
 
-char* yystype_definition = (char*)"typedef int YYSTYPE;";
+std::string yystype_definition = "typedef int YYSTYPE;";
 constexpr const char* YYSTYPE_FORMAT =
   "#if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED\n"
   "%s\n"
@@ -73,7 +73,7 @@ prepare_outfile(std::ofstream* fp, std::ofstream* fp_h)
 }
 
 static void
-my_perror(const char* msg, int c)
+my_perror(const char* msg, char c, int n_line, int n_col)
 {
     using std::to_string;
     throw std::runtime_error(std::string("\nerror [line ") + to_string(n_line) +
@@ -144,9 +144,12 @@ write_tokens_to_compiler_file(std::ofstream& fp, std::ofstream& fp_h)
 void
 process_yacc_file_section1(std::ifstream& fp_yacc,
                            std::ofstream& fp,
-                           std::ofstream& fp_h)
+                           std::ofstream& fp_h,
+                           int& n_line,
+                           int& n_col)
 {
-    n_line = n_col = 1;
+    n_line = 1;
+    n_col = 1;
 
     bool is_code = false;
     char c = 0, last_c = '\n', last_last_c = 0;
@@ -169,9 +172,9 @@ process_yacc_file_section1(std::ifstream& fp_yacc,
         last_last_c = last_c;
         last_c = c;
 
-        n_col++;
+        n_col += 1;
         if (c == '\n') {
-            n_line++;
+            n_line += 1;
             n_col = 1;
         }
     }
@@ -184,7 +187,7 @@ process_yacc_file_section1(std::ifstream& fp_yacc,
  * rewind to section 2.
  */
 static void
-goto_section2(std::ifstream& fp_yacc)
+goto_section2(std::ifstream& fp_yacc, int& n_line)
 {
     char c = 0, last_c = 0, last_last_c = '\n';
 
@@ -192,7 +195,7 @@ goto_section2(std::ifstream& fp_yacc)
     n_line = 1;
     while (fp_yacc.get(c)) {
         if (c == '\n')
-            n_line++;
+            n_line += 1;
         if (last_last_c == '\n' && last_c == '%' && c == '%')
             break; // end section 2.
 
@@ -206,7 +209,7 @@ goto_section2(std::ifstream& fp_yacc)
  * Presumption: finished section 1, entering section 2.
  */
 static void
-goto_section3(std::ifstream& fp_yacc)
+goto_section3(std::ifstream& fp_yacc, int& n_line)
 {
     char c = 0, last_c = 0, last_last_c = '\n';
 
@@ -249,7 +252,8 @@ find_full_rule(int rule_count) -> Production*
 }
 
 static auto
-find_mid_prod_index(Production* rule, Production* mid_prod_rule) -> int
+find_mid_prod_index(const Production* rule, const Production* mid_prod_rule)
+  -> int
 {
     SymbolNode* lnode = mid_prod_rule->nLHS;
     SymbolTblNode* lsym = lnode->snode;
@@ -268,7 +272,7 @@ find_mid_prod_index(Production* rule, Production* mid_prod_rule) -> int
 }
 
 static auto
-find_sym(Production* rule, int dollar_number) -> SymbolTblNode*
+find_sym(const Production* rule, int dollar_number) -> SymbolTblNode*
 {
     SymbolTblNode* sym = nullptr;
     if (dollar_number == MAX_RULE_LENGTH)
@@ -301,10 +305,12 @@ find_sym(Production* rule, int dollar_number) -> SymbolTblNode*
 static void
 process_yacc_file_section2(std::ifstream& fp_yacc,
                            std::ofstream& fp,
-                           char* filename)
+                           const std::string& filename,
+                           int n_line,
+                           int n_col)
 {
     YACC_STATE state = LHS;
-    int code_level;
+    int code_level = 0;
     bool reading_symbol = false;
     bool reading_number = false;
     bool reading_type = false;
@@ -312,9 +318,7 @@ process_yacc_file_section2(std::ifstream& fp_yacc,
     char c = 0, last_c = 0, last_last_c = 0;
     int rule_count = 0;
     bool end_of_code = false; // for mid-production action.
-    char* explicit_type = 0;
-    Production* rule;
-    SymbolTblNode* sym;
+    char* explicit_type = nullptr;
     static const char* padding = "        ";
 
     while (fp_yacc.get(c)) {
@@ -359,7 +363,7 @@ process_yacc_file_section2(std::ifstream& fp_yacc,
                 } else if (last_c == '/' && c == '*') {
                     state = COLON_COMMENT;
                 } else if (!isspace(c)) {
-                    my_perror("error: state COLON. ", c);
+                    my_perror("error: state COLON. ", c, n_line, n_col);
                 }
                 break;
             case COLON_COMMENT:
@@ -411,7 +415,8 @@ process_yacc_file_section2(std::ifstream& fp_yacc,
                 } else if (c == '/') {
                     // do nothing
                 } else if (c == ':') {
-                    my_perror("You may miss a ';' in the last rule.", c);
+                    my_perror(
+                      "You may miss a ';' in the last rule.", c, n_line, n_col);
                 } else {
                     // reading a symbol. do nothing
                     if (end_of_code) {
@@ -450,7 +455,7 @@ process_yacc_file_section2(std::ifstream& fp_yacc,
                         token_type = explicit_type;
                         explicit_type = nullptr;
                     } else {
-                        rule = find_full_rule(rule_count);
+                        const Production* rule = find_full_rule(rule_count);
                         token_type = rule->nLHS->snode->token_type;
                     }
                     if (token_type)
@@ -467,7 +472,7 @@ process_yacc_file_section2(std::ifstream& fp_yacc,
                     Production* start_rule = grammar.rules[rule_count];
                     int rhs_index = 0;
 
-                    rule = find_full_rule(rule_count);
+                    const Production* rule = find_full_rule(rule_count);
                     if (rule != start_rule)
                         rhs_index = find_mid_prod_index(rule, start_rule);
                     else
@@ -475,9 +480,10 @@ process_yacc_file_section2(std::ifstream& fp_yacc,
                     const char* token_type = nullptr;
                     if (explicit_type) {
                         token_type = explicit_type;
-                        explicit_type = 0;
+                        explicit_type = nullptr;
                     } else {
-                        sym = find_sym(rule, dollar_number);
+                        const SymbolTblNode* sym =
+                          find_sym(rule, dollar_number);
                         token_type = sym->token_type;
                     }
                     if (token_type)
@@ -596,7 +602,7 @@ copy_src_file(std::ofstream& fp, char* filename)
  * associated with reductions.
  */
 void
-copy_yaccpar_file_1(std::ofstream& fp, const char* filename)
+copy_yaccpar_file_1(std::ofstream& fp, const std::string& filename)
 {
     std::ifstream fp_src;
     fp_src.open(filename);
@@ -618,7 +624,7 @@ copy_yaccpar_file_1(std::ofstream& fp, const char* filename)
 }
 
 void
-copy_yaccpar_file_2(std::ofstream& fp, const char* filename)
+copy_yaccpar_file_2(std::ofstream& fp, const std::string& filename)
 {
     std::ifstream fp_src;
     fp_src.open(filename);
@@ -688,17 +694,17 @@ print_yyr1(std::ofstream& fp)
 {
     fp << "static YYCONST yytabelem yyr1[] = {" << std::endl;
     // First rule is always "$accept : ...".
-    fp << std::setw(6) << 0 << ',';
+    fp << std::setw(INTEGER_PADDING) << 0 << ',';
 
     if (Options::get().use_remove_unit_production) {
         int index = 0;
         for (int i = 1; i < grammar.rules.size(); i++) {
             // printf("rule %d lhs: %s\n", i, grammar.rules[i]->LHS);
             index = grammar.rules[i]->nLHS->snode->value;
-            fp << std::setw(6) << index;
+            fp << std::setw(INTEGER_PADDING) << index;
             if (i < grammar.rules.size() - 1)
                 fp << ',';
-            if ((i - 9) % 10 == 0)
+            if ((i - 9) % ITEM_PER_LINE == 0)
                 fp << std::endl;
         }
         fp << "};" << std::endl;
@@ -706,11 +712,11 @@ print_yyr1(std::ofstream& fp)
     }
 
     for (int i = 1; i < grammar.rules.size(); i++) {
-        fp << std::setw(6)
+        fp << std::setw(INTEGER_PADDING)
            << (-1) * get_non_terminal_index(grammar.rules[i]->nLHS->snode);
         if (i < grammar.rules.size() - 1)
             fp << ',';
-        if ((i - 9) % 10 == 0)
+        if ((i - 9) % ITEM_PER_LINE == 0)
             fp << std::endl;
     }
     fp << "};" << std::endl;
@@ -729,13 +735,14 @@ print_yyr2(std::ofstream& fp)
 {
     int i = 0;
     fp << "static YYCONST yytabelem yyr2[] = {" << std::endl;
-    fp << std::setw(6) << 0 << ',';
+    fp << std::setw(INTEGER_PADDING) << 0 << ',';
     for (i = 1; i < grammar.rules.size(); i++) {
-        fp << std::setw(6)
-           << (grammar.rules[i]->RHS_count << 1) + grammar.rules[i]->hasCode;
+        fp << std::setw(INTEGER_PADDING)
+           << (grammar.rules[i]->RHS_count << 1) +
+                static_cast<int>(grammar.rules[i]->hasCode);
         if (i < grammar.rules.size() - 1)
             fp << ',';
-        if ((i - 9) % 10 == 0)
+        if ((i - 9) % ITEM_PER_LINE == 0)
             fp << std::endl;
     }
     fp << "};" << std::endl;
@@ -848,7 +855,7 @@ print_parsing_tbl_entry(std::ofstream& fp,
 
     if (is_entry) {
         (*count)++;
-        if ((*count) % 10 == 0 && (*count) != 0)
+        if ((*count) % ITEM_PER_LINE == 0 && (*count) != 0)
             fp << std::endl;
     }
 }
@@ -863,25 +870,24 @@ void
 print_parsing_tbl(std::ofstream& fp)
 {
     int col_size = ParsingTblCols;
-    int* rowoffset = new int[ParsingTblRows];
-    int rowoffset_pt = 0;
+    std::vector<int> rowoffset;
+    rowoffset.reserve(ParsingTblRows);
     int count = 0;
 
     fp << "static YYCONST yytabelem yyptblact[] = {" << std::endl;
 
     if (Options::get().use_remove_unit_production) {
-        int i = 0;
         for (int row = 0; row < ParsingTblRows; row++) {
             if (is_reachable_state(row)) {
 
-#if USE_REM_FINAL_STATE
-                if (final_state_list[row] < 0) {
-                    print_parsing_tbl_entry('s', final_state_list[row], &count);
-                    *(rowoffset + rowoffset_pt) = count;
-                    rowoffset_pt++;
-                    continue;
+                if constexpr (USE_REM_FINAL_STATE) {
+                    if (final_state_list[row] < 0) {
+                        print_parsing_tbl_entry(
+                          fp, 's', final_state_list[row], &count);
+                        rowoffset.push_back(count);
+                        continue;
+                    }
                 }
-#endif
                 for (int col = 0; col < ParsingTblCols; col++) {
                     const SymbolTblNode* n = ParsingTblColHdr[col];
                     if (is_goal_symbol(n) == false &&
@@ -897,22 +903,21 @@ print_parsing_tbl(std::ofstream& fp)
                     } // end of if.
                 }
 
-                *(rowoffset + rowoffset_pt) = count;
-                rowoffset_pt++;
+                rowoffset.push_back(count);
                 // printf("\n");
             } // end of if.
         }
     } else {
         for (int i = 0; i < ParsingTblRows; i++) {
 
-#if USE_REM_FINAL_STATE
-            if (final_state_list[i] < 0) {
-                print_parsing_tbl_entry('s', final_state_list[i], &count);
-                *(rowoffset + rowoffset_pt) = count;
-                rowoffset_pt++;
-                continue;
+            if constexpr (USE_REM_FINAL_STATE) {
+                if (final_state_list[i] < 0) {
+                    print_parsing_tbl_entry(
+                      fp, 's', final_state_list[i], &count);
+                    rowoffset.push_back(count);
+                    continue;
+                }
             }
-#endif
 
             for (int j = 0; j < ParsingTblCols; j++) {
                 char action = 0;
@@ -922,8 +927,7 @@ print_parsing_tbl(std::ofstream& fp)
                 print_parsing_tbl_entry(fp, action, state_no, &count);
             }
 
-            *(rowoffset + rowoffset_pt) = count;
-            rowoffset_pt++;
+            rowoffset.push_back(count);
             // printf("\n");
         } // end of for.
     }
@@ -931,11 +935,11 @@ print_parsing_tbl(std::ofstream& fp)
     fp << "-10000000};" << std::endl << std::endl; // -10000000 is space filler
 
     fp << "static YYCONST yytabelem yyrowoffset[] = {\n0, " << std::endl;
-    for (int i = 0; i < rowoffset_pt; i++) {
-        fp << *(rowoffset + i);
-        if (i < rowoffset_pt - 1)
+    for (size_t i = 0; i < rowoffset.size(); i++) {
+        fp << rowoffset[i];
+        if (i < rowoffset.size() - 1)
             fp << ", ";
-        if (i % 10 == 0 && i != 0)
+        if (i % ITEM_PER_LINE == 0 && i != 0)
             fp << std::endl;
     }
     fp << "};" << std::endl
@@ -948,15 +952,15 @@ print_parsing_tbl_col_entry(std::ofstream& fp,
                             int token_value,
                             int* count)
 {
-    bool isEntry = false;
+    bool is_entry = false;
     if (action == 's' || action == 'g' || action == 'r' || action == 'a') {
         fp << token_value << ", ";
-        isEntry = true;
+        is_entry = true;
     }
 
-    if (isEntry) {
+    if (is_entry) {
         (*count)++;
-        if ((*count) % 10 == 0 && (*count) != 0)
+        if ((*count) % ITEM_PER_LINE == 0 && (*count) != 0)
             fp << std::endl;
     }
 }
@@ -981,12 +985,12 @@ print_parsing_tbl_col(std::ofstream& fp)
         for (int row = 0; row < ParsingTblRows; row++) {
             if (is_reachable_state(row)) {
 
-#if USE_REM_FINAL_STATE
-                if (final_state_list[row] < 0) {
-                    print_parsing_tbl_col_entry('r', -10000001, &count);
-                    continue;
+                if constexpr (USE_REM_FINAL_STATE) {
+                    if (final_state_list[row] < 0) {
+                        print_parsing_tbl_col_entry(fp, 'r', -10000001, &count);
+                        continue;
+                    }
                 }
-#endif
                 for (int col = 0; col < ParsingTblCols; col++) {
                     SymbolTblNode* n = ParsingTblColHdr[col];
                     if (is_goal_symbol(n) == false &&
@@ -1003,13 +1007,13 @@ print_parsing_tbl_col(std::ofstream& fp)
     } else {
         for (int i = 0; i < ParsingTblRows; i++) {
 
-#if USE_REM_FINAL_STATE
-            if (final_state_list[i] < 0) { // is a final state.
-                // -10000001 labels a final state's col entry
-                print_parsing_tbl_col_entry('r', -10000001, &count);
-                continue;
+            if constexpr (USE_REM_FINAL_STATE) {
+                if (final_state_list[i] < 0) { // is a final state.
+                    // -10000001 labels a final state's col entry
+                    print_parsing_tbl_col_entry(fp, 'r', -10000001, &count);
+                    continue;
+                }
             }
-#endif
             for (int j = 0; j < ParsingTblCols; j++) {
                 SymbolTblNode* n = ParsingTblColHdr[j];
                 char action = 0;
@@ -1040,7 +1044,7 @@ get_final_states(std::ofstream& fp)
         }
 
         fp << ", ";
-        if ((++j) % 10 == 0)
+        if ((++j) % ITEM_PER_LINE == 0)
             fp << std::endl;
         fp << final_state_list[i];
     }
@@ -1123,7 +1127,7 @@ write_lrk_table_arrays(std::ofstream& fp)
     for (int i = 0; i < ParsingTblCols; i++) {
         if (i > 0)
             fp << ", ";
-        if (i % 10 == 0) {
+        if (i % ITEM_PER_LINE == 0) {
             if (i > 0)
                 fp << std::endl;
             fp << "  ";
@@ -1201,19 +1205,18 @@ void
 get_lrk_hyacc_path()
 {
     if (use_lrk()) {
-        puts("lrk used");
-        auto* tmp = new char[strlen(HYACC_PATH) + 2];
-        strcpy(tmp, HYACC_PATH);
-        strcat(tmp, "k"); // hyaccpark
-        HYACC_PATH = tmp;
-
+        std::cout << "lrk used" << std::endl;
+        HYACC_PATH += 'k';
         std::cout << "LR(k) HYACC_PATH: " << HYACC_PATH << std::endl;
     }
 }
 
 void
-generate_compiler(char* infile)
+generate_compiler(const std::string& infile)
 {
+    // count number of lines in yacc input file.
+    int n_line = 0;
+    int n_col = 0;
     auto& options = Options::get();
     std::ifstream fp_yacc{};
     std::ofstream fp{};
@@ -1229,11 +1232,12 @@ generate_compiler(char* infile)
 
     if (options.use_lines)
         fp << std::endl << "# line 1 \"" << infile << '\"' << std::endl;
-    process_yacc_file_section1(fp_yacc, fp, fp_h); // declaration section.
+    process_yacc_file_section1(
+      fp_yacc, fp, fp_h, n_line, n_col); // declaration section.
 
     write_special_info(fp);
 
-    goto_section3(fp_yacc);
+    goto_section3(fp_yacc, n_line);
 
     if (options.use_lines)
         fp << std::endl
@@ -1248,8 +1252,9 @@ generate_compiler(char* infile)
     get_lrk_hyacc_path(); /* do this if LR(k) is used */
 
     copy_yaccpar_file_1(fp, HYACC_PATH);
-    goto_section2(fp_yacc);
-    process_yacc_file_section2(fp_yacc, fp, infile); // get reduction code.
+    goto_section2(fp_yacc, n_line);
+    process_yacc_file_section2(
+      fp_yacc, fp, infile, n_line, n_col); // get reduction code.
     copy_yaccpar_file_2(fp, HYACC_PATH);
 
     free_symbol_node_list(tokens);

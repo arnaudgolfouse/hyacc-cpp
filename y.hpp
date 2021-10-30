@@ -17,8 +17,7 @@
    51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#ifndef _HYACC_H_
-#define _HYACC_H_
+#pragma once
 
 /****************************************************************
  * y.h
@@ -36,6 +35,7 @@
 #include <cstdio>
 #include <cstdlib> /* exit, malloc, realloc, free, system. */
 #include <cstring> /* strtok, strcpy, strcmp. */
+#include <memory>
 #include <mutex>
 #include <ostream>
 #include <stdexcept>
@@ -205,7 +205,7 @@ struct SymbolTableNode
     int seq; /* sequence (column) number in parsing table. */
     RuleIDNode* ruleIDList;
     SymbolTableNode* next;
-    char* token_type;
+    const char* token_type;
 };
 using SymbolTblNode = struct SymbolTableNode;
 
@@ -220,12 +220,14 @@ constexpr size_t HT_SIZE = 997; /* should be a prime. */
 extern std::array<HashTblNode, HT_SIZE> HashTbl;
 
 /* used in other data structures. */
+using SymbolNode = struct SymNode;
 struct SymNode
 {
     SymbolTblNode* snode;
     SymNode* next;
+
+    static auto create(SymbolTblNode* sn) -> SymbolNode*;
 };
-using SymbolNode = struct SymNode;
 
 using SymbolList = SymbolNode*;
 
@@ -243,7 +245,7 @@ using SymbolList = SymbolNode*;
  * Set USE_CONFIG_QUEUE_FOR_GET_CLOSURE to 0 to test the
  * other way. See result in y.output.
  */
-#define USE_CONFIG_QUEUE_FOR_GET_CLOSURE 1
+constexpr bool USE_CONFIG_QUEUE_FOR_GET_CLOSURE = true;
 
 constexpr int QUEUE_ERR_CODE = -10000000;
 
@@ -304,6 +306,11 @@ struct Context
     SymbolList nContext;
     int context_count;
     Context* next; // Used for LR(k) only.
+
+    /*
+     * Empty a context.
+     */
+    void clear();
 };
 
 /* Production of a configuration, or rule of a grammar. */
@@ -381,12 +388,12 @@ struct ConflictNode
     int r;        // reduce, neg, and is always the smaller one.
     int s;        // reduce or shift, neg or pos.
     int decision; // final decision.
-    ConflictNode* next;
+    std::shared_ptr<ConflictNode> next;
 
-    static auto create(int state, SymbolTblNode* lookahead, int r, int s)
-      -> ConflictNode*;
-    static void destroy_node(Conflict* c);
-    static void destroy_list(Conflict* a);
+    static auto create_node(int state, SymbolTblNode* lookahead, int r, int s)
+      -> std::shared_ptr<ConflictNode>;
+    // static void destroy_node(Conflict* c);
+    // static void destroy_list(Conflict* a);
 };
 
 extern int ss_count; // total count of shift/shift conflicts.
@@ -400,12 +407,13 @@ struct StateList
 {
     std::vector<StateNode*> state_list;
 
-    static auto create() -> StateList*;
+    static auto create() -> std::shared_ptr<StateList>;
+    static void expand(StateList* l);
     /*
      * Called by cloneState() in lane_tracing.c.
      */
-    auto clone() -> StateList*;
-    static void destroy(StateList* l);
+    auto clone() -> std::shared_ptr<StateList>;
+    // static void destroy(StateList* l);
 
     /*
      * Add if not exist yet.
@@ -417,19 +425,15 @@ struct StateList
 
 struct StateNode
 {
-    Configuration** config;
-    int config_max_count;
-    int config_count;
-    int core_config_count;
+    std::vector<Configuration*> config;
+    size_t core_config_count;
 
     int state_no;
     SymbolNode* trans_symbol;
 
-    StateList* parents_list;
+    std::shared_ptr<StateList> parents_list;
 
-    StateNode** successor_list;
-    int successor_count;
-    int successor_max_count;
+    std::vector<StateNode*> successor_list;
 
     StateNode* next;
 
@@ -489,7 +493,7 @@ struct Grammar
     /*
      * Returns number of rules excluding unit productions.
      */
-    auto get_opt_rule_count() -> int const;
+    auto get_opt_rule_count() -> size_t const;
 
     /*
      * Write terminals of the given grammar.
@@ -499,7 +503,7 @@ struct Grammar
     /*
      * Write non-terminals of the given grammar.
      *
-     * Note: the part "if (ADD_GOAL_RULE == 1) ..."
+     * Note: the part "if constexpr (ADD_GOAL_RULE) ..."
      * is just to keep consistent with yacc.
      * Leave this out for now.
      */
@@ -519,40 +523,41 @@ extern Grammar grammar; /* Used by the entire program. */
 extern StateCollection* states_new;
 
 /* for indexed access of states_new states */
-struct State_array
+struct StateArray
 {
   public:
     std::vector<State*> state_list = {};
 
     // each cell is for a state, index is state_no.
-    std::vector<Conflict*> conflict_list = {};
+    std::vector<std::shared_ptr<Conflict>> conflict_list = {};
     std::vector<int> rs_count = {}; // shift/reduce conflicts count.
     std::vector<int> rr_count = {}; // reduce/reduce conflicts count.
 
-    explicit inline State_array()
+    explicit inline StateArray()
     {
         this->state_list.reserve(PARSING_TABLE_INIT_SIZE);
         this->conflict_list.reserve(PARSING_TABLE_INIT_SIZE);
     }
 
-    static auto create() -> State_array*;
+    static auto create() -> std::shared_ptr<StateArray>;
+    static void expand(StateArray* array, size_t new_size);
 };
 
-extern State_array* states_new_array;
+extern std::shared_ptr<StateArray> states_new_array;
 
 /* Variables for parsing table. */
 
 constexpr int CONST_ACC = -10000000; /* for ACC in parsing table */
 
-extern size_t PARSING_TABLE_SIZE; /* Default to STATE_COLLECTION_SIZE. */
-extern int* ParsingTable;
+extern std::atomic_size_t PARSING_TABLE_SIZE;
+extern std::vector<int> ParsingTable;
 extern int ParsingTblCols;
 extern int ParsingTblRows;
 /*
  * For parsing table column header names.
  * Value = terminal_count + non_terminal_count + 1 columns.
  */
-extern SymbolTblNode** ParsingTblColHdr;
+extern std::vector<SymbolTblNode*> ParsingTblColHdr;
 /*
  * For final parsing table.
  */
@@ -563,26 +568,24 @@ extern int F_ParsingTblCols;
  * Used by step 4 of remove unit production in y.c,
  * and by get_yy_arrays() in gen_compiler.c.
  */
-extern int* states_reachable;
-extern int states_reachable_count;
+extern std::vector<int> states_reachable;
 
 /*
  * For condensed parsing table after removing unit productions.
  * Used by function getActualState() in y.c and gen_compiler.c.
  */
-extern int* actual_state_no;
-extern int actual_state_no_ct;
+extern std::vector<int> actual_state_no;
 
 /* Statistical values. */
 extern int n_symbol;
-extern int n_rule;
-extern int n_rule_opt;
-extern int n_state_opt1;
-extern int n_state_opt12;
-extern int n_state_opt123;
+extern size_t n_rule;
+extern size_t n_rule_opt;
+extern size_t n_state_opt1;
+extern size_t n_state_opt12;
+extern size_t n_state_opt123;
 
 /* defined in hyacc_path.c, used in gen_compiler.c */
-extern const char* HYACC_PATH;
+extern std::string HYACC_PATH;
 
 /*************************
  * Function headers.
@@ -647,7 +650,7 @@ add_core_config2_state(State* s, Configuration* new_config);
 extern auto
 add_transition_states2_new(StateCollection* coll, State* src_state) -> bool;
 extern void
-add_state_to_state_array(State_array& a, State* s);
+add_state_to_state_array(StateArray& a, State* s);
 extern void
 add_successor(State* s, State* n);
 extern void
@@ -669,7 +672,7 @@ mandatory_update_action(SymbolTblNode* lookahead, int row, int state_dest);
 extern void
 free_context(Context* c);
 extern void
-get_reachable_states(int cur_state, int states_reachable[], int* states_count);
+get_reachable_states(int cur_state, std::vector<int>& states_reachable);
 extern void
 print_parsing_table_note();
 extern auto
@@ -690,9 +693,7 @@ has_common_core(State* s1, State* s2) -> bool;
 extern auto
 combine_context(Context* c_dest, Context* c_src) -> bool;
 extern void
-clear_context(Context* c);
-extern void
-get_context(Configuration* cfg, Context* context);
+get_context(const Configuration* cfg, Context* context);
 extern void
 update_state_parsing_tbl_entry(const State* s);
 extern void
@@ -707,15 +708,13 @@ insert_state_to_pm(State* s);
  *
  * The column is arranged this way:
  * STR_END, terminals, non-terminals.
- * Use macro so it's inline and faster.
  *
  * Used in y.c and upe.c.
  */
-template<typename T>
-constexpr inline auto
-get_col(T n)
+inline auto
+get_col(const SymbolTableNode& n) -> int
 {
-    return n->seq;
+    return n.seq;
 }
 
 /*
@@ -739,7 +738,7 @@ is_vanish_symbol(SymbolTblNode& n) -> bool
 inline void
 update_action(size_t col, size_t row, int state_dest)
 {
-    ParsingTable[(row)*ParsingTblCols + (col)] = state_dest;
+    ParsingTable.at(row * ParsingTblCols + col) = state_dest;
 }
 
 /* Defined in upe.c */
@@ -758,7 +757,7 @@ print_condensed_final_parsing_table();
 
 /* Defined in get_yacc_grammar.c */
 extern void
-get_yacc_grammar(char* infile);
+get_yacc_grammar(const std::string& infile);
 
 /* Defined in version.c */
 extern void
@@ -770,12 +769,13 @@ show_manpage();
 
 /* Defined in get_options.c */
 extern auto
-get_options(int argc, char** argv, Options& options) -> int;
+get_options(const std::vector<std::string>& args, Options& options) -> int;
 
 /* Defined in gen_compiler.cpp */
-extern int* final_state_list; // for final states.
+// Length is ParsingTblRows (?)
+extern std::vector<int> final_state_list; // for final states.
 extern void
-generate_compiler(char* infile);
+generate_compiler(const std::string& infile);
 
 /* functions in symbol_table.c */
 extern void
@@ -788,8 +788,6 @@ extern void
 hash_tbl_dump();
 extern void
 hash_tbl_destroy();
-extern auto
-create_symbol_node(SymbolTblNode* sn) -> SymbolNode*;
 extern auto
 find_in_symbol_list(SymbolList a, SymbolTblNode* s) -> SymbolNode*;
 extern auto
@@ -828,8 +826,6 @@ state_hash_tbl_dump();
  * For use by get_yacc_grammar.c and gen_compiler.c
  */
 extern SymbolList tokens;
-extern SymbolNode* tokens_tail;
-extern int tokens_max_ct;
 extern int tokens_ct;
 
 extern void
@@ -886,11 +882,10 @@ output_parsing_table_lalr();
 
 struct StateNoArray
 {
-    int* states; /* list of state_no */
+    // list of state_no
+    std::vector<int> states;
     // SymbolNode ** conflictSymbolList; // conflict symbols for each state
-    int count;
-    int count_unresolved; /* unresolved after lane tracing phase 1. */
-    int size;
+    size_t count_unresolved; /* unresolved after lane tracing phase 1. */
 };
 
 extern StateNoArray* states_inadequate;
@@ -939,5 +934,3 @@ write_conflicting_context(int state_no); // for debug.
  * When this is true, transition occurs only on conflicting contexts.
  */
 extern bool in_lanetracing;
-
-#endif

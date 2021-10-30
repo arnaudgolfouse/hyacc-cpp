@@ -50,15 +50,15 @@ PACK_SRC = $(SRC) $(SRC_HEADER) inst.cpp makefile \
            hyaccpar hyaccmanpage hyaccmanpage.html \
            hyacc.1 GPL_license readme.pdf
 TARGET = hyacc
-CC = g++
+CC = clang++
 DATE = `date '+%m-%d-%y'`
 PACK_NAME = hyacc_$(DATE).tar
-FFLAG = -cpp -g
+FFLAG = -std=c++20
 
 
 $(TARGET) : $(OBJS) $(SRC_HEADER) 
 	@echo please wait ...
-	$(CC) -o $(TARGET) $(OBJS) 
+	$(CC) $(FFLAG) -o $(TARGET) $(OBJS) 
 	@echo compiled successfully 
 
 #
@@ -66,19 +66,19 @@ $(TARGET) : $(OBJS) $(SRC_HEADER)
 #
 all : $(SRC) $(SRC_HEADER)
 	@echo please wait ...
-	$(CC) -o $(TARGET) $(SRC)
+	$(CC) $(FFLAG) -o $(TARGET) $(SRC)
 	@echo compiled successfully
 
 release : $(SRC) $(SRC_HEADER) 
 	@echo please wait ...
 	@make create_path_file
-	$(CC) -o $(TARGET) $(SRC)  
+	$(CC) $(FFLAG) -o $(TARGET) $(SRC)  
 	@echo release version is successfully built
 
 debug : $(SRC) $(SRC_HEADER)
 	@echo please wait ...
 	@make create_path_file
-	$(CC) -g -o $(TARGET) $(SRC)
+	$(CC) $(FFLAG) -g -o $(TARGET) $(SRC)
 	@echo debug version is successfully built
 
 clean :

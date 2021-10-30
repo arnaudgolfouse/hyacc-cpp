@@ -32,6 +32,7 @@
 #include "y.hpp"
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <ostream>
 #include <stdexcept>
 
@@ -327,9 +328,9 @@ set_dump(const Set* set, void (*set_item_dump)(void*))
 
 // create an empty list.
 auto
-list_create() -> List*
+List::create() -> std::shared_ptr<List>
 {
-    auto* t = new List;
+    auto t = std::make_shared<List>();
     t->head = nullptr;
     t->tail = nullptr;
     t->count = 0;
@@ -339,51 +340,33 @@ list_create() -> List*
 // insert new object at tail of list t,
 // without checking if the object already exists.
 void
-list_insert_tail(List* t, void* object)
+List::insert_tail(void* object)
 {
-    if (nullptr == object || nullptr == t)
+    if (object == nullptr)
         return;
 
-    if (t->head == nullptr) {
-        t->head = t->tail = object_item_new(object);
+    if (this->head == nullptr) {
+        this->head = this->tail = object_item_new(object);
     } else {
-        t->tail->next = object_item_new(object);
-        t->tail = t->tail->next;
+        this->tail->next = object_item_new(object);
+        this->tail = this->tail->next;
     }
 
-    t->count++;
+    this->count++;
 }
 
 void
-list_destroy(List* t)
+List::dump(void (*list_item_dump)(void*)) const
 {
-    ObjectItem* o = nullptr;
-
-    if (t == nullptr)
-        return;
-    if ((o = t->head) != nullptr) {
-        while (o != nullptr) {
-            ObjectItem* tmp = o;
-            o = o->next;
-            object_item_destroy(tmp);
-        }
-    }
-
-    delete t;
-}
-
-void
-list_dump(List* t, void (*list_item_dump)(void*))
-{
-    if (t == nullptr || t->head == nullptr) {
+    if (this->head == nullptr) {
         std::cout << "(list is empty)" << std::endl;
         return;
     }
 
-    std::cout << "list count: " << t->count << std::endl;
+    std::cout << "list count: " << this->count << std::endl;
 
     int i = 0;
-    for (ObjectItem* s = t->head; s != nullptr; s = s->next) {
+    for (ObjectItem* s = this->head; s != nullptr; s = s->next) {
         std::cout << ++i << " ";
         (*list_item_dump)(s->object);
     }
@@ -523,7 +506,7 @@ lrk_pt_add_row(LRkPT* t, LRkPTRow* r_prev, int state, SymbolTblNode* token)
 {
     auto* r = new LRkPTRow;
     r->state = state;
-    r->token = create_symbol_node(token);
+    r->token = SymbolNode::create(token);
 
     r->row = new ConfigPairNode*[ParsingTblCols];
     for (int i = 0; i < ParsingTblCols; i++) {
@@ -565,7 +548,7 @@ lrk_pt_get_entry(LRkPT* t,
         return nullptr; // row not exist in t.
 
     *exist = true; // this entry exists.
-    int index = get_col(col_token);
+    int index = get_col(*col_token);
 
     return r->row[index];
 }
@@ -597,7 +580,7 @@ lrk_pt_add_reduction(LRkPT* t,
     }
 
     // now add the reduce action on token s.
-    int index = get_col(s);
+    int index = get_col(*s);
     ConfigPairNode* n = r->row[index];
     if (n == nullptr) {
         r->row[index] = config_pair_node_create(c_tail, c);
@@ -814,14 +797,14 @@ get_string_with_k_non_vanish_symbol(SymbolList alpha, int k) -> SymbolList
         return nullptr;
 
     SymbolNode* pt = alpha;
-    SymbolNode* cpy_tail = create_symbol_node(pt->snode);
+    SymbolNode* cpy_tail = SymbolNode::create(pt->snode);
     SymbolNode* cpy = cpy_tail;
     int i = (is_vanish_symbol(*pt->snode) == false) ? 1 : 0;
     if (i == k)
         return cpy;
 
     for (pt = alpha->next; pt != nullptr; pt = pt->next) {
-        cpy_tail->next = create_symbol_node(pt->snode);
+        cpy_tail->next = SymbolNode::create(pt->snode);
         cpy_tail = cpy_tail->next;
         if (is_vanish_symbol(*pt->snode) == false)
             i++;
@@ -937,14 +920,8 @@ lrk_theads_truncate_list_by_k(SymbolList s, int k) -> SymbolList
     return s;
 }
 
-//
-// Add to the end of list the result of applying all possible
-// productions to the j-th symbol, omitting existing strings,
-// and truncate until it contains no more than k non-vanishable
-// symbols.
-//
 void
-add_derivatives(List* t, ObjectItem* o, int j, int k)
+List::add_derivatives(ObjectItem* o, int j, int k)
 {
     // get the (j)-th symbol.
     auto* m = static_cast<SymbolNode*>(o->object);
@@ -973,8 +950,8 @@ add_derivatives(List* t, ObjectItem* o, int j, int k)
         // assumption: new_list != nullptr, t != nullptr.
         if (nullptr != new_list) {
             new_list = lrk_theads_truncate_list_by_k(new_list, k);
-            if (lrk_thead_in_list(t, new_list) == false) {
-                list_insert_tail(t, (void*)new_list);
+            if (lrk_thead_in_list(this, new_list) == false) {
+                this->insert_tail((void*)new_list);
             }
         } // end if
     }     // end for
@@ -1000,36 +977,33 @@ j_th_symbol_is_nt(SymbolList s, int j) -> bool
     return (s->snode->type == symbol_type::NONTERMINAL);
 }
 
-//
-// Remove from list t all strings whose j-th symbol is non-terminal.
-//
-static void
-lrk_theads_rm_nt(List* t, int j)
+void
+List::lrk_theads_rm_nt(int j)
 {
 #if DEBUG_LRK_THEADS
     puts("\nlrk_theads_rm_nt:");
 #endif
 
-    if (nullptr == t || nullptr == t->head)
+    if (this->head == nullptr)
         return;
 
     ObjectItem* o_prev = nullptr;
-    ObjectItem* o = t->head;
+    ObjectItem* o = this->head;
     while (o != nullptr) {
         if (true == j_th_symbol_is_nt(static_cast<SymbolList>(o->object), j)) {
-            t->count--;
+            this->count--;
             // remove o.
             if (o_prev == nullptr) {
-                t->head = o->next;
-                if (t->head == nullptr) {
-                    t->tail = nullptr;
+                this->head = o->next;
+                if (this->head == nullptr) {
+                    this->tail = nullptr;
                 }
                 object_item_destroy(o);
-                o = t->head;
+                o = this->head;
             } else {
                 o_prev->next = o->next;
                 if (o_prev->next == nullptr) {
-                    t->tail = o_prev;
+                    this->tail = o_prev;
                 }
                 object_item_destroy(o);
                 o = o_prev->next;
@@ -1073,47 +1047,43 @@ k_heads_are_t(SymbolList s, int k, int* len) -> bool
     return true;
 }
 
-//
-// Remove from t all strings whose k-heads consist entirely
-// of terminals, and add the k-heads to set t_heads;
-//
-static void
-lrk_theads_rm_theads(List* t, int k, List* t_heads)
+void
+List::lrk_theads_rm_theads(int k, List* t_heads)
 {
     int len = 0;
 
-    if (nullptr == t || nullptr == t->head)
+    if (this->head == nullptr)
         return;
 
     ObjectItem* o_prev = nullptr;
-    ObjectItem* o = t->head;
+    ObjectItem* o = this->head;
     while (o != nullptr) {
         if (true ==
               k_heads_are_t(static_cast<SymbolList>(o->object), k, &len) ||
             (len > 0 && len < k)) {
-            t->count--;
+            this->count--;
             if (len < k) {
                 // k'-thead, where k' < k. do nothing
                 if (len == k - 1) {
-                    list_insert_tail(t_heads, o->object);
+                    t_heads->insert_tail(o->object);
                 }
             } else if (false ==
                        lrk_thead_in_list(t_heads, (SymbolList)o->object)) {
                 // k-thead.
-                list_insert_tail(t_heads, o->object);
+                t_heads->insert_tail(o->object);
             }
             // remove o.
             if (o_prev == nullptr) {
-                t->head = o->next;
-                if (t->head == nullptr) {
-                    t->tail = nullptr;
+                this->head = o->next;
+                if (this->head == nullptr) {
+                    this->tail = nullptr;
                 }
                 object_item_destroy(o);
-                o = t->head;
+                o = this->head;
             } else {
                 o_prev->next = o->next;
                 if (o_prev->next == nullptr) {
-                    t->tail = o_prev;
+                    this->tail = o_prev;
                 }
                 object_item_destroy(o);
                 o = o_prev->next;
@@ -1130,26 +1100,26 @@ lrk_theads_rm_theads(List* t, int k, List* t_heads)
  * This is a set of strings.
  */
 auto
-lrk_theads(SymbolList alpha, int k) -> List*
+lrk_theads(SymbolList alpha, int k) -> std::shared_ptr<List>
 {
     if (alpha == nullptr)
         return nullptr;
 
     SymbolList s = get_string_with_k_non_vanish_symbol(alpha, k);
 
-    List* t_heads = list_create(); // set of LR(k) theads.
-    List* t = list_create();
-    list_insert_tail(t, (void*)s);
+    std::shared_ptr<List> t_heads = List::create(); // set of LR(k) theads.
+    std::shared_ptr<List> t = List::create();
+    t->insert_tail((void*)s);
 
     for (int j = 0; j < k; j++) {
         ObjectItem* o = t->head;
         while (o != nullptr) {
-            add_derivatives(t, o, j, k);
+            t->add_derivatives(o, j, k);
             o = o->next;
         }
 
-        lrk_theads_rm_nt(t, j);
-        lrk_theads_rm_theads(t, k, t_heads);
+        t->lrk_theads_rm_nt(j);
+        t->lrk_theads_rm_theads(k, t_heads.get());
     }
 
     return t_heads;

@@ -30,6 +30,7 @@
 #include "y.hpp"
 #include <iostream>
 #include <stdexcept>
+#include <vector>
 
 enum class ErrorFlags
 {
@@ -138,7 +139,7 @@ get_filename_prefix(std::string name)
 }
 
 void
-write_options(int infile_index, char** argv)
+write_options(int infile_index, const std::vector<std::string>& args)
 {
     // exit(0);
 }
@@ -239,21 +240,19 @@ set_lrk(Options& options)
 
 /// @brief Get a single letter option out of `s`.
 ///
-/// This will always advance `s` at least once. Some options require an
-/// additional arguments, advancing `s` again.
+/// Some options require additional arguments, advancing `s` again.
 ///
-/// @param cmd_argc arcg passed from main.
+/// @param cmd_argc argc passed from main.
 /// @param argc_pt index of current cmd parameter.
 void
 get_single_letter_option(Options& options,
-                         int cmd_argc,
+                         size_t cmd_argc,
                          int argc_pt,
-                         std::string::iterator& s,
-                         const std::string::iterator& end)
+                         std::string::const_iterator& s,
+                         const std::string::const_iterator& end)
 {
     char switch_param = 0;
     char c = *s;
-    ++s;
 
     // printf("c = %c\n", c);
     switch (c) {
@@ -299,25 +298,25 @@ get_single_letter_option(Options& options,
             if (options.use_lr0) {
                 show_helpmsg_exit(ErrorFlags::UNKNOWN_SWITCH_O_USE_LR0);
             }
-            switch_param = *s;
             ++s;
+            switch_param = *s;
             switch (switch_param) {
-                case 0:
+                case '0':
                     options.use_combine_compatible_states = false;
                     options.use_remove_unit_production = false;
                     options.use_remove_repeated_states = false;
                     break;
-                case 1:
+                case '1':
                     options.use_combine_compatible_states = true;
                     options.use_remove_unit_production = false;
                     options.use_remove_repeated_states = false;
                     break;
-                case 2:
+                case '2':
                     options.use_combine_compatible_states = true;
                     options.use_remove_unit_production = true;
                     options.use_remove_repeated_states = false;
                     break;
-                case 3: /* use all optimizations */
+                case '3': /* use all optimizations */
                     options.use_combine_compatible_states = true;
                     options.use_remove_unit_production = true;
                     options.use_remove_repeated_states = true;
@@ -430,8 +429,7 @@ get_single_letter_option(Options& options,
             break;
         default:                           /* ignore other switches. */
             if (!(c >= '0' && c <= '9')) { /* not a digit */
-                throw std::runtime_error(std::string("unknown switch ") +
-                                         std::to_string(c));
+                throw std::runtime_error(std::string("unknown switch ") + c);
             }
             break;
     }
@@ -491,19 +489,18 @@ get_mnemonic_long_option(Options& options, const std::string& s)
  *   optimization 3: further remove repeated states after 2.
  */
 auto
-get_options(int argc, char** argv, Options& options) -> int
+get_options(const std::vector<std::string>& args, Options& options) -> int
 {
-    if (argc == 1) {
+    if (args.size() == 1) {
         show_helpmsg_exit(ErrorFlags::NO_INPUT_FILE);
     }
 
     init_options(options);
 
     int infile_index = -1;
-    for (int i = 1; i < argc; i++) {
+    for (int i = 1; i < args.size(); i++) {
         int argc_pt = i;
-        std::string argv_i =
-          argv[i]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        const std::string& argv_i = args[i];
         // printf("%d, %s\n", i, argv_i);
         size_t len = argv_i.size();
 
@@ -518,8 +515,8 @@ get_options(int argc, char** argv, Options& options) -> int
             continue;
         }
 
-        std::string::iterator argv_i_iter = argv_i.begin();
-        const std::string::iterator argv_i_iter_end = argv_i.end();
+        std::string::const_iterator argv_i_iter = argv_i.begin();
+        const std::string::const_iterator argv_i_iter_end = argv_i.end();
 
         if (len >= 2 && *argv_i_iter == '-') {
             ++argv_i_iter;
@@ -527,9 +524,11 @@ get_options(int argc, char** argv, Options& options) -> int
                 get_mnemonic_long_option(options, argv_i.data());
             } else {
                 for (; argv_i_iter != argv_i_iter_end; ++argv_i_iter) {
-                    char c = *argv_i_iter;
-                    get_single_letter_option(
-                      options, argc, argc_pt, argv_i_iter, argv_i_iter_end);
+                    get_single_letter_option(options,
+                                             args.size(),
+                                             argc_pt,
+                                             argv_i_iter,
+                                             argv_i_iter_end);
                 }
             }
         } else {
@@ -544,6 +543,6 @@ get_options(int argc, char** argv, Options& options) -> int
         show_helpmsg_exit(ErrorFlags::NO_INPUT_FILE);
     }
 
-    write_options(infile_index, argv);
+    write_options(infile_index, args);
     return infile_index;
 }
