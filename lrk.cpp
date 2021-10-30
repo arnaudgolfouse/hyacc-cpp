@@ -69,11 +69,11 @@ print_cfg_ctxt(void* object)
     auto* n = cc->ctxt;
 
     if (c == nullptr) {
-        puts("c is nullptr");
+        std::cout << "c is nullptr" << std::endl;
         return;
     }
     if (n == nullptr) {
-        puts("n is nullptr");
+        std::cout << "n is nullptr" << std::endl;
         return;
     }
 
@@ -87,7 +87,7 @@ test_int()
     Set* s = nullptr;
     int i = 1, j = 2, k = 3;
 
-    puts("test_int");
+    std::cout << "test_int" << std::endl;
     s = set_insert(s, (void*)&i);
 
     set_dump(s, &print_int);
@@ -105,7 +105,7 @@ test_str()
     const char* s1 = "s1";
     const char* s2 = "s2";
     const char* s3 = "s3";
-    puts("test_str");
+    std::cout << "test_str" << std::endl;
 
     s = set_insert(s, (void*)s1);
     s = set_insert(s, (void*)s2);
@@ -117,7 +117,7 @@ test_str()
 static void
 test_lrk_theads()
 {
-    puts("test_lrk_theads(), on G_thead.");
+    std::cout << "test_lrk_theads(), on G_thead." << std::endl;
     SymbolList alpha = SymbolNode::create(hash_tbl_find("X"));
     SymbolNode* t = alpha;
     t->next = SymbolNode::create(hash_tbl_find("Y"));
@@ -388,12 +388,12 @@ edge_pushing(int state_no)
             int k1 = k - c->z; ///////////!!!!!!!!
 
             if (c->nMarker == nullptr) {
-                puts("Error: c->nMarker is nullptr. ");
+                std::cout << "Error: c->nMarker is nullptr. " << std::endl;
                 continue;
             }
             std::shared_ptr<List> phi = lrk_theads(c->nMarker->next, k1);
             if (phi == nullptr) {
-                // puts("phi is nullptr. should not!");
+                // std::cout << "phi is nullptr. should not!" << std::endl;
                 continue;
             }
 
@@ -411,7 +411,7 @@ edge_pushing(int state_no)
                     ConfigPairNode* n =
                       config_pair_list_find(lane_head_tail_pairs, c);
                     if (n != nullptr) { // found in cache.
-                        puts("found in cache");
+                        std::cout << "found in cache" << std::endl;
                         // this list is in INC order of c.
                         for (; n != nullptr; n = n->next) {
                             if (c != n->end)

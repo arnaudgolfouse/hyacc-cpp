@@ -176,7 +176,7 @@ config_pair_list_dump(ConfigPairList list)
     std::cout << "--ConfigPairList--" << std::endl;
     for (ConfigPairNode* n = list; n != nullptr; n = n->next) {
         config_pair_node_dump(n);
-        puts("");
+        std::cout << std::endl;
     }
 }
 
@@ -193,7 +193,7 @@ config_pair_list_find(ConfigPairList list, Configuration* conflict_config)
         }
     }
 #if DEBUG_EdgePushing
-    puts("not found");
+    std::cout << "not found" << std::endl;
 #endif
     return nullptr;
 }
@@ -309,7 +309,7 @@ void
 set_dump(const Set* set, void (*set_item_dump)(void*))
 {
     if (set == nullptr) {
-        puts("(set is empty)");
+        std::cout << "(set is empty)" << std::endl;
         return;
     }
 
@@ -907,7 +907,7 @@ lrk_theads_truncate_list_by_k(SymbolList s, int k) -> SymbolList
         if (t->snode->vanishable == false)
             i++;
         if (i >= k) { // truncate from after this point.
-                      // puts("--Yes truncate");
+                      // std::cout << "--Yes truncate" << std::endl;
             SymbolNode* tmp = t->next;
             t->next = nullptr;
             if (nullptr != tmp) {
@@ -981,7 +981,7 @@ void
 List::lrk_theads_rm_nt(int j)
 {
 #if DEBUG_LRK_THEADS
-    puts("\nlrk_theads_rm_nt:");
+    std::cout << std::endl << "lrk_theads_rm_nt:" << std::endl;
 #endif
 
     if (this->head == nullptr)

@@ -110,8 +110,8 @@ queue_expand(Queue* q)
 
     delete[] old_array;
 
-    // printf("expand queue size to %d: ", q->size);
-    // queue_dump(q); printf("\n");
+    // std::cout << "expand queue size to " <<  q->size<< ": ";
+    //  queue_dump(q);std::cout  << std::endl;
 }
 
 /*
@@ -136,8 +136,8 @@ queue_push(Queue* q, int n)
     if (q->tail == q->size)
         q->tail = 0;
 
-        // printf("push %d (size=%d): ", n, q->count);
-        // queue_dump(q); printf("\n");
+        // std::cout << "push " <<  n<< " (size=" <<  q->count<< "): ";
+        //  queue_dump(q);std::cout  << std::endl;
 
 #if DEBUG_QUEUE
     if (q->max_count < q->count)
@@ -163,8 +163,8 @@ queue_pop(Queue* q) -> int
 
     q->count--;
 
-    // printf("pop %d (size=%d): ", item, q->count);
-    // queue_dump(q); printf("\n");
+    // std::cout << "pop " <<  item<< " (size=" <<  q->count<< "): ";
+    //  queue_dump(q);std::cout  << std::endl;
 
     return item;
 }
@@ -220,9 +220,9 @@ void
 queue_info(Queue* q)
 {
 #if DEBUG_QUEUE
-    printf("queue_push is called %d times, ", q->call_count);
-    printf("max count: %d, average count: %.2f\n",
-           q->max_count,
-           ((double)q->sum_count) / q->call_count);
+    std::cout << "queue_push is called " << q->call_count << " times, ";
+    std::cout << "max count: " << q->max_count
+              << ", average count: " << TODO(2 points of float precision)
+              << ((double)q->sum_count) / q->call_count << std::endl;
 #endif
 }

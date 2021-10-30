@@ -276,8 +276,9 @@ combine_inc_symbol_list(SymbolList a, SymbolList b) -> SymbolNode*
 
     while (true) {
         int cmp = strcmp(na->snode->symbol, nb->snode->symbol);
-        // printf("strcmp(%s, %s) = %d\n",
-        //        na->snode->symbol, nb->snode->symbol, cmp);
+        // std::cout << "strcmp(" <<
+        //         na->snode->symbol<< ", " <<  nb->snode->symbol<< ") = " <<
+        //         cmp << std::endl;
         if (cmp == 0) {
             na_prev = na;
             na = na->next;
@@ -409,7 +410,7 @@ hash_tbl_init()
     }
 
 #if DEBUG_HASHTBL
-    printf("size of hash table = %ld\n", sizeof(HashTbl));
+    std::cout << "size of hash table = " << sizeof(HashTbl) << std::endl;
 #endif
     // testHashTbl();
 }
@@ -429,7 +430,7 @@ hash_value(const char* symbol) -> int
     }
 
 #if DEBUG_HASHTBL
-    printf("hash value for %s is %d\n", symbol, sum);
+    std::cout << "hash value for " << symbol << " is " << sum << std::endl;
 #endif
 
     return sum;
@@ -453,7 +454,7 @@ hash_tbl_insert(const char* symbol) -> SymbolTblNode*
     if (symbol == nullptr)
         return nullptr;
 #if DEBUG_HASHTBL
-    printf("hash insert %s at %d\n", symbol, where);
+    std::cout << "hash insert " << symbol << " at " << where << std::endl;
 #endif
     v = hash_value(symbol);
 
@@ -465,7 +466,7 @@ hash_tbl_insert(const char* symbol) -> SymbolTblNode*
     for (n = HashTbl[v].next; n->next != nullptr; n = n->next) {
         if (strcmp(n->symbol, symbol) == 0) {
 #if DEBUG_HASHTBL
-            printf("node for string %s exists\n", symbol);
+            std::cout << "node for string " << symbol << " exists" << std::endl;
 #endif
             return n;
         }
@@ -473,7 +474,7 @@ hash_tbl_insert(const char* symbol) -> SymbolTblNode*
     // the last node on this linked list.
     if (strcmp(n->symbol, symbol) == 0) {
 #if DEBUG_HASHTBL
-        printf("node for string %s exists\n", symbol);
+        std::cout << "node for string " << symbol << " exists" << std::endl;
 #endif
         return n;
     }
@@ -496,14 +497,14 @@ hash_tbl_find(const char* symbol) -> SymbolTblNode*
     for (SymbolTblNode* n = HashTbl.at(v).next; n != nullptr; n = n->next) {
         if (strcmp(n->symbol, symbol) == 0) {
 #if DEBUG_HASHTBL
-            printf("node for %s is found\n", symbol);
+            std::cout << "node for " << symbol << " is found" << std::endl;
 #endif
             return n;
         }
     }
 
 #if DEBUG_HASHTBL
-    printf("node for %s is NOT found\n", symbol);
+    std::cout << "node for " << symbol << " is NOT found" << std::endl;
 #endif
 
     return nullptr;
@@ -514,12 +515,12 @@ hash_tbl_destroy()
 {
     SymbolTblNode* nnext = nullptr;
 
-    // printf("--destroy hash table--\n");
+    // std::cout << "--destroy hash table--" << std::endl;
     for (int i = 0; i < HT_SIZE; i++) {
         if (HashTbl[i].count > 0) {
             for (SymbolTblNode* n = HashTbl[i].next; n != nullptr; n = nnext) {
                 nnext = n->next;
-                // printf("freeing node for %s\n", n->symbol);
+                // std::cout << "freeing node for " <<  n->symbol << std::endl;
                 delete[] n->symbol;
                 destroy_rule_id_list(n->ruleIDList);
                 delete n;

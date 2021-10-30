@@ -754,7 +754,8 @@ void
 StateNode::destroy_state(State* s)
 {
     if (s == nullptr) {
-        // printf("destroyState warning: s is nullptr\n");
+        // std::cout << "StateNode::destroy_state warning: s is nullptr" <<
+        // std::endl;
         return;
     }
     for (const auto& config : s->config) {
@@ -1263,13 +1264,13 @@ config_cmp(const Configuration* c1, const Configuration* c2) -> int
     const Production* c1_production = grammar.rules[c1->ruleID];
     const Production* c2_production = grammar.rules[c2->ruleID];
 
-    // printf("compare LHS\n");
+    // std::cout << "compare LHS" << std::endl;
     int cmp_val = strcmp(c1_production->nLHS->snode->symbol,
                          c2_production->nLHS->snode->symbol);
     if (cmp_val != 0)
         return cmp_val;
 
-    // printf("compare RHS\n");
+    // std::cout << "compare RHS" << std::endl;
     int count = c1_production->RHS_count;
     if (count > c2_production->RHS_count) {
         count = c2_production->RHS_count;
@@ -1293,7 +1294,7 @@ config_cmp(const Configuration* c1, const Configuration* c2) -> int
     } // c2 RHS is longer.
 
     // If productions are the same, go on to compare context.
-    // printf("compare marker\n");
+    // std::cout << "compare marker" << std::endl;
     cmp_val = c1->marker - c2->marker;
     if (cmp_val > 0) {
         return 1;
@@ -1303,7 +1304,7 @@ config_cmp(const Configuration* c1, const Configuration* c2) -> int
     }
 
     // If production and marker are the same, go on to compare context.
-    // printf("compare context\n");
+    // std::cout << "compare context" << std::endl;
     count = c1->context->context_count;
     if (count > c2->context->context_count) {
         count = c2->context->context_count;
@@ -1319,7 +1320,7 @@ config_cmp(const Configuration* c1, const Configuration* c2) -> int
         b = b->next;
     }
 
-    // printf("compare context count\n");
+    // std::cout << "compare context count" << std::endl;
     cmp_val = c1->context->context_count - c2->context->context_count;
     if (cmp_val > 0) {
         return 1;
@@ -1484,7 +1485,8 @@ void
 combine_compatible_config(State* s, bool debug_comb_comp_config)
 {
     if (s == nullptr) {
-        // printf("combineCompatibleConfig: warning: s is nullptr\n");
+        // std::cout << "combineCompatibleConfig: warning: s is nullptr" <<
+        // std::endl;
         return;
     }
     if (s->config.size() <= 1)
@@ -1791,7 +1793,7 @@ has_common_core(const State* s1, const State* s2) -> bool
 {
     if (s1 == nullptr || s2 == nullptr)
         return false;
-    // printf("hasCommonCore: \n");
+    // std::cout << "hasCommonCore: " << std::endl;
 
     bool result = false;
     if (s1->core_config_count != s2->core_config_count)
@@ -1993,7 +1995,8 @@ propagate_context_change(const State* s)
                 continue;
 
             if (combine_context(d->context, c->context)) {
-                // printf("context of state %d updated\n", t->state_no);
+                // std::cout << "context of state " <<  t->state_no<< " updated"
+                // << std::endl;
                 is_changed = true;
 
                 if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
@@ -2161,9 +2164,9 @@ void
 add_successor(State* s, State* n)
 {
     s->successor_list.push_back(n);
-    // printf(":: state %d, succesor is state %d on symbol
-    // %s\n",
-    //    s->state_no, n->state_no, n->trans_symbol);
+    // std::cout << ":: state " <<
+    //     s->state_no<< ", succesor is state " <<  n->state_no<< " on symbol
+    //  " <<  n->trans_symbol << std::endl;
 
     if (Options::get().use_lalr) {
         // add s to the parents_list of n. To get originators in
@@ -2251,7 +2254,7 @@ add_transition_states2_new(StateCollection* coll, State* src_state) -> bool
             // method.
             if (os == src_state && is_compatible == 1) {
                 src_state_changed = true;
-                // printf("src state is changed\n");
+                // std::cout << "src state is changed" << std::endl;
             }
         }
 
@@ -2535,16 +2538,16 @@ insert_action(SymbolTblNode* lookahead, int row, int state_dest)
           std::to_string(state_dest));
     }
 
-    // printf("conflict (state %d, lookahead %s): %d v.s. %d\n",
-    //        row, lookahead->symbol, ParsingTable.at(cell),
-    //        state_dest);
+    // std::cout << "conflict (state " <<
+    //         row<< ", lookahead " <<  lookahead->symbol<< "): " <<
+    //         ParsingTable.at(cell)<< " v.s. " << state_dest << std::endl;
 
     // reduce/reduce conflict, use the rule appears first.
     // i.e., the ruleID is smaller, or when negated, is bigger.
     if (ParsingTable.at(cell) < 0 && state_dest < 0) {
-        // printf("r/r conflict: [%d, %s] - %d v.s. %d\n",
-        //        row, lookahead->symbol, ParsingTable.at(cell),
-        //        state_dest);
+        // std::cout << "r/r conflict: [" <<
+        //         row<< ", " <<  lookahead->symbol<< "] - " <<
+        //         ParsingTable.at(cell)<< " v.s. " << state_dest << std::endl;
         std::shared_ptr<Conflict> c = add_to_conflict_array(
           row, lookahead, ParsingTable.at(cell), state_dest);
 
@@ -2591,14 +2594,14 @@ insert_action(SymbolTblNode* lookahead, int row, int state_dest)
 
     if (tp_s == nullptr || tp_r == nullptr || tp_s->precedence == 0 ||
         tp_r->precedence == 0) {
-        // printf("s/r conflict: [%d, %s] - %d v.s. %d\n",
-        //        row, lookahead->symbol, ParsingTable.at(cell),
-        //        state_dest);
+        // std::cout << "s/r conflict: [" <<
+        //         row<< ", " <<  lookahead->symbol<< "] - " <<
+        //         ParsingTable.at(cell)<< " v.s. " << state_dest << std::endl;
         std::shared_ptr<Conflict> c = add_to_conflict_array(
           row, lookahead, ParsingTable.at(cell), state_dest);
 
         ParsingTable.at(cell) = shift; // use shift over reduce by default.
-        // printf("default using %d\n", ParsingTable.at(cell));
+        // std::cout << "default using " <<  ParsingTable.at(cell) << std::endl;
 
         if (c != nullptr) {
             c->decision = ParsingTable.at(cell);
@@ -2617,8 +2620,8 @@ insert_action(SymbolTblNode* lookahead, int row, int state_dest)
         (tp_r->precedence == tp_s->precedence &&
          tp_r->assoc == associativity::LEFT)) {
         ParsingTable.at(cell) = reduce;
-        // printf("resolved by using %d\n",
-        // ParsingTable.at(cell));
+        // std::cout << "resolved by using " <<
+        //  ParsingTable.at(cell) << std::endl;
         return;
     }
 
@@ -2629,7 +2632,7 @@ insert_action(SymbolTblNode* lookahead, int row, int state_dest)
     }
 
     ParsingTable.at(cell) = shift;
-    // printf("resolved by using %d\n", ParsingTable.at(cell));
+    // std::cout << "resolved by using " <<  ParsingTable.at(cell) << std::endl;
 }
 
 auto

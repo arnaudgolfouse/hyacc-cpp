@@ -677,8 +677,8 @@ get_non_terminal_index(SymbolTblNode* snode) -> int
             return i;
         i++;
     }
-    // printf("getNonTerminalIndex warning: ");
-    // printf("%s not found!\n", symbol);
+    // std::cout << "getNonTerminalIndex warning: ";
+    // std::cout  <<  symbol<< " not found!" << std::endl;
     return -1;
 }
 
@@ -699,7 +699,8 @@ print_yyr1(std::ofstream& fp)
     if (Options::get().use_remove_unit_production) {
         int index = 0;
         for (int i = 1; i < grammar.rules.size(); i++) {
-            // printf("rule %d lhs: %s\n", i, grammar.rules[i]->LHS);
+            // std::cout << "rule " <<  i<< " lhs: " <<  grammar.rules[i]->LHS
+            // << std::endl;
             index = grammar.rules[i]->nLHS->snode->value;
             fp << std::setw(INTEGER_PADDING) << index;
             if (i < grammar.rules.size() - 1)
@@ -898,13 +899,13 @@ print_parsing_tbl(std::ofstream& fp)
 
                         if (action == 's' || action == 'g')
                             state_no = get_actual_state(state_no);
-                        // printf("%c%d\t", action, state_no);
+                        // std::cout  <<  action <<  state_no<< "\t";
                         print_parsing_tbl_entry(fp, action, state_no, &count);
                     } // end of if.
                 }
 
                 rowoffset.push_back(count);
-                // printf("\n");
+                // std::cout  << std::endl;
             } // end of if.
         }
     } else {
@@ -923,12 +924,12 @@ print_parsing_tbl(std::ofstream& fp)
                 char action = 0;
                 int state_no = 0;
                 get_action(ParsingTblColHdr[j]->type, j, i, &action, &state_no);
-                // printf("%c%d, ", action, state_no);
+                // std::cout  <<  action <<  state_no<< ", ";
                 print_parsing_tbl_entry(fp, action, state_no, &count);
             }
 
             rowoffset.push_back(count);
-            // printf("\n");
+            // std::cout  << std::endl;
         } // end of for.
     }
 
@@ -1075,7 +1076,7 @@ write_lrk_table_arrays(std::ofstream& fp)
        << "/* Number of rows in each LR(k) parsing table. */" << std::endl;
     fp << "static YYCONST yytabelem yy_lrk_rows[] = {";
     for (int i = 2; i <= lrk_pt_array->max_k; i++) {
-        // printf("write LRK table arrays: i = %d\n", i);
+        // std::cout << "write LRK table arrays: i = " <<  i << std::endl;
         if (i > 2)
             fp << ", ";
         fp << lrk_pt_array->array[i - 2]->row_count;

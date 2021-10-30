@@ -190,7 +190,8 @@ llist_context_set_clone(LlistContextSet* c) -> LlistContextSet*
 
     if (nullptr == c)
         return nullptr;
-    // printf("clone c: "); dump_LlistContextSet(c); std::cout << std::endl;
+    // std::cout << "clone c: "; dump_LlistContextSet(c); std::cout <<
+    // std::endl;
 
     LlistContextSet* d = llist_context_set_create(c->config);
     LlistContextSet* d_next = d;
@@ -203,7 +204,8 @@ llist_context_set_clone(LlistContextSet* c) -> LlistContextSet*
         d_next = d_next->next;
     }
 
-    // printf("result d: "); dump_LlistContextSet(d); std::cout << std::endl;
+    // std::cout << "result d: "; dump_LlistContextSet(d); std::cout <<
+    // std::endl;
     return d;
 }
 
@@ -758,17 +760,18 @@ cluster_contain_state(const LtCluster* c, int state_no) -> int
 
     if (state_no < 0)
         return -1;
-    // printf("cluster_cotain_state(state_no: %d)\n", state_no);
+    // std::cout << "cluster_cotain_state(state_no: " <<  state_no<< ")" <<
+    // std::endl;
     if (c == nullptr || c->states == nullptr)
         return -1;
 
     for (const LlistInt2* s = c->states; s != nullptr; s = s->next) {
         if (s->n1 == state_no) {
-            // puts("found");
+            // std::cout << "found" << std::endl;
             return s->n2;
         }
     }
-    // puts("NOT found");
+    // std::cout << "NOT found" << std::endl;
 
     return -1;
 }
@@ -786,17 +789,18 @@ cluster_contain_actual_state(LtCluster* c, int state_no) -> int
 {
     if (state_no < 0)
         return -1;
-    // printf("cluster_cotain_state(state_no: %d)\n", state_no);
+    // std::cout << "cluster_cotain_state(state_no: " <<  state_no<< ")" <<
+    // std::endl;
     if (c == nullptr || c->states == nullptr)
         return -1;
 
     for (LlistInt2* s = c->states; s != nullptr; s = s->next) {
         if (s->n2 == state_no) {
-            // puts("found");
+            // std::cout << "found" << std::endl;
             return s->n1;
         }
     }
-    // puts("NOT found");
+    // std::cout << "NOT found" << std::endl;
 
     return -1;
 }
@@ -938,10 +942,9 @@ replace_successor(State* src_state, State* s_new, State* s_old)
         return;
 
     if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-        printf("replace successor of state %d: %d replaced by %d: ",
-               src_state->state_no,
-               s_old->state_no,
-               s_new->state_no);
+        std::cout << "replace successor of state " << src_state->state_no
+                  << ": " << s_old->state_no << " replaced by "
+                  << s_new->state_no << ": ";
     }
 
     for (auto& successor : src_state->successor_list) {
@@ -955,7 +958,7 @@ replace_successor(State* src_state, State* s_new, State* s_old)
     }
 
     if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-        puts("NOT done");
+        std::cout << "NOT done" << std::endl;
     }
 }
 
@@ -991,8 +994,9 @@ lane_head_tail_pairs_replace(LtCluster* c,
     if (end_config->owner != s)
         return;
 
-    // printf("LHTPR: end_config: %d.%d\n",
-    //       end_config->owner->state_no, end_config->ruleID);
+    // std::cout << "LHTPR: end_config: " <<
+    //        end_config->owner->state_no<< "." <<  end_config->ruleID <<
+    //        std::endl;
 
     for (ConfigPairNode* n = lane_head_tail_pairs; n != nullptr; n = n->next) {
         // n->end->owner == end_config->owner.
@@ -1045,12 +1049,14 @@ cluster_add_lt_tbl_entry(LtCluster* c,
         state_no = s_copy->state_no;
 
         if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-            printf("clone state %d to %d\n", s->state_no, state_no);
+            std::cout << "clone state " << s->state_no << " to " << state_no
+                      << std::endl;
         }
 
         if (Options::get().use_lr_k) {
             // For LR(k), replace entry in lane_head_tail_pairs!
-            // printf("parrent state: %d\n", e_parent_state_no);
+            // std::cout << "parrent state: " <<  e_parent_state_no <<
+            // std::endl;
             lane_head_tail_pairs_replace(c, cur_red_config, s, s_copy);
         }
     }
@@ -1085,7 +1091,8 @@ find_containing_cluster(LtCluster* c, int state_no) -> LtCluster*
 
     if constexpr (DEBUG_PHASE_2_REGENERATE2) {
         if (nullptr != c)
-            printf("c: current state: %d/%d\n", c->states->n1, c->states->n2);
+            std::cout << "c: current state: " << c->states->n1 << "/"
+                      << c->states->n2 << std::endl;
     }
 
     for (; c != nullptr; c = c->next) {
@@ -1164,7 +1171,8 @@ combine_cluster(LtCluster* c_new, LtCluster* c_old)
             get_closure(s); /* needed only if context changed.*/               \
             lt_phase2_propagate_context_change(state_no, container, e);        \
         }                                                                      \
-        /*else { printf("::no propagation for state %d\n", state_no); }*/      \
+        /*else {std::cout << "::no propagation for state " <<  state_no <<     \
+         * std::endl; }*/                                                      \
     }
 
 #define clear_inherit_regenerate(state_no, parent_state_no)                    \
@@ -1216,7 +1224,8 @@ lt_phase2_propagate_context_change(int state_no, LtCluster* c, LtTblEntry* e)
     // so are its to_states which can be found from e.
 
     if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-        printf("lt_p2_propagateContextChange from state %d\n", state_no);
+        std::cout << "lt_p2_propagateContextChange from state " << state_no
+                  << std::endl;
     }
 
     for (const LlistInt* t = e->to_states; t != nullptr; t = t->next) {
@@ -1226,13 +1235,15 @@ lt_phase2_propagate_context_change(int state_no, LtCluster* c, LtTblEntry* e)
             const LlistInt2* t2 = llist_int2_find_n1(c->states, t->n);
             if (t2 == nullptr) {
                 if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-                    printf("--to state %d, not found in cluster.\n", t->n);
+                    std::cout << "--to state " << t->n
+                              << ", not found in cluster." << std::endl;
                     // cluster_dump(c);
                 }
                 continue; // if not found, just ignore this to state.
             }
             if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-                printf("--to state: %d, actual: %d\n", t->n, t2->n2);
+                std::cout << "--to state: " << t->n << ", actual: " << t2->n2
+                          << std::endl;
             }
             inherit_propagate(t2->n2, state_no, c, f);
         }
@@ -1246,12 +1257,12 @@ inherit_parent_context(State* s, State* parent) -> bool
         return false;
 
     if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-        printf("state %d: to inherit context from parent state %d\n",
-               s->state_no,
-               parent->state_no);
+        std::cout << "state " << s->state_no
+                  << ": to inherit context from parent state "
+                  << parent->state_no << std::endl;
 
         if (0 && s->state_no == 39) {
-            printf("before: \n");
+            std::cout << "before: " << std::endl;
             my_write_state(s);
             my_write_state(parent);
         }
@@ -1280,7 +1291,7 @@ inherit_parent_context(State* s, State* parent) -> bool
 
     if constexpr (DEBUG_PHASE_2_REGENERATE2) {
         if (0 && s->state_no == 39) {
-            printf("after: \n");
+            std::cout << "after: " << std::endl;
             my_write_state(s);
         }
     }
@@ -1391,10 +1402,9 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
                 c = new_cluster = container;
 
                 if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-                    printf("=>3. state %d: inherit context from state %d, "
-                           "propagate\n",
-                           state_no,
-                           parent_state_no);
+                    std::cout << "=>3. state " << state_no
+                              << ": inherit context from state "
+                              << parent_state_no << ", ";
                 }
                 inherit_propagate(state_no, parent_state_no, container, e);
 
@@ -1408,7 +1418,8 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
     if (container_not_found) {
         if (first_container == nullptr) { // always add.
             if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-                printf("4. state %d is NOT in any cluster yet\n", state_no);
+                std::cout << "4. state " << state_no
+                          << " is NOT in any cluster yet" << std::endl;
             }
             ret_state = cluster_add_lt_tbl_entry(
               c, state_no, e_ctxt, parent_state_no, false);
@@ -1422,10 +1433,9 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
                 e->processed = true;
 
             if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-                printf("=>4. state %d: clear, inherit context from state %d, "
-                       "regenerate\n",
-                       state_no,
-                       parent_state_no);
+                std::cout << "=>4. state " << state_no
+                          << ": clear, inherit context from state "
+                          << parent_state_no << ", ";
             }
             clear_inherit_regenerate(state_no, parent_state_no);
 
@@ -1440,10 +1450,9 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
                 all_pairwise_disjoint = false;
             }
             if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-                printf("=>5. state %d: clear, inherit context from state %d, "
-                       "regenerate\n",
-                       ret_state,
-                       parent_state_no);
+                std::cout << "=>5. state " << ret_state
+                          << ": clear, inherit context from state "
+                          << parent_state_no << ", ";
             }
             clear_inherit_regenerate(ret_state, parent_state_no);
         }
@@ -1505,9 +1514,9 @@ phase2_regeneration2()
         new_cluster = cluster_create(x);
 
         if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-            printf("== chain head state: %d\n", e->from_state);
-            printf("=>1. clear and regenerate context for state %d\n",
-                   x->from_state);
+            std::cout << "== chain head state: " << e->from_state << std::endl;
+            std::cout << "=>1. clear and regenerate context for state "
+                      << x->from_state << std::endl;
         }
         clear_regenerate(x->from_state);
 
@@ -1753,7 +1762,7 @@ add_state_no_array(StateNoArray* sa, int state_no)
             return;
         } // exists.
     }
-    // printf("state %d is added to list. \n", state_no);
+    // std::cout << "state " <<  state_no<< " is added to list. " << std::endl;
     sa->states.push_back(state_no);
 }
 
@@ -1814,7 +1823,7 @@ static void
 my_write_production(const Production* p, int marker)
 {
     if (p == nullptr) {
-        // printf("writeProduction warning: p is nullptr\n");
+        // std::cout << "writeProduction warning: p is nullptr" << std::endl;
         return;
     }
 
@@ -1938,7 +1947,8 @@ get_inadequate_state_reduce_config_context(const State* s)
         if (is_final_configuration(c)) {
             lane_tracing_reduction(c);
             if constexpr (DEBUG_PHASE_1) {
-                puts(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
+                std::cout << ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
+                          << std::endl;
             }
         }
     }
@@ -2101,7 +2111,8 @@ remove_pass_through_states(laneHead* lh_list) -> laneHead*
         }
         if (h->s->PASS_THRU == 1u) {
             if constexpr (DEBUG_PHASE_2) {
-                puts("Is pass thru state! Remove it from laneHead list");
+                std::cout << "Is pass thru state! Remove it from laneHead list"
+                          << std::endl;
             }
             // now remove this state from lh_list.
             laneHead* tmp = h;
@@ -2246,8 +2257,8 @@ add_split_state(State* y, State* s, int successor_index) -> bool
     if (os == nullptr) { // No existing state found. Add Y as a new state.
         y->state_no = states_new->state_count;
         if constexpr (DEBUG_PHASE_2_REGENERATE) {
-            // puts("split - new state");
-            printf("split - add new state %d\n", y->state_no);
+            // std::cout << "split - new state" << std::endl;
+            std::cout << "split - add new state " << y->state_no << std::endl;
         }
         states_new->add_state2(y);
         add_state_to_state_array(*states_new_array, y);
@@ -2261,7 +2272,7 @@ add_split_state(State* y, State* s, int successor_index) -> bool
         }
         return true;
     } // same or compatible with an existing state.
-    // puts("split - old state");
+    // std::cout << "split - old state" << std::endl;
     update_action(get_col(*os->trans_symbol->snode), s->state_no, os->state_no);
     s->successor_list[successor_index] = os;
     State::destroy_state(y);
@@ -2277,7 +2288,8 @@ add_unique_queue(State* s, laneHead* lh_list) -> laneHead*
 
     if (h->s == s) { // exists, is the first node.
         if constexpr (DEBUG_PHASE_2_REGENERATE) {
-            printf("state %d already on laneHead queue\n", s->state_no);
+            std::cout << "state " << s->state_no << " already on laneHead queue"
+                      << std::endl;
         }
         return lh_list;
     }
@@ -2285,7 +2297,8 @@ add_unique_queue(State* s, laneHead* lh_list) -> laneHead*
     for (; h->next != nullptr; h = h->next) {
         if (h->next->s == s) { // exists already.
             if constexpr (DEBUG_PHASE_2_REGENERATE) {
-                printf("state %d already on laneHead queue\n", s->state_no);
+                std::cout << "state " << s->state_no
+                          << " already on laneHead queue" << std::endl;
             }
             return lh_list;
         }
@@ -2422,7 +2435,9 @@ phase2_regeneration(laneHead* lh_list)
         update_state_reduce_action(s);
 
         if constexpr (DEBUG_PHASE_2_REGENERATE) {
-            printf("\n==regenerate state %d\n", s->state_no);
+            std::cout << std::endl
+                      << "==reg" << std::endl
+                      << "erate state " << s->state_no << std::endl;
             my_write_state(s);
         }
         const StateCollection* coll = get_state_successors(s);
@@ -2436,20 +2451,22 @@ phase2_regeneration(laneHead* lh_list)
 
             if (y0->PASS_THRU == 0u) {
                 if constexpr (DEBUG_PHASE_2_REGENERATE) {
-                    printf("state %d PASS_THRU == 0 - NOT on lane\n",
-                           y0->state_no);
+                    std::cout << "state " << y0->state_no
+                              << " PASS_THRU == 0 - NOT on lane" << std::endl;
                 }
                 continue; // NOT on 'conflicting' lane.
             }
             if constexpr (DEBUG_PHASE_2_REGENERATE) {
-                printf("state %d PASS_THRU == 1 - on lane\n", y0->state_no);
-                printf("%s successor isOnConflictingLane\n",
-                       y->trans_symbol->snode->symbol);
+                std::cout << "state " << y0->state_no
+                          << " PASS_THRU == 1 - on lane" << std::endl;
+                std::cout << y->trans_symbol->snode->symbol
+                          << " successor isOnConflictingLane" << std::endl;
             }
 
             if (y0->REGENERATED == 0u) { // is original.
                 if constexpr (DEBUG_PHASE_2_REGENERATE) {
-                    printf("replace - replace old state %d\n", y0->state_no);
+                    std::cout << "replace - replace old state " << y0->state_no
+                              << std::endl;
                 }
                 // replace the context of Y0 with those of Y.
                 regenerate_state_context(y0, y);
@@ -2460,8 +2477,8 @@ phase2_regeneration(laneHead* lh_list)
 
                 if (exists) {
                     if constexpr (DEBUG_PHASE_2_REGENERATE) {
-                        printf("combine to compatible state %d\n",
-                               y0->state_no);
+                        std::cout << "combine to compatible state "
+                                  << y0->state_no << std::endl;
                     }
                     combine_state_context(y0, y);
                     lh_list = add_unique_queue(y0, lh_list);
@@ -2471,7 +2488,7 @@ phase2_regeneration(laneHead* lh_list)
                             new_state = y;
                         }
                         if constexpr (DEBUG_PHASE_2_REGENERATE) {
-                            puts("split - new state added");
+                            std::cout << "split - new state added" << std::endl;
                         }
                     }
                 }
@@ -2483,7 +2500,7 @@ phase2_regeneration(laneHead* lh_list)
     //    If there are any new split states, do GPM on them.
     if (new_state != nullptr) {
         if constexpr (DEBUG_PHASE_2_REGENERATE) {
-            puts("GRM(new_state) now.");
+            std::cout << "GRM(new_state) now." << std::endl;
         }
         gpm(new_state);
     }
@@ -2526,12 +2543,12 @@ get_the_context(const Configuration* o) -> SymbolNode*
 
     if constexpr (DEBUG_PHASE_2_GET_TBL) {
         if (gamma_theads != nullptr) {
-            printf("C: Add context to entry state %d: ", o->owner->state_no);
-            printf("[%d.%d] ",
-                   cur_red_config->owner->state_no,
-                   cur_red_config->ruleID);
+            std::cout << "C: Add context to entry state " << o->owner->state_no
+                      << ": ";
+            std::cout << "[" << cur_red_config->owner->state_no << "."
+                      << cur_red_config->ruleID << "] ";
             write_the_symbol_list(gamma_theads);
-            printf("\n");
+            std::cout << std::endl;
         }
     }
 
@@ -2561,24 +2578,25 @@ trace_back(const Configuration* c0, Configuration* c, laneHead* lh_list)
 
     if (c->LANE_END == 1) {
         if constexpr (DEBUG_PHASE_2) {
-            printf(
-              "END config FOUND: %d.%d\n\n", c->owner->state_no, c->ruleID);
-            printf("=ADD another head state: %d\n", c->owner->state_no);
+            std::cout << "END config FOUND: " << c->owner->state_no << "."
+                      << c->ruleID << std::endl
+                      << "\n";
+            std::cout << "=ADD another head state: " << c->owner->state_no
+                      << std::endl;
         }
 
         if constexpr (DEBUG_PHASE_2_GET_TBL) {
-            printf("D: END of config lane FOUND: %d.%d \n",
-                   c->owner->state_no,
-                   c->ruleID);
+            std::cout << "D: END of config lane FOUND: " << c->owner->state_no
+                      << "." << c->ruleID << " " << std::endl;
         }
 
         if (Options::get().use_lr_k) { // for LR(k) use only.
             if constexpr (DEBUG_PHASE_2_GET_TBL) {
-                printf("config_red_config: %d.%d, LANE_END: %d.%d\n",
-                       cur_red_config->owner->state_no,
-                       cur_red_config->ruleID,
-                       c->owner->state_no,
-                       c->ruleID);
+                std::cout << "config_red_config: "
+                          << cur_red_config->owner->state_no << "."
+                          << cur_red_config->ruleID
+                          << ", LANE_END: " << c->owner->state_no << "."
+                          << c->ruleID << std::endl;
             }
             // Don't use goal production. As it is the augmented rule, and
             // it generates no context at all.
@@ -2592,7 +2610,8 @@ trace_back(const Configuration* c0, Configuration* c, laneHead* lh_list)
     }
 
     if (c->originators == nullptr) {
-        puts("trace_back: c->originators is nullptr. error? report bug");
+        std::cout << "trace_back: c->originators is nullptr. error? report bug"
+                  << std::endl;
         return lh_list; // should NEVER happen.
     }
 
@@ -2603,21 +2622,22 @@ trace_back(const Configuration* c0, Configuration* c, laneHead* lh_list)
         set_transitors_pass_thru_on(c, o); // set PASS_THRU ON.
         if (o->LANE_CON == 0) {
             if constexpr (DEBUG_PHASE_2) {
-                printf(
-                  "config on lane: %d.%d\n", o->owner->state_no, o->ruleID);
+                std::cout << "config on lane: " << o->owner->state_no << "."
+                          << o->ruleID << std::endl;
             }
             if (c->owner != o->owner) {
                 c->owner->PASS_THRU = 1;
                 if constexpr (DEBUG_PHASE_2) {
-                    printf("set state %d PASS_THRU ON\n", c->owner->state_no);
+                    std::cout << "set state " << c->owner->state_no
+                              << " PASS_THRU ON" << std::endl;
                 }
             }
 
             lh_list = trace_back(c, o, lh_list);
         } else {
             if constexpr (DEBUG_PHASE_2) {
-                printf(
-                  "already traced: %d.%d\n", o->owner->state_no, o->ruleID);
+                std::cout << "already traced: " << o->owner->state_no << "."
+                          << o->ruleID << std::endl;
             }
         }
     }
@@ -2637,17 +2657,19 @@ trace_back_lrk(const Configuration* c0, Configuration* c)
 
     if (c->LANE_END == 1) {
         if constexpr (DEBUG_PHASE_2) {
-            printf(
-              "END config FOUND: %d.%d\n\n", c->owner->state_no, c->ruleID);
-            printf("=ADD another head state: %d\n", c->owner->state_no);
+            std::cout << "END config FOUND: " << c->owner->state_no << "."
+                      << c->ruleID << std::endl
+                      << "\n";
+            std::cout << "=ADD another head state: " << c->owner->state_no
+                      << std::endl;
         }
 
         if constexpr (DEBUG_PHASE_2_GET_TBL) {
-            printf("config_red_config: %d.%d, LANE_END: %d.%d\n",
-                   cur_red_config->owner->state_no,
-                   cur_red_config->ruleID,
-                   c->owner->state_no,
-                   c->ruleID);
+            std::cout << "config_red_config: "
+                      << cur_red_config->owner->state_no << "."
+                      << cur_red_config->ruleID
+                      << ", LANE_END: " << c->owner->state_no << "."
+                      << c->ruleID << std::endl;
         }
         // Don't use goal production. As it is the augmented rule, and
         // it generates no context at all.
@@ -2793,12 +2815,13 @@ lane_tracing_phase2()
 
     const int ct = states_inadequate->count_unresolved;
     if constexpr (DEBUG_PHASE_2) {
-        printf("phase 2. unresolved inadequate states: %d\n", ct);
+        std::cout << "phase 2. unresolved inadequate states: " << ct
+                  << std::endl;
     }
 
     laneHead* lane_head_list = get_conflict_lane_head();
     if (lane_head_list == nullptr) {
-        puts("laneHeadList is nullptr. return");
+        std::cout << "laneHeadList is nullptr. return" << std::endl;
         return;
     }
 
@@ -2807,7 +2830,7 @@ lane_tracing_phase2()
     }
 
     if constexpr (DEBUG_PHASE_2_REGENERATE) {
-        puts("Now do regeneration");
+        std::cout << "Now do regeneration" << std::endl;
     }
 
     if (!Options::get().use_combine_compatible_states) {
@@ -2842,7 +2865,7 @@ lane_tracing()
     }
 
     if (GRAMMAR_AMBIGUOUS) {
-        puts("Grammar is ambiguous");
+        std::cout << "Grammar is ambiguous" << std::endl;
     }
 }
 
@@ -2989,7 +3012,7 @@ stack_operation(int* fail_ct, Configuration* o)
     (*fail_ct)++;
 
     if constexpr (DEBUG_PHASE_1) {
-        printf("---------------fail_ct = %d\n", *fail_ct);
+        std::cout << "---------------fail_ct = " << *fail_ct << std::endl;
     }
 
     switch (*fail_ct) {
@@ -3058,7 +3081,7 @@ static void
 context_adding(SymbolList context_generated, int cur_config_index)
 {
     if constexpr (DEBUG_PHASE_1) {
-        puts("CONTEXT ADDING ROUTINE: ");
+        std::cout << "CONTEXT ADDING ROUTINE: " << std::endl;
         write_symbol_list(context_generated, "CONTEXT_GENERATED");
     }
 
@@ -3069,8 +3092,8 @@ context_adding(SymbolList context_generated, int cur_config_index)
             Configuration* c = LANE->array[ct];
             if (c != LT_ZERO && c != LT_MARKER) {
                 if constexpr (DEBUG_PHASE_1) {
-                    printf(
-                      "add context to %d.%d\n", c->owner->state_no, c->ruleID);
+                    std::cout << "add context to " << c->owner->state_no << "."
+                              << c->ruleID << std::endl;
                 }
                 bool exist = false;
                 c->context->nContext = insert_symbol_list_unique(
@@ -3129,7 +3152,7 @@ lane_tracing_reduction(Configuration* c)
 
     if (c->COMPLETE == 1) {
 #if DEBUG_EdgePushing
-        puts("c->COMPLETE == 1");
+        std::cout << "c->COMPLETE == 1" << std::endl;
 #endif
         return; // already evaluated.
     }
@@ -3143,7 +3166,7 @@ lane_tracing_reduction(Configuration* c)
     TEST_FAILED = FLAG_OFF;
 
 #if DEBUG_EdgePushing
-    puts("DO_LOOP:");
+    std::cout << "DO_LOOP:" << std::endl;
 #endif
 
     do_loop();
@@ -3232,11 +3255,10 @@ set_transitors_pass_thru_on(const Configuration* cur_config, Configuration* o)
 
             if (false == Options::get().use_combine_compatible_states) {
                 if constexpr (DEBUG_PHASE_2_GET_TBL) {
-                    printf("B: next entry in entry_table: (%d.%d, %d.%d)\n",
-                           c->owner->state_no,
-                           c->ruleID,
-                           cur_config->owner->state_no,
-                           cur_config->ruleID);
+                    std::cout << "B: next entry in entry_table: ("
+                              << c->owner->state_no << "." << c->ruleID << ", "
+                              << cur_config->owner->state_no << "."
+                              << cur_config->ruleID << ")" << std::endl;
                 }
                 // add another entry to LT_tbl.
                 lt_tbl_entry_add(c->owner, cur_config->owner);
@@ -3248,8 +3270,8 @@ set_transitors_pass_thru_on(const Configuration* cur_config, Configuration* o)
                 // you also don't want to set o->owner to be PASS_THRU, since
                 // it may be the end state.
                 if constexpr (DEBUG_PHASE_2_GET_TBL) {
-                    printf("==state %d: set pass_thru ON. 2.\n",
-                           c->owner->state_no);
+                    std::cout << "==state " << c->owner->state_no
+                              << ": set pass_thru ON. 2." << std::endl;
                 }
                 c->owner->PASS_THRU = 1;
             }
@@ -3279,10 +3301,8 @@ get_transitors(Configuration* c0, Configuration* c)
         return;
 
     if constexpr (DEBUG_GET_ORIGINATOR) {
-        printf("get transitor for %d.%d.%d\n",
-               c->owner->state_no,
-               c->ruleID,
-               c->marker);
+        std::cout << "get transitor for " << c->owner->state_no << "."
+                  << c->ruleID << "." << c->marker << std::endl;
     }
 
     for (const auto& p : l->state_list) {
@@ -3291,13 +3311,11 @@ get_transitors(Configuration* c0, Configuration* c)
             if (t->ruleID == c->ruleID && t->marker == c->marker - 1) {
                 // is a transitor.
                 if constexpr (DEBUG_GET_ORIGINATOR) {
-                    printf("++ ++ transitor found for [%d.%d.%d]: [%d.%d.%d]\n",
-                           c->owner->state_no,
-                           c->ruleID,
-                           c->marker,
-                           p->state_no,
-                           t->ruleID,
-                           t->marker);
+                    std::cout << "++ ++ transitor found for ["
+                              << c->owner->state_no << "." << c->ruleID << "."
+                              << c->marker << "]: [" << p->state_no << "."
+                              << t->ruleID << "." << t->marker << "]"
+                              << std::endl;
                 }
                 insert_transitor_list(c, t);
                 get_originators(c0, t);
@@ -3322,10 +3340,8 @@ static void
 get_originators(Configuration* c0, Configuration* c)
 {
     if constexpr (DEBUG_GET_ORIGINATOR) {
-        printf("-- current config: %d.%d.%d\n",
-               c->owner->state_no,
-               c->ruleID,
-               c->marker);
+        std::cout << "-- current config: " << c->owner->state_no << "."
+                  << c->ruleID << "." << c->marker << std::endl;
     }
 
     if (c->isCoreConfig == 1u) { // core config, search parent states.
@@ -3340,14 +3356,11 @@ get_originators(Configuration* c0, Configuration* c)
             }
             if (d->nMarker->snode == grammar.rules[c->ruleID]->nLHS->snode) {
                 if constexpr (DEBUG_GET_ORIGINATOR) {
-                    printf(
-                      "-- -- originator found for [%d.%d.%d]: [%d.%d.%d]\n",
-                      c0->owner->state_no,
-                      c0->ruleID,
-                      c0->marker,
-                      d->owner->state_no,
-                      d->ruleID,
-                      d->marker);
+                    std::cout << "-- -- originator found for ["
+                              << c0->owner->state_no << "." << c0->ruleID << "."
+                              << c0->marker << "]: [" << d->owner->state_no
+                              << "." << d->ruleID << "." << d->marker << "]"
+                              << std::endl;
                 }
                 insert_originator_list(c0, d, 1);
             }
@@ -3401,14 +3414,15 @@ do_loop()
 
         if constexpr (DEBUG_PHASE_1) {
             stdout_write_config(o);
-            printf("gamma: %s\n",
-                   gamma == nullptr ? "nullptr" : gamma->snode->symbol);
+            std::cout << "gamma: "
+                      << (gamma == nullptr ? "nullptr" : gamma->snode->symbol)
+                      << std::endl;
         }
 
         SymbolNode* gamma_theads = nullptr;
         if (gamma != nullptr) { // if not nullptr, get theads.
             if constexpr (DEBUG_PHASE_1) {
-                puts("gamma not nullptr, get theads.");
+                std::cout << "gamma not nullptr, get theads." << std::endl;
             }
             gamma_theads = get_theads(gamma); // get Heads.
             if constexpr (DEBUG_PHASE_1) {
@@ -3423,7 +3437,8 @@ do_loop()
             // if (o->owner->state_no == 0 && o->ruleID == 0) {
             if (is_goal(*o)) {
                 if constexpr (DEBUG_PHASE_1) {
-                    puts("GOAL PRODUCTION - generate context: $end");
+                    std::cout << "GOAL PRODUCTION - generate context: $end"
+                              << std::endl;
                 }
                 gamma_theads = SymbolNode::create(hash_tbl_find(STR_END));
             }
@@ -3435,7 +3450,7 @@ do_loop()
 
         if (test_a(gamma_theads)) {
             if constexpr (DEBUG_PHASE_1) {
-                puts("testA true, get CONTEXTS_GENERATED");
+                std::cout << "testA true, get CONTEXTS_GENERATED" << std::endl;
             }
             bool null_possible = false;
             contexts_generated =
@@ -3447,31 +3462,32 @@ do_loop()
 
             if (null_possible) {
                 if constexpr (DEBUG_PHASE_1) {
-                    puts("null possible true");
+                    std::cout << "null possible true" << std::endl;
                 }
                 if (test_b(o)) { // if (o->COMPLETE == FLAG_ON) {
                     if constexpr (DEBUG_PHASE_1) {
-                        puts("COMPLETE ON");
+                        std::cout << "COMPLETE ON" << std::endl;
                     }
 
                     contexts_generated = combine_context_list(
                       contexts_generated, o->context->nContext);
                 } else {
                     if constexpr (DEBUG_PHASE_1) {
-                        puts("COMPLETE OFF");
+                        std::cout << "COMPLETE OFF" << std::endl;
                     }
 
                     if (test_d(o)) { // if (o->IN_LANE == FLAG_ON) {
                         if constexpr (DEBUG_PHASE_1) {
-                            puts("IN_LANE ON");
-                            puts("GRAMMAR is AMBIGUOUS");
+                            std::cout << "IN_LANE ON" << std::endl;
+                            std::cout << "GRAMMAR is AMBIGUOUS" << std::endl;
                         }
                         GRAMMAR_AMBIGUOUS = true;
                         /// exit(1); //////////////// exit prematurely.
                         move_markers(o);
                     } else {
                         if constexpr (DEBUG_PHASE_1) {
-                            puts("IN_LANE OFF. set TRACE_FURTHER ON");
+                            std::cout << "IN_LANE OFF. set TRACE_FURTHER ON"
+                                      << std::endl;
                         }
 
                         TRACE_FURTHER = FLAG_ON;
@@ -3479,18 +3495,17 @@ do_loop()
                 }
             } else {
                 if constexpr (DEBUG_PHASE_1) {
-                    puts("possible null is: false");
+                    std::cout << "possible null is: false" << std::endl;
                 }
                 o->LANE_END = 1; // set LANE_END to be true.
 
                 if constexpr (DEBUG_PHASE_1) {
-                    printf(
-                      "Found lane_end: %d.%d\n", o->owner->state_no, o->ruleID);
-                    printf(
-                      "conflict config: %d.%d, lane head state %d, contexts: ",
-                      LANE->array[0]->owner->state_no,
-                      LANE->array[0]->ruleID,
-                      o->owner->state_no);
+                    std::cout << "Found lane_end: " << o->owner->state_no << "."
+                              << o->ruleID << std::endl;
+                    std::cout
+                      << "conflict config: " << LANE->array[0]->owner->state_no
+                      << "." << LANE->array[0]->ruleID << ", lane head state "
+                      << o->owner->state_no << ", contexts: ";
                     write_symbol_list(gamma_theads, "contexts");
                 }
                 // if is in edge_pushing, ignore the context adding routine.
@@ -3504,12 +3519,12 @@ do_loop()
 
         } else {
             if constexpr (DEBUG_PHASE_1) {
-                puts("testA false");
+                std::cout << "testA false" << std::endl;
             }
 
             if (test_b(o)) { // testB
                 if constexpr (DEBUG_PHASE_1) {
-                    puts("testB true");
+                    std::cout << "testB true" << std::endl;
                 }
 
                 contexts_generated = combine_context_list(contexts_generated,
@@ -3518,12 +3533,12 @@ do_loop()
                   contexts_generated, o, cur_config_index, &fail_ct);
             } else {
                 if constexpr (DEBUG_PHASE_1) {
-                    puts("testB false");
+                    std::cout << "testB false" << std::endl;
                 }
 
                 if (test_c(o)) { // test_c
                     if constexpr (DEBUG_PHASE_1) {
-                        puts("test_c true");
+                        std::cout << "test_c true" << std::endl;
                     }
 
                     move_markers(o);
@@ -3534,7 +3549,7 @@ do_loop()
                       contexts_generated, o, cur_config_index, &fail_ct);
                 } else {
                     if constexpr (DEBUG_PHASE_1) {
-                        puts("test_c false");
+                        std::cout << "test_c false" << std::endl;
                     }
 
                     stack_operation(&fail_ct, o);
@@ -3545,12 +3560,12 @@ do_loop()
     } // end of for.
 
     if constexpr (DEBUG_PHASE_1) {
-        puts("________END OF DO_LOOP____________________");
+        std::cout << "________END OF DO_LOOP____________________" << std::endl;
     }
 
     if (TEST_FAILED == FLAG_ON) {
         if constexpr (DEBUG_PHASE_1) {
-            puts("__TEST_FAILED is ON__");
+            std::cout << "__TEST_FAILED is ON__" << std::endl;
         }
 
         TEST_FAILED = FLAG_OFF;
@@ -3565,7 +3580,7 @@ pop_lane()
 {
 
     if constexpr (DEBUG_PHASE_1) {
-        puts("POP_LANE");
+        std::cout << "POP_LANE" << std::endl;
     }
 
     LANE->pop();
@@ -3579,7 +3594,7 @@ check_stack_top()
 
     if (top == LT_MARKER) {
         if constexpr (DEBUG_PHASE_1) {
-            puts("__check_stack_top true");
+            std::cout << "__check_stack_top true" << std::endl;
         }
 
         STACK->pop();
@@ -3587,19 +3602,19 @@ check_stack_top()
 
     } else {
         if constexpr (DEBUG_PHASE_1) {
-            puts("__check_stack_top false");
+            std::cout << "__check_stack_top false" << std::endl;
         }
 
         if (top->COMPLETE == FLAG_ON) {
             if constexpr (DEBUG_PHASE_1) {
-                puts("__top COMPLETE ON");
+                std::cout << "__top COMPLETE ON" << std::endl;
             }
 
             STACK->pop();
             check_stack_top();
         } else {
             if constexpr (DEBUG_PHASE_1) {
-                puts("__top COMPLETE OFF");
+                std::cout << "__top COMPLETE OFF" << std::endl;
             }
 
             STACK->pop();
@@ -3617,9 +3632,8 @@ propogate_context_sets(Configuration* c)
         return;
 
     if constexpr (DEBUG_PHASE_1) {
-        printf("===config %d.%d heuristic propogate context sets===\n",
-               c->owner->state_no,
-               c->ruleID);
+        std::cout << "===config " << c->owner->state_no << "." << c->ruleID
+                  << " heuristic propogate context sets===" << std::endl;
         stdout_write_config(c);
     }
 
@@ -3650,18 +3664,18 @@ check_lane_top()
 
     if (lane_top == LT_MARKER) {
         if constexpr (DEBUG_PHASE_1) {
-            puts("check lane top true");
+            std::cout << "check lane top true" << std::endl;
         }
 
         check_stack_top();
     } else {
         if constexpr (DEBUG_PHASE_1) {
-            puts("check lane top false");
+            std::cout << "check lane top false" << std::endl;
         }
 
         if (lane_top == LT_ZERO) {
             if constexpr (DEBUG_PHASE_1) {
-                puts("lane top is ZERO.");
+                std::cout << "lane top is ZERO." << std::endl;
             }
 
             pop_lane();
@@ -3676,7 +3690,8 @@ check_lane_top()
             if (LANE->count() == 1) { // the starting reduction
                                       /////////// END PROGRAMING ///////////////
                 if constexpr (DEBUG_PHASE_1) {
-                    puts("=====REDUCTION LANE TRACING ENDS=====");
+                    std::cout << "=====REDUCTION LANE TRACING ENDS====="
+                              << std::endl;
                 }
             } else {
                 pop_lane();

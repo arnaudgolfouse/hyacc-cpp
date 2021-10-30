@@ -32,6 +32,7 @@
 
 #include "y.hpp"
 #include <cstddef>
+#include <iostream>
 #include <vector>
 
 #define DEBUG_STACK 0
@@ -52,7 +53,8 @@ struct Stack
     {
         if (this->array.empty()) {
             if (USE_WARNING)
-                puts("stack_pop warning: underflow, return nullptr");
+                std::cout << "stack_pop warning: underflow, return nullptr"
+                          << std::endl;
             return nullptr;
         }
         auto* last = this->array.back();
@@ -63,7 +65,8 @@ struct Stack
     {
         if (this->array.empty()) {
             if (USE_WARNING)
-                puts("stack_pop warning: underflow, return nullptr");
+                std::cout << "stack_pop warning: underflow, return nullptr"
+                          << std::endl;
             return nullptr;
         }
         return this->array.back();

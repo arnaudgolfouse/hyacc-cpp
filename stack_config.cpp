@@ -42,7 +42,7 @@ Stack::create2(const size_t size) -> Stack*
 {
     Stack* s = new Stack{};
     if (s == nullptr) {
-        puts("stack_create: out of memory");
+        std::cout << "stack_create: out of memory" << std::endl;
         return nullptr;
     }
     s->array.reserve(size);

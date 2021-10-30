@@ -141,7 +141,7 @@ MRTreeNode::find_node_in_tree(const std::shared_ptr<MRTreeNode>& node,
   -> std::shared_ptr<MRTreeNode>
 {
     if (node == nullptr) {
-        // printf("findNodeInTree warning: node is null\n");
+        // std::cout << "findNodeInTree warning: node is null" << std::endl;
         return nullptr;
     }
     if (node->symbol->snode == symbol) {
@@ -349,7 +349,7 @@ void
 get_node(int leaf_index, MRTreeNode* node, MRParents* parents)
 {
     if (node == nullptr) {
-        // printf("getNode warning: node is nullptr\n");
+        // std::cout << "getNode warning: node is nullptr" << std::endl;
         return;
     }
 

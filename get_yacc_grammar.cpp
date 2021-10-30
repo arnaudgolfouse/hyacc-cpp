@@ -341,7 +341,7 @@ get_expect_sr_conflict()
                                  "]: invalid %expect value: " + ysymbol);
     }
 
-    // printf("expect: %d\n", expected_sr_conflict);
+    // std::cout << "expect: " <<  expected_sr_conflict << std::endl;
     ysymbol_pt = 0;
 }
 
@@ -504,7 +504,7 @@ process_yacc_file_input_section1(std::ifstream& fp) -> SymbolNode*
             // avoid '\'' and '\\'.
             if (c == '\'' &&
                 (last_c != '\\' || (ysymbol_pt == 2 && ysymbol[0] == '\\'))) {
-                // printf("] terminal ends\n");
+                // std::cout << "] terminal ends" << std::endl;
                 output_terminal(tokens_tail,
                                 state,
                                 prev_state,
@@ -522,7 +522,8 @@ process_yacc_file_input_section1(std::ifstream& fp) -> SymbolNode*
             } else if (c == '>') {
                 // process token type. to be implemented.
                 ysymbol[ysymbol_pt] = 0;
-                // printf("token type [%d, %d]: %s\n", n_line, n_col, ysymbol);
+                // std::cout << "token type [" <<  n_line<< ", " <<  n_col<< "]:
+                // " <<  ysymbol << std::endl;
 
                 token_type = new char[strlen(ysymbol) + 1];
                 if (token_type != nullptr) {
@@ -543,7 +544,7 @@ process_yacc_file_input_section1(std::ifstream& fp) -> SymbolNode*
             } else if (isspace(c)) { // output another token
                 output_terminal(tokens_tail, state, prev_state, token_type);
             } else if (c == '\'') {
-                // printf("terminal starts: ['");
+                // std::cout << "terminal starts: ['";
                 prev_state = state;
                 state = IS_QUOTED_TERMINAL;
             } else if (c == '<') { // start of <token_type>.
@@ -694,7 +695,7 @@ insert_mid_prod_rule(int ct)
 void
 add_lhs_symbol(SymbolTblNode* symbol)
 {
-    // printf("\n==add LHS symbol: %s\n", symbol);
+    // std::cout  << std::endl<< "==add LHS symbol: " <<  symbol << std::endl;
     Production* p = grammar.rules.back();
     p->nLHS = SymbolNode::create(symbol);
 }
@@ -702,7 +703,7 @@ add_lhs_symbol(SymbolTblNode* symbol)
 void
 add_rhs_symbol(SymbolTblNode* symbol)
 {
-    // printf("\n==add RHS symbol: %s\n", symbol);
+    // std::cout  << std::endl<< "==add RHS symbol: " <<  symbol << std::endl;
     Production* p = grammar.rules.back();
     p->RHS_count++;
 
@@ -755,7 +756,7 @@ set_has_code()
 static auto
 is_in_vanish_symbol_list(SymbolTblNode* n) -> bool
 {
-    // printf("isInVanishSymbolList input: %s\n", symbol);
+    // std::cout << "isInVanishSymbolList input: " <<  symbol << std::endl;
     if (strlen(n->symbol) == 0) {
         return true;
     }
@@ -1221,12 +1222,12 @@ output_nonterminal(SymbolNode* tokens_tail, YACC_STATE state) -> SymbolTblNode*
     if (IS_PREC == 1) {
         // is a ficticious terminal, no token actually.
         get_rhs_prec_symbol(ysymbol); // ysymbol should exist.
-        // printf("%%prec on symbol %s\n", ysymbol);
+        // std::cout << "%prec on symbol " <<  ysymbol << std::endl;
         IS_PREC = 0;
         ysymbol_pt = 0;
         return nullptr;
     }
-    // printf("anoterh symbol: %s\n", ysymbol);
+    // std::cout << "another symbol: " <<  ysymbol << std::endl;
 
     if constexpr (DEBUG_YACC_INPUT_PARSER) {
         std::cout << ysymbol << ' ';
@@ -1371,7 +1372,8 @@ process_yacc_file_input_section2(SymbolNode* tokens_tail, std::ifstream& fp)
                     }
                     // else, ignore empty space.
                 } else if (c == '\'') {
-                    // printf("terminal starts(line %d): [%c", n_line, c);
+                    // std::cout << "terminal starts(line " <<  n_line<< "): ["
+                    // <<  c;
                     if (ysymbol_pt != 0) {
                         output_nonterminal(tokens_tail,
                                            RHS); // OUTPUT NEXT RHS SYMBOL.
@@ -1413,13 +1415,13 @@ process_yacc_file_input_section2(SymbolNode* tokens_tail, std::ifstream& fp)
                     if constexpr (DEBUG_YACC_INPUT_PARSER) {
                         std::cout << std::endl << curLHS->symbol << " -> ";
                     }
-                    // printf("\n");
+                    // std::cout  << std::endl;
                     create_new_rule(); // CREATE NEW RULE HERE.
                     add_lhs_symbol(curLHS);
                 } else if (c == '{') {
                     set_has_code(); // has associated code.
-                    /// printf("start of code at rule %d:\n{",
-                    /// grammar.rule_count);
+                    /// std::cout << "start of code at rule " <<
+                    ///  grammar.rule_count<< ":" << std::endl<< "{";
                     yacc_sec2_state = CODE;
                     CODE_level = 1;
                 } else if (last_c == '/' && c == '*') {
@@ -1444,14 +1446,14 @@ process_yacc_file_input_section2(SymbolNode* tokens_tail, std::ifstream& fp)
                 // avoid '\'' and '\\'.
                 if (c == '\'' && (last_c != '\\' ||
                                   (ysymbol_pt == 2 && ysymbol[0] == '\\'))) {
-                    // printf("] terminal ends\n");
+                    // std::cout << "] terminal ends" << std::endl;
                     yacc_sec2_state = RHS;
                     output_nonterminal(tokens_tail,
                                        TERMINAL); // OUTPUT NEXT RHS SYMBOL. is
                                                   // terminal.
                 } else {
-                    /* if (isspace(c)) printf("hit space here %d
-                     * %d\n", n_line, n_col); */
+                    /* if (isspace(c))std::cout << "hit space here " << n_line<<
+                     * " " <<  n_col << std::endl; */
                     add_char_to_symbol(c);
                 }
                 break;
@@ -1466,7 +1468,7 @@ process_yacc_file_input_section2(SymbolNode* tokens_tail, std::ifstream& fp)
                     yacc_sec2_state = CODE_COMMENT2;
                 } else if (c == '}' && CODE_level == 1) {
                     yacc_sec2_state = RHS;
-                    /// printf("end of code\n");
+                    /// std::cout << "end of code" << std::endl;
                     end_of_code = true; // for mid-prod action.
                 } else if (c == '{') {
                     CODE_level++;
@@ -1558,7 +1560,7 @@ void
 post_modification(Grammar* g)
 {
     auto& options = Options::get();
-    // printf("calling post_modification\n");
+    // std::cout << "calling post_modification" << std::endl;
     if (options.use_remove_unit_production == false)
         return;
     if (options.preserve_unit_prod_with_code)
@@ -1570,7 +1572,8 @@ post_modification(Grammar* g)
     int count = 0;
     for (const auto& rule : g->rules) {
         if (rule->RHS_count == 1 && rule->hasCode == 1u) {
-            // printf("rule %d is a unit production with code\n", i);
+            // std::cout << "rule " <<  i<< " is a unit production with code" <<
+            // std::endl;
             count++;
             Production* p = rule;
             p->RHS_count++;

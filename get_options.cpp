@@ -98,7 +98,7 @@ get_outfile_name(const std::string name)
     if (name.empty()) {
         show_helpmsg_exit(ErrorFlags::NO_OUTFILE_NAME);
     }
-    // printf("len = %d, name = %s\n", len, name);
+    // std::cout << "len = " <<  len<< ", name = " <<  name << std::endl;
     std::string y_tab_c_temp = name;
     y_tab_c_temp += ".cpp";
     y_tab_c = y_tab_c_temp;
@@ -123,7 +123,7 @@ get_filename_prefix(std::string name)
     if (name.empty()) {
         show_helpmsg_exit(ErrorFlags::NO_OUTFILE_NAME);
     }
-    // printf("len = %d, name = %s\n", len, name);
+    // std::cout << "len = " <<  len<< ", name = " <<  name << std::endl;
     std::string y_tab_c_temp = name;
     y_tab_c_temp += ".tab.cpp";
     y_tab_c = y_tab_c_temp;
@@ -254,7 +254,7 @@ get_single_letter_option(Options& options,
     char switch_param = 0;
     char c = *s;
 
-    // printf("c = %c\n", c);
+    // std::cout << "c = " <<  c << std::endl;
     switch (c) {
         case 'b': /* file name prefix */
             if (argc_pt >= cmd_argc - 1) {
@@ -501,7 +501,7 @@ get_options(const std::vector<std::string>& args, Options& options) -> int
     for (int i = 1; i < args.size(); i++) {
         int argc_pt = i;
         const std::string& argv_i = args[i];
-        // printf("%d, %s\n", i, argv_i);
+        // std::cout  <<  i<< ", " <<  argv_i << std::endl;
         size_t len = argv_i.size();
 
         if (options.use_output_filename) { // get output file name.
@@ -534,7 +534,7 @@ get_options(const std::vector<std::string>& args, Options& options) -> int
         } else {
             if (infile_index == -1) {
                 infile_index = i;
-                // printf("file to open: %s\n", argv[i]);
+                // std::cout << "file to open: " <<  argv[i] << std::endl;
             }
         }
     }

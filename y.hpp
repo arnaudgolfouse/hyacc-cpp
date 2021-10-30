@@ -31,8 +31,7 @@
 
 #include <array>
 #include <atomic>
-#include <cctype> /* isspace, isdigit. */
-#include <cstdio>
+#include <cctype>  /* isspace, isdigit. */
 #include <cstdlib> /* exit, malloc, realloc, free, system. */
 #include <cstring> /* strtok, strcpy, strcmp. */
 #include <memory>

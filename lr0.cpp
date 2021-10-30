@@ -231,11 +231,12 @@ transition_lr0(State* s)
 static void
 output_parsing_table_row_lr0(State* s)
 {
-    // printf("\nstate %d. config count: %d\n", s->state_no, ct);
+    // std::cout  << std::endl<< "state " <<  s->state_no<< ". config count: "
+    // <<  ct << std::endl;
 
     // insert a/r actions.
     for (const auto& c : s->config) {
-        // printf("%d.%d\n", s->state_no, c->ruleID);
+        // std::cout  <<  s->state_no<< "." <<  c->ruleID << std::endl;
 
         if (is_final_configuration(c) || is_empty_production(c)) {
             insert_reduction_to_parsing_table_lr0(c, s->state_no);
@@ -253,7 +254,7 @@ output_parsing_table_row_lalr(State* s)
 {
     // insert a/r actions.
     for (const auto& c : s->config) {
-        // printf("%d.%d\n", s->state_no, c->ruleID);
+        // std::cout  <<  s->state_no<< "." <<  c->ruleID << std::endl;
 
         if (is_final_configuration(c) || is_empty_production(c)) {
             insert_reduction_to_parsing_table_lalr(c, s->state_no);

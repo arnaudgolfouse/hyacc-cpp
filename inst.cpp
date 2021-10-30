@@ -32,7 +32,6 @@
  * @Last updated: Feb 10, 2007
  */
 
-#include <cstdio>
 #include <cstdlib> /* system, exit. */
 #include <fstream>
 #include <iostream>

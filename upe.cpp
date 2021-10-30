@@ -120,7 +120,7 @@ get_unit_prod_shift(int state,
                     const MRParents& parents,
                     std::vector<int>& unit_prod_dest_states)
 {
-    // printf("getUnitProdShift for '%s'\n", leaf);
+    // std::cout << "getUnitProdShift for '" <<  leaf<< "'" << std::endl;
     unit_prod_dest_states.clear();
 
     for (const auto& parent : parents) {
@@ -128,7 +128,7 @@ get_unit_prod_shift(int state,
         char action = 0;
         int state_dest = 0;
         get_action(n->type, get_col(*n), state, &action, &state_dest);
-        // printf("%c, %d\n", action, state_dest);
+        // std::cout << action << ", " << state_dest << std::endl;
         if (action == 'g') {
             unit_prod_dest_states.push_back(state_dest);
         }
@@ -191,9 +191,10 @@ create_new_ups_state(std::vector<UnitProdState>& ups,
     new_ups.combined_states = old_states;
     ups.push_back(new_ups);
 
-    // printf("ups_count = %d\n", ups_count);
-    // printf("new UPS state %d, is combination of states: \n", ups_count - 1);
-    // printIntArray(old_states, old_states_count);
+    // std::cout << "ups_count = " <<  ups_count << std::endl;
+    // std::cout << "new UPS state " <<  ups_count - 1<< ", is combination of
+    // states: " << std::endl;
+    //  printIntArray(old_states, old_states_count);
 }
 
 /*
@@ -278,9 +279,10 @@ insert_actions_of_combined_states(int new_state,
                                   int src_state,
                                   std::vector<int>& old_states)
 {
-    // printf("Source state: %d. ", src_state);
-    // printf("Combine these states into state %d:\n", new_state);
-    // print_int_array(old_states, old_states_count);
+    // std::cout << "Source state: " <<  src_state<< ". ";
+    // std::cout << "Combine these states into state " <<  new_state<< ":" <<
+    // std::endl;
+    //  print_int_array(old_states, old_states_count);
 
     // copy actions of old_states to new_state.
 
@@ -503,7 +505,8 @@ print_final_parsing_table()
 
             yyprintf("\n");
         } // end if
-          // else { printf("state %d: not reachable.\n", row); }
+          // else {std::cout << "state " <<  row<< ": not reachable." <<
+          // std::endl; }
     }     // end for
     print_parsing_table_note();
 }
@@ -655,7 +658,8 @@ remove_unit_production_step1and2(const MRLeaves& mr_leaves)
     for (int state = 0; state < ParsingTblRows; state++) {
         for (int i = 0; i < mr_leaves.size(); i++) {
             SymbolTblNode* leaf = mr_leaves[i]->symbol->snode;
-            // printf("state %d, checking leaf %s\n", state, leaf->symbol);
+            // std::cout << "state " <<  state<< ", checking leaf " <<
+            // leaf->symbol << std::endl;
             const auto& parents = leaf_parents[i];
 
             get_unit_prod_shift(state, leaf, *parents, unit_prod_dest_states);
@@ -750,7 +754,8 @@ update_repeated_row(int new_state, int old_state, int row)
     char action = 0;
     int state_dest = 0;
     Grammar* g = &grammar;
-    // printf("In row %d, replace %d by %d\n", row, old_state, new_state);
+    // std::cout << "In row " <<  row<< ", replace " <<  old_state<< " by " <<
+    // new_state << std::endl;
 
     // for end marker column STR_END
     SymbolTblNode* n = hash_tbl_find(STR_END);
@@ -823,18 +828,20 @@ further_optimization()
     for (int k = 0; k < states_reachable.size() - 1; k++) {
         int i = states_reachable[k];
         int j = states_reachable[k + 1];
-        // printf("furtherOpt: i = %d, j = %d\n", i, j);
+        // std::cout << "furtherOpt: i = " <<  i<< ", j = " <<  j << std::endl;
         do {
             if (is_equal_row(i, j) == false)
                 break;
 
             update_repeated_rows(i, j);
-            // printf("state %d removed\n", states_reachable[k + 1]);
+            // std::cout << "state " <<  states_reachable[k + 1]<< " removed" <<
+            // std::endl;
             states_reachable.erase(states_reachable.begin() + k + 1);
             if ((k + 1) == states_reachable.size())
                 break;
             j = states_reachable[k + 1];
-            // printf("- furtherOpt: i = %d, j = %d\n", i, j);
+            // std::cout << "- furtherOpt: i = " <<  i<< ", j = " <<  j <<
+            // std::endl;
         } while (true);
     }
 

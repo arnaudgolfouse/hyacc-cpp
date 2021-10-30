@@ -126,8 +126,8 @@ add_gv_node_to_list(GvNode* list, int target_state, SymbolTblNode* snode)
     GvNode* n = find_gv_node_in_list(list, target_state);
     if (nullptr == n) { // targetState NOT found. Add to list.
 #if DEBUG_GEN_GVIZ
-        printf(
-          "target state %d not found (label %s)\n", targetState, snode->symbol);
+        std::cout << "target state " << targetState << " not found (label "
+                  << snode->symbol << ")" << std::endl;
 #endif
         n = create_gv_node(target_state);
         n->labels = n->labels_tail = SymbolNode::create(snode);
@@ -143,8 +143,8 @@ add_gv_node_to_list(GvNode* list, int target_state, SymbolTblNode* snode)
     } else { // found.
              // add snode to the label list of n.
 #if DEBUG_GEN_GVIZ
-        printf(
-          "target state %d found, add label %s\n", targetState, snode->symbol);
+        std::cout << "target state " << targetState << " found, add label "
+                  << snode->symbol << std::endl;
 #endif
         insert_label_to_list(n, snode);
     }
@@ -274,7 +274,7 @@ gen_graphviz_input()
             SymbolTblNode* n = ParsingTblColHdr[col];
             if (!is_goal_symbol(n)) {
                 get_action(n->type, col, row, &action, &state);
-                /* printf("%c%d\t", action, state); */
+                /*std::cout  <<  action <<  state<< "\t"; */
                 if (action == 0) {
                     /* do nothing */
                 } else if (action == 'r') {
