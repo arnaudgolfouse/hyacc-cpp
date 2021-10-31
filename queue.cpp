@@ -28,11 +28,13 @@
  */
 
 #include "y.hpp"
+#include <iomanip>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 constexpr size_t QUEUE_INIT_SIZE = 256; // hidden from outside
-#define DEBUG_QUEUE 0
+constexpr bool DEBUG_QUEUE = false;
 
 auto
 queue_create() -> Queue*
@@ -136,15 +138,15 @@ queue_push(Queue* q, int n)
     if (q->tail == q->size)
         q->tail = 0;
 
-        // std::cout << "push " <<  n<< " (size=" <<  q->count<< "): ";
-        //  queue_dump(q);std::cout  << std::endl;
+    // std::cout << "push " <<  n<< " (size=" <<  q->count<< "): ";
+    //  queue_dump(q);std::cout  << std::endl;
 
-#if DEBUG_QUEUE
-    if (q->max_count < q->count)
-        q->max_count = q->count;
-    q->call_count++;
-    q->sum_count += q->count;
-#endif
+    if constexpr (DEBUG_QUEUE) {
+        if (q->max_count < q->count)
+            q->max_count = q->count;
+        q->call_count++;
+        q->sum_count += q->count;
+    }
 }
 
 /*
@@ -219,10 +221,10 @@ queue_dump(Queue* q)
 void
 queue_info(Queue* q)
 {
-#if DEBUG_QUEUE
-    std::cout << "queue_push is called " << q->call_count << " times, ";
-    std::cout << "max count: " << q->max_count
-              << ", average count: " << TODO(2 points of float precision)
-              << ((double)q->sum_count) / q->call_count << std::endl;
-#endif
+    if constexpr (DEBUG_QUEUE) {
+        std::cout << "queue_push is called " << q->call_count << " times, ";
+        std::cout << "max count: " << q->max_count
+                  << ", average count: " << std::setprecision(2)
+                  << ((double)q->sum_count) / q->call_count << std::endl;
+    }
 }

@@ -17,8 +17,7 @@
    51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#ifndef _LANE_TRACING_H_
-#define _LANE_TRACING_H_
+#pragma once
 
 #include "y.hpp"
 #include <cstdint>
@@ -345,5 +344,3 @@ lrk_theads(SymbolList alpha, int k) -> std::shared_ptr<List>;
 extern bool IN_EDGE_PUSHING_LANE_TRACING;
 extern Configuration* cur_red_config;
 extern SymbolList EDGE_PUSHING_CONTEXT_GENERATED;
-
-#endif

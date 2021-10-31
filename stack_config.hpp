@@ -17,8 +17,7 @@
    51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#ifndef _STACK_CONFIG_H_
-#define _STACK_CONFIG_H_
+#pragma once
 
 /*
  * stack_config.h
@@ -35,7 +34,7 @@
 #include <iostream>
 #include <vector>
 
-#define DEBUG_STACK 0
+constexpr bool DEBUG_STACK = false;
 constexpr size_t STACK_INIT_SIZE = 256;
 constexpr bool USE_WARNING = false;
 
@@ -72,7 +71,8 @@ struct Stack
         return this->array.back();
     }
     /* number of elements in stack */
-    inline auto count() const -> size_t { return this->array.size(); }
+    [[nodiscard]] inline auto count() const -> size_t
+    {
+        return this->array.size();
+    }
 };
-
-#endif

@@ -21,8 +21,7 @@
 #include <memory>
 #include <vector>
 
-#ifndef _MRT_H_
-#define _MRT_H_
+#pragma once
 
 /*
  * mrt.h
@@ -137,5 +136,3 @@ get_parents_for_mr_leaf(const MRLeaves& mr_leaves,
                         MRParents* parents);
 extern auto
 build_multirooted_tree() -> std::vector<std::shared_ptr<MRTreeNode>>;
-
-#endif

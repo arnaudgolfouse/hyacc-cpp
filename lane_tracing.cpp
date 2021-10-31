@@ -3142,7 +3142,7 @@ context_adding_routine(SymbolList context_generated,
 void
 lane_tracing_reduction(Configuration* c)
 {
-    if (nullptr == c)
+    if (c == nullptr)
         return;
 
     if constexpr (DEBUG_PHASE_1) {
@@ -3150,10 +3150,10 @@ lane_tracing_reduction(Configuration* c)
         stdout_write_config(c);
     }
 
-    if (c->COMPLETE == 1) {
-#if DEBUG_EdgePushing
-        std::cout << "c->COMPLETE == 1" << std::endl;
-#endif
+    if (c->COMPLETE == 1u) {
+        if constexpr (DEBUG_EDGE_PUSHING) {
+            std::cout << "c->COMPLETE == 1" << std::endl;
+        }
         return; // already evaluated.
     }
 
@@ -3165,9 +3165,9 @@ lane_tracing_reduction(Configuration* c)
     TRACE_FURTHER = FLAG_OFF;
     TEST_FAILED = FLAG_OFF;
 
-#if DEBUG_EdgePushing
-    std::cout << "DO_LOOP:" << std::endl;
-#endif
+    if constexpr (DEBUG_EDGE_PUSHING) {
+        std::cout << "DO_LOOP:" << std::endl;
+    }
 
     do_loop();
 }

@@ -192,9 +192,9 @@ config_pair_list_find(ConfigPairList list, Configuration* conflict_config)
             return n;
         }
     }
-#if DEBUG_EdgePushing
-    std::cout << "not found" << std::endl;
-#endif
+    if constexpr (DEBUG_EDGE_PUSHING) {
+        std::cout << "not found" << std::endl;
+    }
     return nullptr;
 }
 
@@ -780,8 +780,8 @@ cfg_ctxt_dump(const CfgCtxt* cc)
 // Functions for LR(k) theads. START.
 //////////////////////////////////////////////////////////////////
 
-#define DEBUG_LRK_THEADS_CYCLE 1
-#define DEBUG_LRK_THEADS 0
+constexpr bool DEBUG_LRK_THEADS_CYCLE = true;
+constexpr bool DEBUG_LRK_THEADS = false;
 
 //
 // Get the head of string alpha up to the k-th symbol that
@@ -980,9 +980,9 @@ j_th_symbol_is_nt(SymbolList s, int j) -> bool
 void
 List::lrk_theads_rm_nt(int j)
 {
-#if DEBUG_LRK_THEADS
-    std::cout << std::endl << "lrk_theads_rm_nt:" << std::endl;
-#endif
+    if constexpr (DEBUG_LRK_THEADS) {
+        std::cout << std::endl << "lrk_theads_rm_nt:" << std::endl;
+    }
 
     if (this->head == nullptr)
         return;

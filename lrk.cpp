@@ -34,7 +34,7 @@
 #include <iostream>
 #include <memory>
 
-#define DEBUG_LRK 0
+constexpr bool DEBUG_LRK = false;
 
 /** For (conflict_config, lane_end_config) pairs. */
 ConfigPairList lane_head_tail_pairs;

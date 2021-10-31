@@ -32,7 +32,7 @@
 #include <iostream>
 #include <ostream>
 
-#define DEBUG_GEN_GVIZ 0
+constexpr bool DEBUG_GEN_GVIZ = false;
 
 struct GvNode
 {
@@ -125,10 +125,10 @@ add_gv_node_to_list(GvNode* list, int target_state, SymbolTblNode* snode)
 {
     GvNode* n = find_gv_node_in_list(list, target_state);
     if (nullptr == n) { // targetState NOT found. Add to list.
-#if DEBUG_GEN_GVIZ
-        std::cout << "target state " << targetState << " not found (label "
-                  << snode->symbol << ")" << std::endl;
-#endif
+        if constexpr (DEBUG_GEN_GVIZ) {
+            std::cout << "target state " << target_state << " not found (label "
+                      << snode->symbol << ")" << std::endl;
+        }
         n = create_gv_node(target_state);
         n->labels = n->labels_tail = SymbolNode::create(snode);
         if (nullptr == list) { // first node in list.
@@ -142,10 +142,10 @@ add_gv_node_to_list(GvNode* list, int target_state, SymbolTblNode* snode)
         }
     } else { // found.
              // add snode to the label list of n.
-#if DEBUG_GEN_GVIZ
-        std::cout << "target state " << targetState << " found, add label "
-                  << snode->symbol << std::endl;
-#endif
+        if constexpr (DEBUG_GEN_GVIZ) {
+            std::cout << "target state " << target_state << " found, add label "
+                      << snode->symbol << std::endl;
+        }
         insert_label_to_list(n, snode);
     }
     return list;

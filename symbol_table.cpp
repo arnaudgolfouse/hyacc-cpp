@@ -32,7 +32,7 @@
 #include "y.hpp"
 #include <iostream>
 
-#define DEBUG_HASHTBL 0
+constexpr bool DEBUG_HASHTBL = false;
 
 /*******************************************
  * Functions for RuleIDNode.
@@ -409,9 +409,9 @@ hash_tbl_init()
         HashTbl[i].next = nullptr;
     }
 
-#if DEBUG_HASHTBL
-    std::cout << "size of hash table = " << sizeof(HashTbl) << std::endl;
-#endif
+    if constexpr (DEBUG_HASHTBL) {
+        std::cout << "size of hash table = " << sizeof(HashTbl) << std::endl;
+    }
     // testHashTbl();
 }
 
@@ -429,9 +429,9 @@ hash_value(const char* symbol) -> int
         sum = (sum + symbol[i]) % static_cast<int>(HT_SIZE);
     }
 
-#if DEBUG_HASHTBL
-    std::cout << "hash value for " << symbol << " is " << sum << std::endl;
-#endif
+    if constexpr (DEBUG_HASHTBL) {
+        std::cout << "hash value for " << symbol << " is " << sum << std::endl;
+    }
 
     return sum;
 }
@@ -448,34 +448,34 @@ hash_value(const char* symbol) -> int
 auto
 hash_tbl_insert(const char* symbol) -> SymbolTblNode*
 {
-    int v = 0;
-    SymbolTblNode* n = nullptr;
-
     if (symbol == nullptr)
         return nullptr;
-#if DEBUG_HASHTBL
-    std::cout << "hash insert " << symbol << " at " << where << std::endl;
-#endif
-    v = hash_value(symbol);
+    if constexpr (DEBUG_HASHTBL) {
+        // std::cout << "hash insert " << symbol << " at " << where <<
+        // std::endl;
+    }
+    const int v = hash_value(symbol);
 
     if (HashTbl[v].next == nullptr) {
         HashTbl[v].next = create_symbol_tbl_node(symbol);
         HashTbl[v].count++;
         return HashTbl[v].next;
     }
-    for (n = HashTbl[v].next; n->next != nullptr; n = n->next) {
+    SymbolTblNode* n = HashTbl[v].next;
+    for (; n->next != nullptr; n = n->next) {
         if (strcmp(n->symbol, symbol) == 0) {
-#if DEBUG_HASHTBL
-            std::cout << "node for string " << symbol << " exists" << std::endl;
-#endif
+            if constexpr (DEBUG_HASHTBL) {
+                std::cout << "node for string " << symbol << " exists"
+                          << std::endl;
+            }
             return n;
         }
     }
     // the last node on this linked list.
     if (strcmp(n->symbol, symbol) == 0) {
-#if DEBUG_HASHTBL
-        std::cout << "node for string " << symbol << " exists" << std::endl;
-#endif
+        if constexpr (DEBUG_HASHTBL) {
+            std::cout << "node for string " << symbol << " exists" << std::endl;
+        }
         return n;
     }
     n->next = create_symbol_tbl_node(symbol);
@@ -496,16 +496,16 @@ hash_tbl_find(const char* symbol) -> SymbolTblNode*
 
     for (SymbolTblNode* n = HashTbl.at(v).next; n != nullptr; n = n->next) {
         if (strcmp(n->symbol, symbol) == 0) {
-#if DEBUG_HASHTBL
-            std::cout << "node for " << symbol << " is found" << std::endl;
-#endif
+            if constexpr (DEBUG_HASHTBL) {
+                std::cout << "node for " << symbol << " is found" << std::endl;
+            }
             return n;
         }
     }
 
-#if DEBUG_HASHTBL
-    std::cout << "node for " << symbol << " is NOT found" << std::endl;
-#endif
+    if constexpr (DEBUG_HASHTBL) {
+        std::cout << "node for " << symbol << " is NOT found" << std::endl;
+    }
 
     return nullptr;
 }
