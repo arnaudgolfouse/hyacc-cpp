@@ -51,6 +51,8 @@
 
 #include "y.hpp"
 #include <array>
+#include <fstream>
+#include <iomanip>
 
 struct StateTableNode
 {
@@ -118,7 +120,7 @@ auto
 search_state_hash_tbl(State* s, int* is_compatible) -> State*
 {
     const size_t v = get_state_hash_val(*s);
-    auto& cell = StateHashTbl[v];
+    auto& cell = StateHashTbl.at(v);
     StateTblNode* n = cell.next;
     StateTblNode* n_prev = nullptr;
 
@@ -132,11 +134,11 @@ search_state_hash_tbl(State* s, int* is_compatible) -> State*
 
     while (n != nullptr) {
         n_prev = n;
-        if (is_same_state(n->state, s) ) {
+        if (is_same_state(n->state, s)) {
             return n->state;
         }
         if (Options::get().use_combine_compatible_states) {
-            if (is_compatible_states(n->state, s) ) {
+            if (is_compatible_states(n->state, s)) {
                 combine_compatible_states(n->state, s);
                 (*is_compatible) = 1;
                 return n->state;
@@ -163,7 +165,7 @@ auto
 search_same_state_hash_tbl(State* s) -> State*
 {
     const size_t v = get_state_hash_val(*s);
-    auto& cell = StateHashTbl[v];
+    auto& cell = StateHashTbl.at(v);
     StateTblNode* n = cell.next;
     StateTblNode* n_prev = nullptr;
 
@@ -175,7 +177,7 @@ search_same_state_hash_tbl(State* s) -> State*
 
     while (n != nullptr) {
         n_prev = n;
-        if (is_same_state(n->state, s) ) {
+        if (is_same_state(n->state, s)) {
             return n->state;
         }
         n = n->next;
@@ -198,10 +200,10 @@ state_hash_tbl_dump()
     int states_count = 0, list_count = 0;
     StateTblNode* n = nullptr;
 
-    yyprintf("\n--state hash table--\n");
-    yyprintf("-----------------------\n");
-    yyprintf("cell |   count  | state\n");
-    yyprintf("-----------------------\n");
+    *fp_v << std::endl << "--state hash table--\n";
+    *fp_v << "-----------------------" << std::endl;
+    *fp_v << "cell |   count  | state" << std::endl;
+    *fp_v << "-----------------------" << std::endl;
     for (int i = 0; i < SHT_SIZE; i++) {
         if (StateHashTbl.at(i).count == 0)
             continue;
@@ -209,24 +211,24 @@ state_hash_tbl_dump()
         list_count++;
         states_count += StateHashTbl.at(i).count;
 
-        yyprintf("[%3d] (count=%d) : ", i, StateHashTbl.at(i).count);
+        *fp_v << "[" << i << "] (count=" << StateHashTbl.at(i).count << ") : ";
         if ((n = StateHashTbl.at(i).next) != nullptr) {
-            yyprintf("%d", n->state->state_no);
+            *fp_v << n->state->state_no;
 
             n = n->next;
             while (n != nullptr) {
-                yyprintf(", %d", n->state->state_no);
+                *fp_v << ", " << n->state->state_no;
                 n = n->next;
             }
         }
-        yyprintf("\n");
+        *fp_v << std::endl;
     }
 
-    yyprintf("%d states, %d lists, in average %.2f states/list.\n",
-             states_count,
-             list_count,
-             ((double)states_count) / list_count);
-    yyprintf("load factor: %.2f, hash table cell usage: %.2f\n",
-             ((double)states_count) / SHT_SIZE,
-             ((double)list_count) / SHT_SIZE);
+    *fp_v << states_count << " states, " << list_count << " lists, in average "
+          << std::setprecision(2) << ((double)states_count) / list_count
+          << " states/list." << std::endl;
+    *fp_v << "load factor: " << std::setprecision(2)
+          << ((double)states_count) / SHT_SIZE
+          << ", hash table cell usage: " << std::setprecision(2)
+          << ((double)list_count) / SHT_SIZE << std::endl;
 }

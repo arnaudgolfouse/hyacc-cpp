@@ -30,6 +30,7 @@
 #include "y.hpp"
 #include <cstddef>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -640,7 +641,7 @@ symbol_list_disjoint(SymbolList a, SymbolList b) -> bool
     while (a != nullptr && b != nullptr) {
         if (a->snode == b->snode)
             return false;
-        if (strcmp(a->snode->symbol, b->snode->symbol) < 0) {
+        if (a->snode->symbol < b->snode->symbol) {
             a = a->next;
         } else {
             b = b->next;
@@ -1565,7 +1566,7 @@ add_context_to_lane_head(laneHead* h, SymbolTblNode* n)
     for (; sn != nullptr; sn_prev = sn, sn = sn->next) {
         if (sn->snode == n)
             return; // already in list, don't add.
-        if (strcmp(sn->snode->symbol, n->symbol) > 0) {
+        if (sn->snode->symbol > n->symbol) {
             // add n before sn, after sn_prev.
             break;
         }
@@ -1873,13 +1874,12 @@ write_config_originators(const Configuration& c)
     if (ct == 0)
         return;
 
-    yyprintf("      %d originator%s: \n", ct, (ct > 1) ? "s" : "");
+    *fp_v << "      " << ct << " originator" << ((ct > 1) ? "s" : "") << ": "
+          << std::endl;
     for (int i = 0; i < ct; i++) {
         const Configuration* o = c.originators->list[i];
-        yyprintf("      originator (%d.%d.%d) \n",
-                 o->owner->state_no,
-                 o->ruleID,
-                 o->marker);
+        *fp_v << "      originator (" << o->owner->state_no << "." << o->ruleID
+              << "." << o->marker << ") " << std::endl;
     }
 }
 
@@ -1890,13 +1890,12 @@ write_config_transitors(const Configuration& c)
     if (ct == 0)
         return;
 
-    yyprintf("      %d transitor%s: \n", ct, (ct > 1) ? "s" : "");
+    *fp_v << "      " << ct << " transitor" << ((ct > 1) ? "s" : "") << ": "
+          << std::endl;
     for (int i = 0; i < ct; i++) {
         const Configuration* o = c.transitors->list[i];
-        yyprintf("      transitor (%d.%d.%d) \n",
-                 o->owner->state_no,
-                 o->ruleID,
-                 o->marker);
+        *fp_v << "      transitor (" << o->owner->state_no << "." << o->ruleID
+              << "." << o->marker << ") " << std::endl;
     }
 }
 
@@ -2128,9 +2127,8 @@ gpm(State* new_state)
 
     while (new_state != nullptr) {
         if (Options::get().debug_gen_parsing_machine) {
-            yyprintf("%d states, current state is %d\n",
-                     states_new->state_count,
-                     new_state->state_no);
+            *fp_v << states_new->state_count << " states, current state is "
+                  << new_state->state_no << std::endl;
         }
 
         get_closure(new_state); // get closure of this state.
@@ -2173,7 +2171,7 @@ get_state_successors(const State* s) -> StateCollection*
             // do nothing.
         } else { // do transit operation.
             SymbolTblNode* scanned_symbol = get_scanned_symbol(c);
-            if (strlen(scanned_symbol->symbol) == 0) { // empty reduction.
+            if (scanned_symbol->symbol->empty()) { // empty reduction.
                 continue;
             }
             State* new_state =
@@ -2350,7 +2348,7 @@ update_state_reduce_action(State* s)
     for (const auto& c : s->config) {
         // update reduce action for final/empty production.
         if (is_final_configuration(c) ||
-            strlen(get_scanned_symbol(c)->symbol) == 0) {
+            get_scanned_symbol(c)->symbol->empty()) {
             const SymbolNode* lookahead = c->context->nContext;
             for (; lookahead != nullptr; lookahead = lookahead->next) {
                 get_action(lookahead->snode->type,
@@ -2874,7 +2872,7 @@ auto
 test_a(const SymbolNode* n) -> bool
 {
     for (; n != nullptr; n = n->next) {
-        if (strlen(n->snode->symbol) != 0)
+        if (!n->snode->symbol->empty())
             return true;
     }
     return false;
@@ -2930,7 +2928,7 @@ insert_symbol_list_unique(SymbolList list, SymbolTblNode* snode, bool* exist)
             *exist = true;
             return list; // existing node.
         }
-        if (strcmp(n->snode->symbol, snode->symbol) > 0) {
+        if (n->snode->symbol > snode->symbol) {
             SymbolNode* new_node = SymbolNode::create(snode);
             // insert new_snode before n.
 
@@ -2976,7 +2974,7 @@ get_contexts_generated(SymbolList list, bool* null_possible) -> SymbolList
     *null_possible = false;
 
     for (; list != nullptr; list = list->next) {
-        if (strlen(list->snode->symbol) == 0) {
+        if (list->snode->symbol->empty()) {
             *null_possible = true;
         } else {
             bool exist = false;
@@ -3397,7 +3395,8 @@ do_loop()
         if constexpr (DEBUG_PHASE_1) {
             stdout_write_config(o);
             std::cout << "gamma: "
-                      << (gamma == nullptr ? "nullptr" : gamma->snode->symbol)
+                      << (gamma == nullptr ? "nullptr"
+                                           : gamma->snode->symbol->c_str())
                       << std::endl;
         }
 

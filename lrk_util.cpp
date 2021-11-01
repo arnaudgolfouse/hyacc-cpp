@@ -483,10 +483,11 @@ LRkPT::find(int state, SymbolTblNode* token, bool* found) const noexcept
         if (r->state > state)
             break; // not found
                    // found same state.
-        int cmp = strcmp(r->token->snode->symbol, token->symbol);
-        if (cmp < 0)
+        const std::string& symb1 = *r->token->snode->symbol;
+        const std::string& symb2 = *token->symbol;
+        if (symb1 < symb2)
             continue;
-        if (cmp > 0)
+        if (symb1 > symb2)
             break;
         *found = true;
         return r;
@@ -1004,14 +1005,13 @@ List::lrk_theads_rm_nt(int j)
 static auto
 k_heads_are_t(SymbolList s, int k, int* len) -> bool
 {
-    int i;
-    SymbolList s0 = s;
     *len = -1;
 
-    if (nullptr == s)
+    if (s == nullptr)
         return false;
 
-    for (i = 0; (i < k) && (nullptr != s); i++) {
+    int i = 0;
+    for (; (i < k) && (nullptr != s); i++) {
         if (s->snode->type == symbol_type::NONTERMINAL)
             return false;
         s = s->next;

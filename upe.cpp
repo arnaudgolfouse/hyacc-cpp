@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -77,15 +78,15 @@ constexpr size_t UPS_MAX_SIZE = 65536;
 void
 print_int_array(const std::vector<int>& a)
 {
-    yyprintf("count = %d\n", a.size());
+    *fp_v << "count = " << a.size() << std::endl;
     bool first = true;
     for (int elem : a) {
         if (!first)
-            yyprintf(", ");
+            *fp_v << ", ";
         first = false;
-        yyprintf("%d", elem);
+        *fp_v << elem;
     }
-    yyprintf("\n");
+    *fp_v << std::endl;
 }
 
 /*
@@ -155,28 +156,30 @@ write_unit_prod_shift(int state,
                       const std::vector<int>& unit_prod_dest_states,
                       int new_ups_state)
 {
-    yyprintf("state %d, leaf '%s' -", state, leaf->symbol);
-    yyprintf(" combine these states to new state %d:\n", new_ups_state);
+    *fp_v << "state " << state << ", leaf '" << leaf->symbol << "' -";
+    *fp_v << " combine these states to new state " << new_ups_state << ":"
+          << std::endl;
     for (int i = 0; i < unit_prod_dest_states.size(); i++) {
         if (i > 0)
-            yyprintf(", ");
-        yyprintf("%d", unit_prod_dest_states[i]);
+            *fp_v << ", ";
+        *fp_v << unit_prod_dest_states[i];
     }
-    yyprintf("\n");
+    *fp_v << std::endl;
 }
 
 void
 write_ups_state(const UnitProdState& ups)
 {
-    yyprintf("State no: %d. Is combination of these states:\n", ups.state_no);
+    *fp_v << "State no: " << ups.state_no
+          << ". Is combination of these states:" << std::endl;
     print_int_array(ups.combined_states);
 }
 
 void
 write_ups_states(const std::vector<UnitProdState>& ups)
 {
-    yyprintf("==New states for unit production removal");
-    yyprintf(" (total %d):\n", ups.size());
+    *fp_v << "==New states for unit production removal";
+    *fp_v << " (total " << ups.size() << "):" << std::endl;
     for (const auto& up : ups) {
         write_ups_state(up);
     }
@@ -226,7 +229,7 @@ is_unit_production(int rule_no) -> bool
           std::to_string(rule_no) + ") out of bound");
     }
     if (grammar.rules[rule_no]->RHS_count == 1 &&
-        strlen(grammar.rules[rule_no]->nRHS_head->snode->symbol) > 0)
+        !grammar.rules[rule_no]->nRHS_head->snode->symbol->empty())
         return true;
 
     return false;
@@ -353,8 +356,8 @@ in_int_array(int n, const std::vector<int>& states_reachable) -> bool
  * and terminals, which have only action 's'. So just
  * include checking for 'g' for all three situations.
  */
-void
-get_reachable_states_for_symbol(const char* symbol,
+static void
+get_reachable_states_for_symbol(const std::string& symbol,
                                 int cur_state,
                                 std::vector<int>& states_reachable)
 {
@@ -383,13 +386,13 @@ get_reachable_states(int cur_state, std::vector<int>& states_reachable)
 
     for (SymbolNode* a = grammar.terminal_list; a != nullptr; a = a->next) {
         get_reachable_states_for_symbol(
-          a->snode->symbol, cur_state, states_reachable);
+          *a->snode->symbol, cur_state, states_reachable);
     }
 
     for (SymbolNode* a = grammar.non_terminal_list; a != nullptr; a = a->next) {
         if (is_parent_symbol(a->snode) == false) {
             get_reachable_states_for_symbol(
-              a->snode->symbol, cur_state, states_reachable);
+              *a->snode->symbol, cur_state, states_reachable);
         }
     }
 }
@@ -399,10 +402,10 @@ write_parsing_table_col_header()
 {
     for (int i = 0; i < ParsingTblCols; i++) {
         if (is_goal_symbol(ParsingTblColHdr[i]) == false) {
-            yyprintf("%s\t", ParsingTblColHdr[i]->symbol);
+            *fp_v << ParsingTblColHdr[i]->symbol << "\t";
         }
     }
-    yyprintf("\n");
+    *fp_v << std::endl;
 }
 
 /*
@@ -436,9 +439,9 @@ void
 write_final_parsing_table_col_header()
 {
     for (SymbolNode* a = F_ParsingTblColHdr; a != nullptr; a = a->next) {
-        yyprintf("%s\t", a->snode->symbol);
+        *fp_v << a->snode->symbol << "\t";
     }
-    yyprintf("\n");
+    *fp_v << std::endl;
 }
 
 /*
@@ -459,8 +462,11 @@ remove_unit_production_step4()
     std::sort(states_reachable.begin(), states_reachable.end());
 
     if (Options::get().debug_remove_up_step_4) {
-        yyprintf("\n--remove_unit_production_step4--\n");
-        yyprintf("states reachable from state 0:\n");
+        *fp_v << std::endl
+              << "--remove_" << std::endl
+              << "it_producti" << std::endl
+              << "_step4--\n";
+        *fp_v << "states reachable from state 0:" << std::endl;
         print_int_array(states_reachable);
     }
 
@@ -488,23 +494,23 @@ print_final_parsing_table()
     char action = 0;
     int state = 0;
 
-    yyprintf("\n--Parsing Table--\n");
-    yyprintf("State\t");
+    *fp_v << std::endl << "--Pars" << std::endl << "g Table--\n";
+    *fp_v << "State\t";
     write_final_parsing_table_col_header();
 
     for (int row = 0; row < row_size; row++) {
         if (is_reachable_state(row)) {
-            yyprintf("%d\t", row);
+            *fp_v << row << "\t";
             for (int col = 0; col < ParsingTblCols; col++) {
                 SymbolTblNode* n = ParsingTblColHdr[col];
                 if (is_goal_symbol(n) == false &&
                     is_parent_symbol(n) == false) {
                     get_action(n->type, col, row, &action, &state);
-                    yyprintf("%c%d\t", action, state);
+                    *fp_v << action << state << "\t";
                 }
             }
 
-            yyprintf("\n");
+            *fp_v << std::endl;
         } // end if
           // else {std::cout << "state " <<  row<< ": not reachable." <<
           // std::endl; }
@@ -565,13 +571,15 @@ write_actual_state_array()
     if (!Options::get().use_remove_unit_production)
         return;
 
-    yyprintf("\n\n--actual state array [actual, pseudo]--\n");
+    *fp_v << std::endl
+          << "\n--actual state array [actual, pseudo]--" << std::endl;
     for (int i = 0; i < actual_state_no.size(); i += 2) {
         if (i > 0 && i % LINE_LENGTH == 0)
-            yyprintf("\n");
-        yyprintf("[%d, %d] ", actual_state_no[i], actual_state_no[i + 1]);
+            *fp_v << std::endl;
+        *fp_v << "[" << actual_state_no[i] << ", " << actual_state_no[i + 1]
+              << "] ";
     }
-    yyprintf("\n\n");
+    *fp_v << std::endl << "\n";
 }
 
 /*
@@ -587,14 +595,17 @@ print_condensed_final_parsing_table()
     // value assigned at the end of generate_parsing_table().
     int row_size = ParsingTblRows;
 
-    yyprintf("\n--Final Parsing Table--\n");
-    yyprintf("State\t");
+    *fp_v << std::endl
+          << "--F" << std::endl
+          << "al Pars" << std::endl
+          << "g Table--\n";
+    *fp_v << "State\t";
     write_final_parsing_table_col_header();
 
     int i = 0;
     for (int row = 0; row < row_size; row++) {
         if (is_reachable_state(row)) {
-            yyprintf("%d\t", i);
+            *fp_v << i << "\t";
             for (int col = 0; col < ParsingTblCols; col++) {
                 SymbolTblNode* n = ParsingTblColHdr[col];
                 if (is_goal_symbol(n) == false &&
@@ -602,12 +613,12 @@ print_condensed_final_parsing_table()
                     get_action(n->type, col, row, &action, &state_no);
                     if (action == 's' || action == 'g')
                         state_no = get_actual_state(state_no);
-                    yyprintf("%c%d\t", action, state_no);
+                    *fp_v << action << state_no << "\t";
                 }
             }
 
             i++;
-            yyprintf("\n");
+            *fp_v << std::endl;
         } // end if
     }     // end for
 
@@ -651,8 +662,12 @@ remove_unit_production_step1and2(const MRLeaves& mr_leaves)
     }
 
     if (debug_remove_up_step_1_2) {
-        yyprintf("\n--remove_unit_production_step1and2--\n");
-        yyprintf("--writeUnitProdShift--\n");
+        *fp_v << std::endl
+              << "--remove_" << std::endl
+              << "it_producti" << std::endl
+              << "_step1" << std::endl
+              << "d2--\n";
+        *fp_v << "--writeUnitProdShift--" << std::endl;
     }
 
     // now, steps 1 and 2.
@@ -671,8 +686,8 @@ remove_unit_production_step1and2(const MRLeaves& mr_leaves)
                     ups_state = ParsingTblRows;
                     ParsingTblRows++;
                     if (ParsingTblRows >= PARSING_TABLE_SIZE) {
-                        // yyprintf("remove_unit_production message: ");
-                        // yyprintf("Parsing Table size reached\n");
+                        // *fp_v <<"remove_unit_production message: " ;
+                        // *fp_v <<"Parsing Table size reached" << std::endl ;
                         expand_parsing_table();
                     }
                     create_new_ups_state(ups, ups_state, unit_prod_dest_states);
@@ -690,14 +705,14 @@ remove_unit_production_step1and2(const MRLeaves& mr_leaves)
                 if (debug_remove_up_step_1_2) {
                     write_unit_prod_shift(
                       state, leaf, unit_prod_dest_states, ups_state);
-                    // yyprintf(" => new ups_state: %d\n", ups_state);
+                    // *fp_v <<" => new ups_state: " <<  ups_state<< std::endl ;
                 }
             } // end if (unitProdCount > 0)
         }
     }
     if (debug_remove_up_step_1_2) {
-        yyprintf("--after remove_unit_production_step1and2(), ");
-        yyprintf("total states: %d--\n", ParsingTblRows);
+        *fp_v << "--after remove_unit_production_step1and2(), ";
+        *fp_v << "total states: " << ParsingTblRows << "--" << std::endl;
     }
 }
 
@@ -849,10 +864,9 @@ further_optimization()
     n_state_opt123 = states_reachable.size() + 1;
 
     if (Options::get().show_parsing_tbl && (n_state_opt12 > n_state_opt123)) {
-        yyprintf("After further optimization, ");
-        yyprintf("total states reduced from %d to %d\n",
-                 n_state_opt12,
-                 n_state_opt123);
+        *fp_v << "After further optimization, ";
+        *fp_v << "total states reduced from " << n_state_opt12 << " to "
+              << n_state_opt123 << std::endl;
     }
 }
 

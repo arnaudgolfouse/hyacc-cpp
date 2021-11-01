@@ -31,13 +31,16 @@
 #include "lane_tracing.hpp"
 #include <cstddef>
 #include <cstring>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-FILE* fp_v;
+// FILE* fp_v;
+std::unique_ptr<std::ofstream> fp_v{ nullptr };
 
 Options Options::
   inner{}; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -191,13 +194,15 @@ StateList::clone() -> std::shared_ptr<StateList>
 void
 StateList::write() const
 {
-    yyprintf("\n  parents_list(%d): ", this->state_list.size());
+    *fp_v << std::endl
+          << "  par" << std::endl
+          << "ts_list(" << this->state_list.size() << "): ";
     for (int i = 0; i < this->state_list.size(); i++) {
         if (i > 0)
-            yyprintf(", ");
-        yyprintf("%d", this->state_list[i]->state_no);
+            *fp_v << ", ";
+        *fp_v << this->state_list[i]->state_no;
     }
-    yyprintf("\n");
+    *fp_v << std::endl;
 }
 
 /*
@@ -207,44 +212,45 @@ StateList::write() const
 void
 Production::write(int marker) const
 {
-    yyprintf("%s ", this->nLHS->snode->symbol);
-    yyprintf("-> ");
+    *fp_v << *this->nLHS->snode->symbol << " ";
+    *fp_v << "-> ";
 
     int i = 0;
     for (SymbolNode* n = this->nRHS_head; n != nullptr; n = n->next) {
         if (i == marker)
-            yyprintf(". ");
-        yyprintf("%s ", n->snode->symbol);
+            *fp_v << ". ";
+        *fp_v << *n->snode->symbol << " ";
         i++;
     }
     if (i == marker)
-        yyprintf(". ");
+        *fp_v << ". ";
 
     // print this only when marker = -1.
     // i.e. called from writeGrammar().
     if (marker == -1 && this->isUnitProduction)
-        yyprintf("(unit production)");
+        *fp_v << "(unit production)";
 
     if (marker == -1 && this->lastTerminal != nullptr)
-        yyprintf(" (Precedence Terminal: %s)", this->lastTerminal->symbol);
+        *fp_v << " (Precedence Terminal: " << *this->lastTerminal->symbol
+              << ")";
 
     // if write configration, then don't go to new line.
     // since the context has not been written.
     if (marker < 0)
-        yyprintf("\n");
+        *fp_v << std::endl;
 }
 
 void
 Grammar::write_rules() const
 {
     int count = 0;
-    yyprintf("Rules: \n");
+    *fp_v << "Rules: " << std::endl;
     for (const auto& rule : this->rules) {
-        yyprintf("(%d) ", count);
+        *fp_v << "(" << count << ") ";
         rule->write(-1);
         count++;
     }
-    yyprintf("Number of Rules: %d\n", count);
+    *fp_v << "Number of Rules: " << count << std::endl;
 }
 
 void
@@ -252,16 +258,16 @@ Grammar::write_rules_no_unit_prod() const
 {
     int count = 0;
     int i = 0;
-    yyprintf("Rules: \n");
+    *fp_v << "Rules: " << std::endl;
     for (const auto& rule : this->rules) {
         if (!is_unit_production(i) || i == 0) {
-            yyprintf("(%d) ", i);
+            *fp_v << "(" << i << ") ";
             rule->write(-1);
             count++;
         }
         i++;
     }
-    yyprintf("Number of Rules: %d\n", count);
+    *fp_v << "Number of Rules: " << count << std::endl;
 }
 
 auto
@@ -278,61 +284,63 @@ Grammar::get_opt_rule_count() -> size_t const
 void
 Grammar::write_terminals() const
 {
-    yyprintf("Terminals (%d): \n", this->terminal_count);
+    *fp_v << "Terminals (" << this->terminal_count << "): " << std::endl;
 
     SymbolNode* a = this->terminal_list;
     if (a != nullptr) {
-        yyprintf("%s\n", a->snode->symbol);
+        *fp_v << *a->snode->symbol << std::endl;
         for (a = a->next; a != nullptr; a = a->next) {
-            yyprintf("%s\n", a->snode->symbol);
+            *fp_v << *a->snode->symbol << std::endl;
         }
     }
-    yyprintf("\n");
+    *fp_v << std::endl;
 }
 
 void
 Grammar::write_non_terminals() const
 {
-    yyprintf("Non-terminals (%d): \n", this->non_terminal_count);
+    *fp_v << "Non-terminals (" << this->non_terminal_count
+          << "): " << std::endl;
     SymbolNode* a = this->non_terminal_list;
     if (a != nullptr) {
-        yyprintf("%s\n", a->snode->symbol);
+        *fp_v << *a->snode->symbol << std::endl;
         for (a = a->next; a != nullptr; a = a->next) {
-            yyprintf("%s\n", a->snode->symbol);
+            *fp_v << *a->snode->symbol << std::endl;
         }
     }
-    yyprintf("\n");
+    *fp_v << std::endl;
 }
 
 void
 Grammar::write_vanish_symbols() const
 {
     SymbolNode* a = nullptr;
-    yyprintf("Vanish symbols (%d): \n", this->vanish_symbol_count);
+    *fp_v << "Vanish symbols (" << this->vanish_symbol_count
+          << "): " << std::endl;
     if ((a = this->vanish_symbol_list) != nullptr) {
-        yyprintf("%s\n", a->snode->symbol);
+        *fp_v << *a->snode->symbol << std::endl;
         for (a = this->vanish_symbol_list; a != nullptr; a = a->next) {
-            yyprintf("%s\n", a->snode->symbol);
+            *fp_v << *a->snode->symbol << std::endl;
         }
     }
-    yyprintf("\n");
+    *fp_v << std::endl;
 }
 
 void
 Grammar::write(bool before_rm_unit_prod) const
 {
-    yyprintf("\n--Grammar--\n");
+    *fp_v << std::endl << "--Grammar--\n";
     this->write_terminals();
     this->write_non_terminals();
     this->write_vanish_symbols();
-    yyprintf("Goal symbol: %s\n", this->goal_symbol->snode->symbol);
+    *fp_v << "Goal symbol: " << *this->goal_symbol->snode->symbol << std::endl;
 
     if (before_rm_unit_prod || !Options::get().use_remove_unit_production) {
         this->write_rules();
     } else { // after remove unit production.
         this->write_rules_no_unit_prod();
     }
-    yyprintf("\n");
+    *fp_v << std::endl;
 }
 
 /*
@@ -501,13 +509,13 @@ init()
 void
 write_context(Context* c)
 {
-    yyprintf(" {");
+    *fp_v << " {";
 
     const SymbolNode* s = c->nContext;
     if (s != nullptr) {
-        yyprintf("%s", s->snode->symbol);
+        *fp_v << *s->snode->symbol;
         while ((s = s->next) != nullptr) {
-            yyprintf(", %s", s->snode->symbol);
+            *fp_v << ", " << *s->snode->symbol;
         }
     }
 
@@ -516,17 +524,17 @@ write_context(Context* c)
         // above if block. Single this part out here is to keep
         // the code easier to maintain for LR(1) and LR(k) separately.
         for (c = c->next; c != nullptr; c = c->next) {
-            yyprintf("; ");
+            *fp_v << "; ";
             if ((s = c->nContext) != nullptr) {
-                yyprintf("%s", s->snode->symbol);
+                *fp_v << *s->snode->symbol;
                 while ((s = s->next) != nullptr) {
-                    yyprintf(", %s", s->snode->symbol);
+                    *fp_v << ", " << *s->snode->symbol;
                 }
             }
         }
     }
 
-    yyprintf("} ");
+    *fp_v << "} ";
 }
 
 void
@@ -538,53 +546,52 @@ write_configuration(const Configuration& c)
     if (options.use_lr0 && !options.use_lalr) { // LR(0), no context.
         // do nothing unless is goal production.
         if (c.ruleID == 0)
-            yyprintf("%s", STR_END);
+            *fp_v << STR_END;
     } else {
         write_context(c.context);
     }
 
     if (c.isCoreConfig == 1u)
-        yyprintf(" (core) ");
+        *fp_v << " (core) ";
 
     if (options.use_lalr && options.show_originators) {
         if (c.LANE_END == 1u) {
-            yyprintf(" [LANE_END]");
+            *fp_v << " [LANE_END]";
         }
         if (c.LANE_CON == 1u) {
-            yyprintf(" [LANE_CON]");
+            *fp_v << " [LANE_CON]";
         }
         if (c.COMPLETE == 1u) {
-            yyprintf(" [COMPLETE]");
+            *fp_v << " [COMPLETE]";
         }
-        yyprintf("\n");
-        // yyprintf(" [owner: %d]", c->owner->state_no);
+        *fp_v << std::endl;
+        // *fp_v << " [owner: " <<  c->owner->state_no<< "]" ;
         write_config_originators(c); /* in lane_tracing.c */
         write_config_transitors(c);  /* in lane_tracing.c */
     } else {
-        yyprintf("\n");
+        *fp_v << std::endl;
     }
 }
 
 void
 write_core_configuration(State* s)
 {
-    yyprintf("~~~~~Core configurations.Start~~~~~\n");
+    *fp_v << "~~~~~Core configurations.Start~~~~~" << std::endl;
     for (int i = 0; i < s->core_config_count; i++) {
         write_configuration(*s->config[i]);
     }
-    yyprintf("~~~~~Core configurations.End~~~~~\n");
+    *fp_v << "~~~~~Core configurations.End~~~~~" << std::endl;
 }
 
 void
 write_successor_list(State& s)
 {
     if (!s.successor_list.empty())
-        yyprintf("\n");
-    //  yyprintf("\n-successor list-\n");
+        *fp_v << std::endl;
+    // *fp_v << std::endl << "-successor list-\n" ;
     for (const auto& successor : s.successor_list) {
-        yyprintf("%s : %d\n",
-                 successor->trans_symbol->snode->symbol,
-                 successor->state_no);
+        *fp_v << *successor->trans_symbol->snode->symbol << " : "
+              << successor->state_no << std::endl;
     }
 }
 
@@ -605,15 +612,16 @@ write_state_conflict_list(int state)
 
     for (auto& c = states_new_array->conflict_list[state]; c != nullptr;
          c = c->next) {
-        yyprintf("%d: ", c->state);
+        *fp_v << c->state << ": ";
         if (c->s > 0) {
-            yyprintf("shift/reduce conflict ");
-            yyprintf("(shift %d, red'n %d)", c->s, (-1) * c->r);
+            *fp_v << "shift/reduce conflict ";
+            *fp_v << "(shift " << c->s << ", red'n " << (-1) * c->r << ")";
         } else {
-            yyprintf("reduce/reduce conflict ");
-            yyprintf("red'n %d, red'n %d]", (-1) * c->s, (-1) * c->r);
+            *fp_v << "reduce/reduce conflict ";
+            *fp_v << "red'n " << (-1) * c->s << ", red'n " << (-1) * c->r
+                  << "]";
         } // end if
-        yyprintf(" on '%s'\n", c->lookahead->symbol);
+        *fp_v << " on '" << *c->lookahead->symbol << "'" << std::endl;
     } // end for
 }
 
@@ -622,30 +630,31 @@ write_grammar_conflict_list()
 {
     if (rs_count == 0 && rr_count == 0)
         return;
-    // yyprintf("==Conflict List==\n\n");
-    yyprintf("Conflicts:");
-    yyprintf("  %d shift/reduce, %d reduce/reduce\n\n", rs_count, rr_count);
+    // *fp_v << "==Conflict List==" << std::endl << "\n" ;
+    *fp_v << "Conflicts:";
+    *fp_v << "  " << rs_count << " shift/reduce, " << rr_count
+          << " reduce/reduce" << std::endl
+          << "\n";
 
     for (int i = 0; i < ParsingTblRows; i++) {
         if (states_new_array->rs_count[i] > 0) {
-            yyprintf("  state %d: %d shift/reduce conflict%s",
-                     i,
-                     states_new_array->rs_count[i],
-                     (states_new_array->rs_count[i] == 1) ? "" : "s");
+            *fp_v << "  state " << i << ": " << states_new_array->rs_count[i]
+                  << " shift/reduce conflict"
+                  << ((states_new_array->rs_count[i] == 1) ? "" : "s");
             if (states_new_array->rr_count[i] > 0) {
-                yyprintf(", %d reduce/reduce conflict%s",
-                         states_new_array->rr_count[i],
-                         (states_new_array->rr_count[i] == 1) ? "" : "s");
+                *fp_v << ", " << states_new_array->rr_count[i]
+                      << " reduce/reduce conflict"
+                      << ((states_new_array->rr_count[i] == 1) ? "" : "s");
             }
-            yyprintf("\n");
+            *fp_v << std::endl;
         } else if (states_new_array->rr_count[i] > 0) {
-            yyprintf("  state %d: %d reduce/reduce conflict%s\n",
-                     i,
-                     states_new_array->rr_count[i],
-                     (states_new_array->rr_count[i] == 1) ? "" : "s");
+            *fp_v << "  state " << i << ": " << states_new_array->rr_count[i]
+                  << " reduce/reduce conflict"
+                  << ((states_new_array->rr_count[i] == 1) ? "" : "s")
+                  << std::endl;
         }
     }
-    yyprintf("\n");
+    *fp_v << std::endl;
 }
 
 /*
@@ -661,9 +670,11 @@ write_grammar_conflict_list2()
 
     if (rs_count == 0 && rr_count == 0)
         return;
-    // yyprintf("==Conflict List==\n\n");
-    yyprintf("Conflicts:");
-    yyprintf("  %d shift/reduce, %d reduce/reduce]\n\n", rs_count, rr_count);
+    // *fp_v << "==Conflict List==" << std::endl << "\n" ;
+    *fp_v << "Conflicts:";
+    *fp_v << "  " << rs_count << " shift/reduce, " << rr_count
+          << " reduce/reduce]" << std::endl
+          << "\n";
 
     for (int i = 0; i < ParsingTblRows; i++) {
         if (!is_reachable_state(i))
@@ -672,37 +683,32 @@ write_grammar_conflict_list2()
         state = get_actual_state(i);
 
         if (a->rs_count[i] > 0) {
-            yyprintf("  state %d: %d shift/reduce conflict%s",
-                     state,
-                     a->rs_count[i],
-                     (a->rs_count[i] == 1) ? "" : "s");
+            *fp_v << "  state " << state << ": " << a->rs_count[i]
+                  << " shift/reduce conflict"
+                  << ((a->rs_count[i] == 1) ? "" : "s");
             final_rs_count += a->rs_count[i];
             if (a->rr_count[i] > 0) {
-                yyprintf(", %d reduce/reduce conflict%s",
-                         a->rr_count[i],
-                         (a->rr_count[i] == 1) ? "" : "s");
+                *fp_v << ", " << a->rr_count[i] << " reduce/reduce conflict"
+                      << ((a->rr_count[i] == 1) ? "" : "s");
                 final_rr_count += a->rr_count[i];
             }
-            yyprintf("\n");
+            *fp_v << std::endl;
         } else if (a->rr_count[i] > 0) {
-            yyprintf("  state %d: %d reduce/reduce conflict%s\n",
-                     state,
-                     a->rr_count[i],
-                     (a->rr_count[i] == 1) ? "" : "s");
+            *fp_v << "  state " << state << ": " << a->rr_count[i]
+                  << " reduce/reduce conflict"
+                  << ((a->rr_count[i] == 1) ? "" : "s") << std::endl;
             final_rr_count += a->rr_count[i];
         }
     }
 
     if ((diff = rs_count - final_rs_count) > 0)
-        yyprintf("  [%d shift/reduce conflict%s in removed states]\n",
-                 diff,
-                 (diff > 1) ? "s" : "");
+        *fp_v << "  [" << diff << " shift/reduce conflict"
+              << ((diff > 1) ? "s" : "") << " in removed states]" << std::endl;
     if ((diff = rr_count - final_rr_count) > 0)
-        yyprintf("  [%d reduce/reduce conflict%s in removed states]\n",
-                 diff,
-                 (diff > 1) ? "s" : "");
+        *fp_v << "  [" << diff << " reduce/reduce conflict"
+              << ((diff > 1) ? "s" : "") << " in removed states]" << std::endl;
 
-    yyprintf("\n");
+    *fp_v << std::endl;
 }
 
 void
@@ -711,10 +717,8 @@ write_state(State& s)
     auto& options = Options::get();
     write_state_conflict_list(s.state_no);
 
-    yyprintf("--state %d-- config count:%d, core_config count:%d\n",
-             s.state_no,
-             s.config.size(),
-             s.core_config_count);
+    *fp_v << "--state " << s.state_no << "-- config count:" << s.config.size()
+          << ", core_config count:" << s.core_config_count << std::endl;
     for (const auto& config : s.config) {
         write_configuration(*config);
     }
@@ -726,25 +730,26 @@ write_state(State& s)
     }
 
     // writeCoreConfiguration(s);
-    yyprintf("\n");
+    *fp_v << std::endl;
 }
 
 void
 write_state_collection(StateCollection* c)
 {
-    yyprintf("==State Collection: (count=%d)\n", c->state_count);
+    *fp_v << "==State Collection: (count=" << c->state_count << ")"
+          << std::endl;
 
     State* s = c->states_head;
     while (s != nullptr) {
         write_state(*s);
         s = s->next;
-        // yyprintf("------------------------------------------\n");
-        yyprintf("\n");
+        // *fp_v << "------------------------------------------" << std::endl ;
+        *fp_v << std::endl;
     }
 
     if (c->state_count == 0)
-        yyprintf("(empty)\n");
-    yyprintf("\n");
+        *fp_v << "(empty)" << std::endl;
+    *fp_v << std::endl;
 }
 
 void
@@ -771,7 +776,7 @@ add_symbol2_context(SymbolTblNode* snode, Context* c) -> bool
 {
     SymbolNode *s = c->nContext, *s_prev = nullptr;
     for (; s != nullptr; s_prev = s, s = s->next) {
-        int cmp_val = strcmp(s->snode->symbol, snode->symbol);
+        int cmp_val = s->snode->symbol->compare(*snode->symbol);
         if (cmp_val == 0)
             return false;  // already in context.
         if (cmp_val > 0) { // s_prev < snode < s
@@ -822,7 +827,7 @@ insert_symbol_list_unique_inc(SymbolList list,
             *exist = true;
             return list; // existing node.
         }
-        if (strcmp(n->snode->symbol, snode->symbol) > 0) {
+        if (*n->snode->symbol > *snode->symbol) {
             SymbolNode* new_node = SymbolNode::create(snode);
             // insert new_snode before n.
 
@@ -871,26 +876,26 @@ write_symbol_node_array(SymbolNode* str)
 {
     for (SymbolNode* a = str; a != nullptr; a = a->next) {
         if (a != str)
-            yyprintf(", ");
-        yyprintf("%s", a->snode->symbol);
+            *fp_v << ", ";
+        *fp_v << *a->snode->symbol;
     }
-    yyprintf("\n");
+    *fp_v << std::endl;
 }
 
 void
 show_t_heads(const SymbolList alpha, const SymbolList theads)
 {
-    yyprintf("string '");
+    *fp_v << "string '";
 
     for (SymbolNode* a = alpha; a != nullptr; a = a->next)
-        yyprintf("%s ", a->snode->symbol);
+        *fp_v << *a->snode->symbol << " ";
 
-    yyprintf("' has theads: ");
+    *fp_v << "' has theads: ";
 
     for (SymbolNode* a = theads; a != nullptr; a = a->next)
-        yyprintf("%s ", a->snode->symbol);
+        *fp_v << *a->snode->symbol << " ";
 
-    yyprintf("\n");
+    *fp_v << std::endl;
 }
 
 void
@@ -990,7 +995,7 @@ get_theads(SymbolNode* alpha) -> SymbolNode*
     free_symbol_node(n);
 
     if (Options::get().debug_gen_parsing_machine) {
-        yyprintf("==getTHeads: theads for: ");
+        *fp_v << "==getTHeads: theads for: ";
         write_symbol_node_array(alpha);
         write_symbol_node_array(theads);
     }
@@ -1042,7 +1047,7 @@ get_context(const Configuration* cfg, Context* context)
             get_context_do(cfg, context);
         } else { // theads_count > 0
             for (SymbolNode* a = theads; a != nullptr; a = a->next) {
-                if (strlen(a->snode->symbol) == 0) { // empty string.
+                if (a->snode->symbol->empty()) { // empty string.
                     // Entire alpha vanishable. Copy context.
                     get_context_do(cfg, context);
                 } else {
@@ -1242,8 +1247,8 @@ config_cmp(const Configuration* c1, const Configuration* c2) -> int
     const Production* c2_production = grammar.rules[c2->ruleID];
 
     // std::cout << "compare LHS" << std::endl;
-    int cmp_val = strcmp(c1_production->nLHS->snode->symbol,
-                         c2_production->nLHS->snode->symbol);
+    int cmp_val = c1_production->nLHS->snode->symbol->compare(
+      *c2_production->nLHS->snode->symbol);
     if (cmp_val != 0)
         return cmp_val;
 
@@ -1255,7 +1260,7 @@ config_cmp(const Configuration* c1, const Configuration* c2) -> int
     const SymbolNode* a = c1_production->nRHS_head;
     const SymbolNode* b = c2_production->nRHS_head;
     for (int i = 0; i < count; i++) {
-        cmp_val = strcmp(a->snode->symbol, b->snode->symbol);
+        cmp_val = a->snode->symbol->compare(*b->snode->symbol);
         if (cmp_val != 0)
             return cmp_val;
         a = a->next;
@@ -1290,7 +1295,7 @@ config_cmp(const Configuration* c1, const Configuration* c2) -> int
     a = c1->context->nContext;
     b = c2->context->nContext;
     while (a != nullptr) {
-        cmp_val = strcmp(a->snode->symbol, b->snode->symbol);
+        cmp_val = a->snode->symbol->compare(*b->snode->symbol);
         if (cmp_val != 0)
             return cmp_val;
         a = a->next;
@@ -1469,9 +1474,8 @@ combine_compatible_config(State* s, bool debug_comb_comp_config)
         return;
 
     if (debug_comb_comp_config) {
-        yyprintf("combineCompatibleCfg (state %d). before: %d, ",
-                 s->state_no,
-                 s->config.size());
+        *fp_v << "combineCompatibleCfg (state " << s->state_no
+              << "). before: " << s->config.size() << ", ";
         // writeState(s);
     }
 
@@ -1506,7 +1510,7 @@ combine_compatible_config(State* s, bool debug_comb_comp_config)
     s->config.resize(i);
 
     if (debug_comb_comp_config) {
-        yyprintf("after: %d\n", s->config.size());
+        *fp_v << "after: " << s->config.size() << std::endl;
         // writeState(s);
     }
 }
@@ -1802,7 +1806,7 @@ has_empty_intersection(const Context* c1, const Context* c2) -> bool
     while (a != nullptr && b != nullptr) {
         if (a->snode == b->snode)
             return false; // common element found
-        if (strcmp(a->snode->symbol, b->snode->symbol) < 0) {
+        if (*a->snode->symbol < *b->snode->symbol) {
             a = a->next;
         } else {
             b = b->next;
@@ -1890,8 +1894,7 @@ update_state_parsing_tbl_entry(const State* s)
         const SymbolTblNode* scanned_symbol = get_scanned_symbol(config);
 
         // for final config and empty reduction.
-        if (is_final_configuration(config) ||
-            strlen(scanned_symbol->symbol) == 0) {
+        if (is_final_configuration(config) || scanned_symbol->symbol->empty()) {
             insert_reduction_to_parsing_table(config, s->state_no);
         }
     }
@@ -2260,13 +2263,12 @@ transition(State* s)
     for (const auto& config : s->config) {
         Configuration* c = config;
         if (is_final_configuration(c)) {
-            // yyprintf("a final config. so reduce.\n");
-            // writeConfiguration(c);
+            // *fp_v << "a final config. so reduce." << std::endl ;
+            //  writeConfiguration(c);
             insert_reduction_to_parsing_table(c, s->state_no);
         } else { // do transit operation.
             SymbolTblNode* scanned_symbol = get_scanned_symbol(c);
-            if (strlen(scanned_symbol->symbol) ==
-                0) { // insert empty reduction.
+            if (scanned_symbol->symbol->empty()) { // insert empty reduction.
                 insert_reduction_to_parsing_table(c, s->state_no);
                 continue;
             }
@@ -2344,14 +2346,13 @@ generate_parsing_machine()
     State* new_state = states_new->states_head;
 
     if (Options::get().debug_gen_parsing_machine) {
-        yyprintf("\n\n--generate parsing machine--\n");
+        *fp_v << std::endl << "\n--generate parsing machine--" << std::endl;
     }
 
     while (new_state != nullptr) {
         if (Options::get().debug_gen_parsing_machine) {
-            yyprintf("%d states, current state is %d\n",
-                     states_new->state_count,
-                     new_state->state_no);
+            *fp_v << states_new->state_count << " states, current state is "
+                  << new_state->state_no << std::endl;
         }
 
         get_closure(new_state); // get closure of this state.
@@ -2408,9 +2409,9 @@ expand_parsing_table()
 
     StateArray::expand(states_new_array.get(), PARSING_TABLE_SIZE);
 
-    // yyprintf("expand_parsing_table message: ");
-    // yyprintf("expand parsing table size to %d\n",
-    // PARSING_TABLE_SIZE);
+    // *fp_v << "expand_parsing_table message: " ;
+    // *fp_v << "expand parsing table size to " <<
+    //  PARSING_TABLE_SIZE<< std::endl ;
 }
 
 /*
@@ -2515,14 +2516,14 @@ insert_action(SymbolTblNode* lookahead, int row, int state_dest)
     }
 
     // std::cout << "conflict (state " <<
-    //         row<< ", lookahead " <<  lookahead->symbol<< "): " <<
+    //         row << ", lookahead " << *lookahead->symbol << "): " <<
     //         ParsingTable.at(cell)<< " v.s. " << state_dest << std::endl;
 
     // reduce/reduce conflict, use the rule appears first.
     // i.e., the ruleID is smaller, or when negated, is bigger.
     if (ParsingTable.at(cell) < 0 && state_dest < 0) {
         // std::cout << "r/r conflict: [" <<
-        //         row<< ", " <<  lookahead->symbol<< "] - " <<
+        //         row << ", " << *lookahead->symbol << "] - " <<
         //         ParsingTable.at(cell)<< " v.s. " << state_dest << std::endl;
         std::shared_ptr<Conflict> c = add_to_conflict_array(
           row, lookahead, ParsingTable.at(cell), state_dest);
@@ -2547,7 +2548,7 @@ insert_action(SymbolTblNode* lookahead, int row, int state_dest)
         if (Options::get().show_ss_conflicts) {
             std::cerr << "warning: shift/shift conflict: " << state_dest
                       << " v.s. " << ParsingTable.at(cell) << " @ (" << row
-                      << ", " << lookahead->symbol << ")" << std::endl;
+                      << ", " << *lookahead->symbol << ")" << std::endl;
         }
         // exit(1);
         // ParsingTable.at(cell) = state_dest; // change causes
@@ -2571,8 +2572,8 @@ insert_action(SymbolTblNode* lookahead, int row, int state_dest)
     if (tp_s == nullptr || tp_r == nullptr || tp_s->precedence == 0 ||
         tp_r->precedence == 0) {
         // std::cout << "s/r conflict: [" <<
-        //         row<< ", " <<  lookahead->symbol<< "] - " <<
-        //         ParsingTable.at(cell)<< " v.s. " << state_dest << std::endl;
+        //         row << ", " << *lookahead->symbol << "] - " <<
+        //         ParsingTable.at(cell) << " v.s. " << state_dest << std::endl;
         std::shared_ptr<Conflict> c = add_to_conflict_array(
           row, lookahead, ParsingTable.at(cell), state_dest);
 
@@ -2622,12 +2623,12 @@ is_goal_symbol(const SymbolTblNode* snode) -> bool
 void
 print_parsing_table_note()
 {
-    yyprintf("Note: \n");
-    yyprintf("1. si means shift and stack state i\n");
-    yyprintf("2. ri means reduce by production numbered i\n");
-    yyprintf("3. a0 means accept\n");
-    yyprintf("4. gi means go to state i\n");
-    yyprintf("5. 0 means error\n");
+    *fp_v << "Note: " << std::endl;
+    *fp_v << "1. si means shift and stack state i" << std::endl;
+    *fp_v << "2. ri means reduce by production numbered i" << std::endl;
+    *fp_v << "3. a0 means accept" << std::endl;
+    *fp_v << "4. gi means go to state i" << std::endl;
+    *fp_v << "5. 0 means error" << std::endl;
 }
 
 /*
@@ -2645,22 +2646,22 @@ print_parsing_table()
     int row_size = ParsingTblRows;
     int col_size = ParsingTblCols;
 
-    yyprintf("\n--Parsing Table--\n");
-    yyprintf("State\t");
+    *fp_v << std::endl << "--Pars" << std::endl << "g Table--\n";
+    *fp_v << "State\t";
     write_parsing_table_col_header();
 
     for (int row = 0; row < row_size; row++) {
-        yyprintf("%d\t", row);
+        *fp_v << row << "\t";
         for (int col = 0; col < ParsingTblCols; col++) {
             const SymbolTblNode* n = ParsingTblColHdr.at(col);
             if (!is_goal_symbol(n)) {
                 char action = 0;
                 int state = 0;
                 get_action(n->type, col, row, &action, &state);
-                yyprintf("%c%d\t", action, state);
+                *fp_v << action << state << "\t";
             }
         }
-        yyprintf("\n");
+        *fp_v << std::endl;
     }
 
     print_parsing_table_note();
@@ -2784,23 +2785,24 @@ get_avg_config_count()
     const State* a = states_new->states_head;
     size_t max = a->config.size();
     size_t min = a->config.size();
-    yyprintf("\n--No. of configurations for each state--\n");
+    *fp_v << std::endl
+          << "--No. of c" << std::endl
+          << "figurati" << std::endl
+          << "s for each state--\n";
     for (; a != nullptr; a = a->next) {
         if ((++i) % LINE_LENGTH == 1)
-            yyprintf("\n%d: ", i);
-        yyprintf("%d ", a->config.size());
+            *fp_v << std::endl << i << ": ";
+        *fp_v << a->config.size() << " ";
         sum += a->config.size();
         if (min > a->config.size())
             min = a->config.size();
         if (max < a->config.size())
             max = a->config.size();
     }
-    yyprintf("\n");
-    yyprintf("Average configurations per state: %.2f (min: %d, "
-             "max: %d)\n",
-             ((double)sum / states_new->state_count),
-             min,
-             max);
+    *fp_v << std::endl;
+    *fp_v << "Average configurations per state: " << std::setprecision(2)
+          << ((double)sum / states_new->state_count) << " (min: " << min
+          << ", max: " << max << ')' << std::endl;
 }
 
 void
@@ -2810,17 +2812,13 @@ show_state_config_info()
     if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
         config_queue->info();
     } else {
-        yyprintf("%d states in total.\n", xx);
-        yyprintf("before combine: total cfg: %d, max cfg: %d, "
-                 "cfg/state: %.2f\n",
-                 yy,
-                 zz,
-                 ((double)yy) / xx); // before combineCompatibleConfig.
-        yyprintf("after combine: total cfg: %d, max cfg: %d, "
-                 "cfg/state: %.2f\n",
-                 yyy,
-                 zzz,
-                 ((double)yyy) / xx);
+        *fp_v << xx << " states in total." << std::endl;
+        *fp_v << "before combine: total cfg: " << yy << ", max cfg: " << zz
+              << ", cfg/state: " << std::setprecision(2) << ((double)yy) / xx
+              << std::endl; // before combineCompatibleConfig.
+        *fp_v << "after combine: total cfg: " << yyy << ", max cfg: " << zzz
+              << ", cfg/state: " << std::setprecision(2) << ((double)yyy) / xx
+              << std::endl;
     }
 
     get_avg_config_count();
@@ -2890,49 +2888,43 @@ show_stat()
     if (options.show_actual_state_array)
         write_actual_state_array();
 
-    yyprintf("\n");
-    // yyprintf("--statistics--\n");
-    // yyprintf("[Note: A first rule '$accept ->
-    // start_symbol' is added]\n\n"); yyprintf("Symbols
-    // count: %d\n", n_symbol);
-    yyprintf("%d terminals, %d nonterminals\n",
-             grammar.terminal_count,
-             grammar.non_terminal_count);
-    yyprintf("%d grammar rules\n", n_rule);
+    *fp_v << std::endl;
+    // *fp_v << "--statistics--" << std::endl ;
+    // *fp_v << "[Note: A first rule '$accept ->
+    //  start_symbol' is added]" << std::endl << "\n" ;*fp_v << "Symbols
+    //  count: " <<  n_symbol<< std::endl ;
+    *fp_v << grammar.terminal_count << " terminals, "
+          << grammar.non_terminal_count << " nonterminals" << std::endl;
+    *fp_v << n_rule << " grammar rules" << std::endl;
     if (options.use_remove_unit_production) {
-        yyprintf("%d grammar rules after remove unit "
-                 "productions\n",
-                 n_rule_opt);
+        *fp_v << n_rule_opt << " grammar rules after remove unit ";
     }
     if (options.use_combine_compatible_states) {
         if (options.use_lr0) {
-            yyprintf("%d states without optimization\n", n_state_opt1);
+            *fp_v << n_state_opt1 << " states without optimization"
+                  << std::endl;
         } else {
-            yyprintf("%d states after combine compatible states\n",
-                     n_state_opt1);
+            *fp_v << n_state_opt1 << " states after combine compatible states"
+                  << std::endl;
         }
         if (options.use_remove_unit_production) {
-            yyprintf("%d states after remove unit productions\n",
-                     n_state_opt12);
+            *fp_v << n_state_opt12 << " states after remove unit productions"
+                  << std::endl;
             if (options.use_remove_repeated_states)
-                yyprintf("%d states after remove repeated "
-                         "states\n",
-                         n_state_opt123);
+                *fp_v << n_state_opt123 << " states after remove repeated ";
         }
     } else {
-        yyprintf("%d states without optimization\n", n_state_opt1);
+        *fp_v << n_state_opt1 << " states without optimization" << std::endl;
     }
 
     // conflicts summary.
-    yyprintf("%d shift/reduce conflict%s, %d reduce/reduce "
-             "conflict%s\n",
-             rs_count,
-             (rs_count > 1) ? "s" : "",
-             rr_count,
-             (rr_count > 1) ? "s" : "");
+    *fp_v << rs_count << " shift/reduce conflict" << ((rs_count > 1) ? "s" : "")
+          << ", " << rr_count << " reduce/reduce conflict"
+          << ((rr_count > 1) ? "s" : "") << std::endl;
     if (options.use_remove_unit_production && ss_count > 0) {
-        yyprintf(
-          "%d shift/shift conflict%s\n\n", ss_count, (ss_count > 1) ? "s" : "");
+        *fp_v << ss_count << " shift/shift conflict"
+              << ((ss_count > 1) ? "s" : "") << std::endl
+              << "\n";
     }
 
     // print_size();
@@ -2966,10 +2958,12 @@ write_parsing_tbl_row_lalr(int state)
                 v = get_actual_state(v);
 
             if (ParsingTblColHdr.at(col)->type == symbol_type::TERMINAL) {
-                yyprintf("  %s [%d] shift %d\n", s->symbol, s->value, v);
+                *fp_v << "  " << *s->symbol << " [" << s->value << "] shift "
+                      << v << std::endl;
             }
         } else if (v == CONST_ACC) {
-            yyprintf("  %s [%d] Accept\n", s->symbol, s->value);
+            *fp_v << "  " << *s->symbol << " [" << s->value << "] Accept"
+                  << std::endl;
         } else if (v < 0) {
             if (reduction > 0) {
                 reduction = v;
@@ -2985,23 +2979,23 @@ write_parsing_tbl_row_lalr(int state)
     // write reduce actions.
     if (only_one_reduction) {
         if (reduction < 0) {
-            yyprintf("  . reduce (%d)\n", (-1) * reduction);
+            *fp_v << "  . reduce (" << (-1) * reduction << ")" << std::endl;
         } else {
-            yyprintf("  . error %d\n", reduction);
+            *fp_v << "  . error " << reduction << std::endl;
         } // no reduction.
     } else {
         for (int col = 0; col < ParsingTblCols; col++) {
             int v = ParsingTable.at(row_start + col);
             const SymbolTblNode* s = ParsingTblColHdr.at(col);
             if (v < 0 && v != CONST_ACC) {
-                yyprintf(
-                  "  %s [%d] reduce (%d)\n", s->symbol, s->value, (-1) * v);
+                *fp_v << "  " << *s->symbol << " [" << s->value << "] reduce ("
+                      << (-1) * v << ")" << std::endl;
             }
         }
     }
 
     // write goto action.
-    yyprintf("\n");
+    *fp_v << std::endl;
     for (int col = 0; col < ParsingTblCols; col++) {
         int v = ParsingTable.at(row_start + col);
         const SymbolTblNode* s = ParsingTblColHdr.at(col);
@@ -3010,7 +3004,8 @@ write_parsing_tbl_row_lalr(int state)
                 v = get_actual_state(v);
 
             if (ParsingTblColHdr.at(col)->type == symbol_type::NONTERMINAL) {
-                yyprintf("  %s [%d] goto %d\n", s->symbol, s->value, v);
+                *fp_v << "  " << *s->symbol << " [" << s->value << "] goto "
+                      << v << std::endl;
             }
         }
     }
@@ -3022,10 +3017,11 @@ write_parsing_tbl_row(int state)
     const auto& options = Options::get();
     int row_start = state * ParsingTblCols;
 
-    yyprintf("\n");
+    *fp_v << std::endl;
 
     if (final_state_list.at(state) < 0) {
-        yyprintf("  . reduce (%d)\n", (-1) * final_state_list.at(state));
+        *fp_v << "  . reduce (" << (-1) * final_state_list.at(state) << ")"
+              << std::endl;
         return;
     }
 
@@ -3042,14 +3038,18 @@ write_parsing_tbl_row(int state)
                 v = get_actual_state(v);
 
             if (ParsingTblColHdr.at(col)->type == symbol_type::NONTERMINAL) {
-                yyprintf("  %s [%d] goto %d\n", s->symbol, s->value, v);
+                *fp_v << "  " << *s->symbol << " [" << s->value << "] goto "
+                      << v << std::endl;
             } else {
-                yyprintf("  %s [%d] shift %d\n", s->symbol, s->value, v);
+                *fp_v << "  " << *s->symbol << " [" << s->value << "] shift "
+                      << v << std::endl;
             }
         } else if (v == CONST_ACC) {
-            yyprintf("  %s [%d] Accept\n", s->symbol, s->value);
+            *fp_v << "  " << *s->symbol << " [" << s->value << "] Accept"
+                  << std::endl;
         } else if (v < 0) {
-            yyprintf("  %s [%d] reduce (%d)\n", s->symbol, s->value, (-1) * v);
+            *fp_v << "  " << *s->symbol << " [" << s->value << "] reduce ("
+                  << (-1) * v << ")" << std::endl;
         }
     }
 }
@@ -3061,18 +3061,16 @@ write_state_info(const State& s)
     write_state_conflict_list(s.state_no);
 
     if (s.PASS_THRU == 1u) {
-        yyprintf("[PASS_THRU]\n");
+        *fp_v << "[PASS_THRU]" << std::endl;
     }
 
-    yyprintf("state %d\n\n", s.state_no);
-    // yyprintf("  [config count : %d, core_config count :
-    // %d]\n\n",
-    yyprintf("  [config: %d, core config: %d]\n\n",
-             s.config.size(),
-             s.core_config_count);
+    *fp_v << "state " << s.state_no << std::endl << "\n";
+    *fp_v << "  [config: " << s.config.size()
+          << ", core config: " << s.core_config_count << "]" << std::endl
+          << "\n";
 
     for (const auto& i : s.config) {
-        yyprintf("  (%d) ", i->ruleID);
+        *fp_v << "  (" << i->ruleID << ") ";
         write_configuration(*i);
     }
 
@@ -3084,15 +3082,15 @@ write_state_info(const State& s)
     write_parsing_tbl_row(s.state_no);
 
     // writeCoreConfiguration(s);
-    yyprintf("\n\n");
+    *fp_v << std::endl << "\n";
 }
 
 void
 write_state_collection_info(StateCollection* c)
 {
-    // yyprintf("\n==State List: (count=%d)==\n\n",
-    // c->state_count);
-    yyprintf("\n\n");
+    // *fp_v << std::endl << "==State List: (co" << std::endl << "t=" <<
+    //  c->state_count<< ")==" << std::endl << "\n" ;
+    *fp_v << std::endl << "\n";
     State* s = c->states_head;
     while (s != nullptr) {
         write_state_info(*s);
@@ -3100,24 +3098,25 @@ write_state_collection_info(StateCollection* c)
     }
 
     if (c->state_count == 0)
-        yyprintf("(empty)\n");
-    yyprintf("\n");
+        *fp_v << "(empty)" << std::endl;
+    *fp_v << std::endl;
 }
 
 void
 write_state_info_from_parsing_tbl()
 {
-    // yyprintf("\n==States (count = %d)==\n",
-    // actual_state_no_ct / 2);
+    // *fp_v << std::endl << "==States (co" << std::endl << "t = " <<
+    //  actual_state_no_ct / 2<< ")==" << std::endl ;
     for (int row = 0; row < ParsingTblRows; row++) {
         if (is_reachable_state(row)) {
-            yyprintf("\n\nstate %d\n", get_actual_state(row));
+            *fp_v << std::endl
+                  << "\nstate " << get_actual_state(row) << std::endl;
             write_parsing_tbl_row(row);
             // writeStateConflictList(get_actual_state(row));
             // writeStateConflictList(row);
         }
     }
-    yyprintf("\n\n");
+    *fp_v << std::endl << "\n";
 }
 
 /*
@@ -3150,14 +3149,15 @@ lr1(int argc, char** argv) -> int
     const auto& options = Options::get();
     hash_tbl_init();
 
-    fp_v = nullptr; // for y.output
     if (options.use_verbose) {
-        if ((fp_v = fopen(y_output.data(), "w")) == nullptr) {
+        fp_v->open(y_output.data()); // for y.output
+        if (!fp_v->is_open()) {
             throw std::runtime_error(std::string("cannot open file ") +
                                      y_output);
         }
-        yyprintf("/* y.output. Generated by HYACC. */\n");
-        yyprintf("/* Input file: %s */\n", hyacc_filename.c_str());
+        *fp_v << "/* y.output. Generated by HYACC. */" << std::endl;
+        *fp_v << "/* Input file: " << hyacc_filename.c_str() << " */"
+              << std::endl;
     }
 
     get_yacc_grammar(hyacc_filename);
@@ -3183,10 +3183,13 @@ lr1(int argc, char** argv) -> int
     if (options.use_remove_unit_production) {
         remove_unit_production();
         if (options.show_parsing_tbl)
-            yyprintf("\nAFTER REMOVING UNIT PRODUCTION:\n");
+            *fp_v << std::endl << "AFTER REMOVING UNIT PRODUCTION:\n";
         if (options.show_total_parsing_tbl_after_rm_up) {
-            yyprintf("\n--Entire parsing table ");
-            yyprintf("after removing unit productions--\n");
+            *fp_v << std::endl
+                  << "--" << std::endl
+                  << "tire pars" << std::endl
+                  << "g table ";
+            *fp_v << "after removing unit productions--" << std::endl;
             print_parsing_table();
         }
 
@@ -3195,7 +3198,7 @@ lr1(int argc, char** argv) -> int
         if (options.use_remove_repeated_states) {
             further_optimization();
             if (options.show_parsing_tbl) {
-                yyprintf("\nAFTER REMOVING REPEATED STATES:\n");
+                *fp_v << std::endl << "AFTER REMOVING REPEATED STATES:\n";
                 print_final_parsing_table();
             }
         }
@@ -3204,8 +3207,10 @@ lr1(int argc, char** argv) -> int
         if (options.show_parsing_tbl)
             print_condensed_final_parsing_table();
         if (options.show_grammar) {
-            yyprintf("\n--Grammar after removing unit "
-                     "productions--\n");
+            *fp_v << std::endl
+                  << "--Grammar after remov" << std::endl
+                  << "g " << std::endl
+                  << "it ";
             grammar.write(false);
         }
         if (options.use_graphviz) {
@@ -3221,7 +3226,7 @@ lr1(int argc, char** argv) -> int
     show_conflict_count();
 
     if (options.use_verbose)
-        fclose(fp_v);
+        fp_v->close();
     // free_vars(); // let system take care of it.
     return 0;
 }
@@ -3233,14 +3238,15 @@ lr0(int argc, char** argv) -> int
     /// USE_COMBINE_COMPATIBLE_STATES = false; ///
     hash_tbl_init();
 
-    fp_v = nullptr; // for y.output
     if (options.use_verbose) {
-        if ((fp_v = fopen(y_output.data(), "w")) == nullptr) {
+        fp_v->open(y_output.data());
+        if (!fp_v->is_open()) { // for y.output
             throw std::runtime_error(std::string("cannot open file ") +
                                      y_output);
         }
-        yyprintf("/* y.output. Generated by HYACC. */\n");
-        yyprintf("/* Input file: %s */\n", hyacc_filename.c_str());
+        *fp_v << "/* y.output. Generated by HYACC. */" << std::endl;
+        *fp_v << "/* Input file: " << hyacc_filename.c_str() << " */"
+              << std::endl;
     }
 
     get_yacc_grammar(hyacc_filename);
@@ -3271,10 +3277,13 @@ lr0(int argc, char** argv) -> int
     if (options.use_remove_unit_production) {
         remove_unit_production();
         if (options.show_parsing_tbl)
-            yyprintf("\nAFTER REMOVING UNIT PRODUCTION:\n");
+            *fp_v << std::endl << "AFTER REMOVING UNIT PRODUCTION:\n";
         if (options.show_total_parsing_tbl_after_rm_up) {
-            yyprintf("\n--Entire parsing table ");
-            yyprintf("after removing unit productions--\n");
+            *fp_v << std::endl
+                  << "--" << std::endl
+                  << "tire pars" << std::endl
+                  << "g table ";
+            *fp_v << "after removing unit productions--" << std::endl;
             print_parsing_table();
         }
 
@@ -3283,7 +3292,7 @@ lr0(int argc, char** argv) -> int
         if (options.use_remove_repeated_states) {
             further_optimization();
             if (options.show_parsing_tbl) {
-                yyprintf("\nAFTER REMOVING REPEATED STATES:\n");
+                *fp_v << std::endl << "AFTER REMOVING REPEATED STATES:\n";
                 print_final_parsing_table();
             }
         }
@@ -3292,8 +3301,10 @@ lr0(int argc, char** argv) -> int
         if (options.show_parsing_tbl)
             print_condensed_final_parsing_table();
         if (options.show_grammar) {
-            yyprintf("\n--Grammar after removing unit "
-                     "productions--\n");
+            *fp_v << std::endl
+                  << "--Grammar after remov" << std::endl
+                  << "g " << std::endl
+                  << "it ";
             grammar.write(false);
         }
         if (options.use_graphviz) {
@@ -3313,7 +3324,7 @@ lr0(int argc, char** argv) -> int
     }
 
     if (options.use_verbose)
-        fclose(fp_v);
+        fp_v->close();
     // free_vars(); // let system take care of it.
 
     return 0;

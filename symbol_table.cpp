@@ -31,7 +31,10 @@
 
 #include "y.hpp"
 #include <cstring>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <string>
 
 constexpr bool DEBUG_HASHTBL = false;
 
@@ -55,7 +58,7 @@ static void
 write_rule_id_list(const SymbolTblNode* n)
 {
     RuleIDNode* a = nullptr;
-    std::cout << n->symbol << ": ";
+    std::cout << *n->symbol << ": ";
     if ((a = n->ruleIDList) != nullptr) {
         std::cout << a->ruleID;
 
@@ -213,7 +216,7 @@ find_in_inc_symbol_list(SymbolList a, SymbolTblNode* s) -> SymbolNode*
     for (SymbolNode* b = a; b != nullptr; b = b->next) {
         if (b->snode == s)
             return b;
-        if (strcmp(s->symbol, b->snode->symbol) > 0) {
+        if (*s->symbol > *b->snode->symbol) {
             return nullptr;
         }
     }
@@ -235,7 +238,7 @@ insert_inc_symbol_list(SymbolList a, SymbolTblNode* n) -> SymbolNode*
         return SymbolNode::create(n);
 
     for (b_prev = nullptr, b = a; b != nullptr; b_prev = b, b = b->next) {
-        int cmp = strcmp(n->symbol, b->snode->symbol);
+        int cmp = n->symbol->compare(*b->snode->symbol);
         if (cmp < 0) {               // insert after b_prev, before b.
             if (b_prev == nullptr) { // insert at the head.
                 b_prev = SymbolNode::create(n);
@@ -276,10 +279,9 @@ combine_inc_symbol_list(SymbolList a, SymbolList b) -> SymbolNode*
     SymbolNode* nb = b;
 
     while (true) {
-        int cmp = strcmp(na->snode->symbol, nb->snode->symbol);
-        // std::cout << "strcmp(" <<
-        //         na->snode->symbol<< ", " <<  nb->snode->symbol<< ") = " <<
-        //         cmp << std::endl;
+        int cmp = na->snode->symbol->compare(*nb->snode->symbol);
+        // std::cout << "strcmp(" << *na->snode->symbol << ", "
+        //           << *nb->snode->symbol << ") = " << cmp << std::endl;
         if (cmp == 0) {
             na_prev = na;
             na = na->next;
@@ -319,9 +321,9 @@ write_symbol_list(SymbolList a, const char* name)
     if (name != nullptr)
         std::cout << name << ": ";
     if (b != nullptr) {
-        std::cout << b->snode->symbol;
+        std::cout << *b->snode->symbol;
         for (b = b->next; b != nullptr; b = b->next) {
-            std::cout << ", " << b->snode->symbol;
+            std::cout << ", " << *b->snode->symbol;
         }
         std::cout << std::endl;
     }
@@ -335,19 +337,15 @@ write_symbol_list(SymbolList a, const char* name)
  * create a symbol table node, used by hash table HashTbl.
  */
 auto
-create_symbol_tbl_node(const char* symbol) -> SymbolTblNode*
+create_symbol_tbl_node(const std::string& symbol) -> SymbolTblNode*
 {
-    if (symbol == nullptr)
-        YYERR_EXIT("createSymbolTblNode error: symbol is nullptr\n");
-
     auto* n = new SymbolTblNode;
     if (n == nullptr)
         YYERR_EXIT("createSymbolTblNode error: out of memory\n");
-    n->symbol = new char[strlen(symbol) + 1];
-    strcpy(n->symbol, symbol);
+    *n->symbol = symbol;
     n->next = nullptr;
     n->type = symbol_type::NEITHER;
-    n->vanishable = 0; // default value: FALSE
+    n->vanishable = false; // default value: FALSE
     n->seq = -1;
     n->ruleIDList = nullptr;
     n->TP = nullptr; // terminal property.
@@ -421,9 +419,9 @@ hash_tbl_init()
  * empty string is allowed.
  */
 static auto
-hash_value(const char* symbol) -> int
+hash_value(const std::string& symbol) -> int
 {
-    size_t len = strlen(symbol);
+    size_t len = symbol.size();
 
     int sum = 0;
     for (size_t i = 0; i < len; i++) {
@@ -447,10 +445,8 @@ hash_value(const char* symbol) -> int
  * this symbol.
  */
 auto
-hash_tbl_insert(const char* symbol) -> SymbolTblNode*
+hash_tbl_insert(const std::string& symbol) -> SymbolTblNode*
 {
-    if (symbol == nullptr)
-        return nullptr;
     if constexpr (DEBUG_HASHTBL) {
         // std::cout << "hash insert " << symbol << " at " << where <<
         // std::endl;
@@ -464,7 +460,7 @@ hash_tbl_insert(const char* symbol) -> SymbolTblNode*
     }
     SymbolTblNode* n = HashTbl[v].next;
     for (; n->next != nullptr; n = n->next) {
-        if (strcmp(n->symbol, symbol) == 0) {
+        if (*n->symbol == symbol) {
             if constexpr (DEBUG_HASHTBL) {
                 std::cout << "node for string " << symbol << " exists"
                           << std::endl;
@@ -473,7 +469,7 @@ hash_tbl_insert(const char* symbol) -> SymbolTblNode*
         }
     }
     // the last node on this linked list.
-    if (strcmp(n->symbol, symbol) == 0) {
+    if (*n->symbol == symbol) {
         if constexpr (DEBUG_HASHTBL) {
             std::cout << "node for string " << symbol << " exists" << std::endl;
         }
@@ -489,14 +485,12 @@ hash_tbl_insert(const char* symbol) -> SymbolTblNode*
  * If symbol does not exist, return nullptr.
  */
 auto
-hash_tbl_find(const char* symbol) -> SymbolTblNode*
+hash_tbl_find(const std::string& symbol) -> SymbolTblNode*
 {
-    if (symbol == nullptr)
-        return nullptr;
     int v = hash_value(symbol);
 
     for (SymbolTblNode* n = HashTbl.at(v).next; n != nullptr; n = n->next) {
-        if (strcmp(n->symbol, symbol) == 0) {
+        if (*n->symbol == symbol) {
             if constexpr (DEBUG_HASHTBL) {
                 std::cout << "node for " << symbol << " is found" << std::endl;
             }
@@ -521,8 +515,7 @@ hash_tbl_destroy()
         if (HashTbl[i].count > 0) {
             for (SymbolTblNode* n = HashTbl[i].next; n != nullptr; n = nnext) {
                 nnext = n->next;
-                // std::cout << "freeing node for " <<  n->symbol << std::endl;
-                delete[] n->symbol;
+                // std::cout << "freeing node for " << *n->symbol << std::endl;
                 destroy_rule_id_list(n->ruleIDList);
                 delete n;
             }
@@ -533,17 +526,14 @@ hash_tbl_destroy()
 void
 symbol_tbl_node_dump(SymbolTblNode* n)
 {
-    yyprintf("%s [type=%s,vanish=%s,seq=%d,val=%d",
-             n->symbol,
-             get_symbol_type(n),
-             n->vanishable ? "T" : "F",
-             n->seq,
-             n->value);
+    *fp_v << *n->symbol << " [type=" << get_symbol_type(n)
+          << ",vanish=" << (n->vanishable ? "T" : "F") << ",seq=" << n->seq
+          << ",val=" << n->value;
     if (n->type == symbol_type::TERMINAL && n->TP != nullptr) {
-        yyprintf(
-          ",prec=%d,assoc=%s", n->TP->precedence, get_assoc_name(n->TP->assoc));
+        *fp_v << ",prec=" << n->TP->precedence
+              << ",assoc=" << get_assoc_name(n->TP->assoc);
     }
-    yyprintf("]");
+    *fp_v << "]";
 }
 
 void
@@ -552,33 +542,30 @@ hash_tbl_dump()
     int count = 0, list_count = 0;
     SymbolTblNode* n = nullptr;
 
-    yyprintf("\n\n--Hash table--\n");
+    *fp_v << std::endl << "\n--Hash table--" << std::endl;
     for (int i = 0; i < HT_SIZE; i++) {
         if (HashTbl[i].count > 0) {
             list_count++;
-            yyprintf("HashTbl[%d] (count=%d): ", i, HashTbl[i].count);
+            *fp_v << "HashTbl[" << i << "] (count=" << HashTbl[i].count
+                  << "): ";
             for (n = HashTbl[i].next; n->next != nullptr; n = n->next) {
                 symbol_tbl_node_dump(n);
-                yyprintf(", ");
+                *fp_v << ", ";
                 count++;
             }
             symbol_tbl_node_dump(n);
-            yyprintf("\n");
+            *fp_v << std::endl;
             count++;
         }
     }
-    yyprintf("--hash table size: %d--\n", HT_SIZE);
-    yyprintf("--symbol count: %d, load factor lamda (%d/%d) = %.3f--\n",
-             count,
-             count,
-             HT_SIZE,
-             ((double)count) / HT_SIZE);
-    yyprintf("--list count: %d. Hash Table cell usage (%d/%d) = %.3f--\n",
-             list_count,
-             list_count,
-             HT_SIZE,
-             ((double)list_count) / HT_SIZE);
-    yyprintf("--symbols per list: %.3f--\n", ((double)count) / list_count);
-
+    *fp_v << "--hash table size: " << HT_SIZE << "--" << std::endl;
+    *fp_v << "--symbol count: " << count << ", load factor lamda (" << count
+          << '/' << HT_SIZE << ") = " << std::setprecision(3)
+          << ((double)count) / HT_SIZE << "--" << std::endl;
+    *fp_v << "--list count: " << list_count << ". Hash Table cell usage ("
+          << list_count << '/' << HT_SIZE << ") = " << std::setprecision(3)
+          << ((double)list_count) / HT_SIZE << "--" << std::endl;
+    *fp_v << "--symbols per list: " << std::setprecision(3)
+          << ((double)count) / list_count << "--" << std::endl;
     // hash_tbl_destroy();
 }

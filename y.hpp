@@ -56,25 +56,7 @@ constexpr size_t LINE_INIT_SIZE = 128;
 constexpr bool ADD_GOAL_RULE = true;
 
 /* store output of y.output. */
-extern FILE* fp_v;
-
-template<typename... T>
-inline auto
-yyprintf(const char* s, T... t) -> void
-{
-    if (fp_v != nullptr) {
-        fprintf(fp_v, s, t...);
-    }
-}
-
-template<>
-inline auto
-yyprintf(const char* s) -> void
-{
-    if (fp_v != nullptr) {
-        fprintf(fp_v, "%s", s);
-    }
-}
+extern std::unique_ptr<std::ofstream> fp_v;
 
 template<typename T>
 constexpr auto
@@ -189,7 +171,7 @@ struct TerminalProperty
 /* contains a symbol. */
 struct SymbolTableNode
 {
-    char* symbol;
+    std::shared_ptr<std::string> symbol;
     int value; /* symbol value, for parsing table col header. */
     symbol_type type;
     bool vanishable;
@@ -794,9 +776,9 @@ generate_compiler(const std::string& infile);
 extern void
 hash_tbl_init();
 extern auto
-hash_tbl_insert(const char* symbol) -> SymbolTblNode*;
+hash_tbl_insert(const std::string& symbol) -> SymbolTblNode*;
 extern auto
-hash_tbl_find(const char* symbol) -> SymbolTblNode*;
+hash_tbl_find(const std::string& symbol) -> SymbolTblNode*;
 extern void
 hash_tbl_dump();
 extern void

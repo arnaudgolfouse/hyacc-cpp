@@ -31,6 +31,7 @@
 #include "mrt.hpp"
 #include "y.hpp"
 #include <cstddef>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -98,10 +99,10 @@ write_leaf_index_for_parent()
 {
     for (int i = 0; i < all_parents->size(); i++) {
         if (i > 0)
-            yyprintf(", ");
-        yyprintf("%d", leaf_index_for_parent[i]);
+            *fp_v << ", ";
+        *fp_v << leaf_index_for_parent[i];
     }
-    yyprintf("\n");
+    *fp_v << std::endl;
 }
 
 /*
@@ -216,22 +217,22 @@ write_branch(SymbolList branch)
     SymbolNode* a = nullptr;
     for (a = branch; a != nullptr; a = a->next) {
         if (a != branch)
-            yyprintf(", ");
-        yyprintf("%s", a->snode->symbol);
+            *fp_v << ", ";
+        *fp_v << a->snode->symbol;
     }
     if (a != branch)
-        yyprintf(", ");
+        *fp_v << ", ";
 }
 
 void
 MRTreeNode::write_leaf_branch(SymbolList branch, SymbolNode* branch_tail)
 {
-    yyprintf("%s", this->symbol->snode->symbol);
+    *fp_v << this->symbol->snode->symbol;
     if (this->parent.empty()) {
-        yyprintf("\n");
+        *fp_v << std::endl;
         return;
     }
-    yyprintf(", ");
+    *fp_v << ", ";
 
     if (branch->next == nullptr) {
         branch_tail->next = branch->next =
@@ -254,7 +255,9 @@ write_mr_forest(const MRLeaves& mr_leaves)
     SymbolList branch = SymbolNode::create(hash_tbl_find(""));
     SymbolNode* branch_tail = SymbolNode::create(hash_tbl_find(""));
 
-    yyprintf("\n==writeMRForest (mr_leaves_count: %d)==\n", mr_leaves.size());
+    *fp_v << std::endl
+          << "==writeMRForest (mr_leaves_co" << std::endl
+          << "t: " << mr_leaves.size() << ")==" << std::endl;
     for (const auto& mr_leave : mr_leaves) {
         mr_leave->write_leaf_branch(branch, branch_tail);
     }
@@ -408,12 +411,17 @@ get_all_mr_parents(const MRLeaves& mr_leaves)
 void
 write_all_mr_parents(const MRLeaves& mr_leaves)
 {
-    yyprintf("\n==all MR Parents (inside '()' is a corresponding leaf):\n");
+    *fp_v << std::endl
+          << "==all MR Par" << std::endl
+          << "ts (" << std::endl
+          << "side '()' is a corresp" << std::endl
+          << "d" << std::endl
+          << "g leaf):\n";
     for (int i = 0; i < all_parents->size(); i++) {
-        yyprintf("%s (=>%s)\n",
-                 (*all_parents)[i]->snode->symbol,
-                 mr_leaves[leaf_index_for_parent[i]]->symbol->snode->symbol);
+        *fp_v << (*all_parents)[i]->snode->symbol << " (=>"
+              << mr_leaves[leaf_index_for_parent[i]]->symbol->snode->symbol
+              << ")" << std::endl;
     }
-    yyprintf("\n");
+    *fp_v << std::endl;
     // writeLeafIndexForParent();
 }

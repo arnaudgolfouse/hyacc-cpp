@@ -265,7 +265,7 @@ output_terminal(SymbolNode* tokens_tail,
             break;
 
         default:
-            throw std::runtime_error(std::string("error ") + n->symbol +
+            throw std::runtime_error(std::string("error ") + *n->symbol +
                                      " used a terminal");
     }
 
@@ -758,7 +758,7 @@ static auto
 is_in_vanish_symbol_list(const SymbolTblNode* n) -> bool
 {
     // std::cout << "isInVanishSymbolList input: " <<  symbol << std::endl;
-    if (strlen(n->symbol) == 0) {
+    if (n->symbol->empty()) {
         return true;
     }
 
@@ -882,7 +882,7 @@ get_non_terminals(Grammar* g)
             tail = tail->next;
         }
 
-        if (strcmp(tail->snode->symbol, STR_ACCEPT) != 0)
+        if (*tail->snode->symbol != STR_ACCEPT)
             tail->snode->value = (-1) * (++index);
 
         g->non_terminal_count++;
@@ -926,13 +926,12 @@ get_terminals(Grammar* g)
         for (int j = 0; j < rule->RHS_count; j++) {
             if (j > 0)
                 s = s->next; // s: g->rules[i]->RHS[j].
-            char* symbol = s->snode->symbol;
 
             if (s->snode->type != symbol_type::TERMINAL)
                 continue;
 
             // is an empty string.
-            if (strlen(s->snode->symbol) == 0)
+            if (s->snode->symbol->empty())
                 continue;
 
             if (find_in_symbol_list(g->terminal_list, s->snode) != nullptr)
@@ -999,23 +998,23 @@ get_escape_char(char c) -> char
 /*
  * Used by getTokensValue() only.
  */
-auto
-get_token_value(const char* s, int* index) -> int
+static auto
+get_token_value(const std::string& s, int* index) -> int
 {
 
-    if (strlen(s) == 1)
+    if (s.size() == 1)
         return s[0]; // single letter.
 
     int val = 0;
-    if (strlen(s) == 2 && s[0] == '\\') { // escaped sequence.
+    if (s.size() == 2 && s[0] == '\\') { // escaped sequence.
         val = static_cast<unsigned char>(get_escape_char(s[1]));
         if (val != 0)
             return val;
     }
 
-    if (strcmp(s, STR_ERROR) == 0)
+    if (s == STR_ERROR)
         return 256;
-    if (strcmp(s, STR_END) == 0)
+    if (s == STR_END)
         return 0;
 
     val = 257 + (*index);
@@ -1054,7 +1053,7 @@ get_tokens_value(Grammar* g)
 {
     int index = 0;
     for (SymbolNode* a = tokens; a != nullptr; a = a->next) {
-        a->snode->value = get_token_value(a->snode->symbol, &index);
+        a->snode->value = get_token_value(*a->snode->symbol, &index);
     }
 }
 
@@ -1084,12 +1083,12 @@ get_symbol_parsing_tbl_col(Grammar* g)
     n->seq = 0;
 
     for (int i = 1; a != nullptr; a = a->next, i++) {
-        n = hash_tbl_find(a->snode->symbol);
+        n = hash_tbl_find(*a->snode->symbol);
         n->seq = i;
     }
 
     for (int i = 1; a != nullptr; a = a->next, i++) {
-        n = hash_tbl_find(a->snode->symbol);
+        n = hash_tbl_find(*a->snode->symbol);
         n->seq = g->terminal_count + i;
     }
 }
@@ -1150,7 +1149,7 @@ get_grammar_unit_productions(Grammar* g)
 {
     for (int i = 0; i < g->rules.size(); i++) {
         if (grammar.rules[i]->RHS_count == 1 &&
-            strlen(grammar.rules[i]->nRHS_head->snode->symbol) > 0) {
+            grammar.rules[i]->nRHS_head->snode->symbol->size() > 0) {
             g->rules[i]->isUnitProduction = true;
         }
     }

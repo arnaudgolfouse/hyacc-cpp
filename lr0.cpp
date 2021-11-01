@@ -29,6 +29,7 @@
 #include "y.hpp"
 #include <cstddef>
 #include <cstring>
+#include <fstream>
 
 static void
 propagate_originator_change(State* s);
@@ -194,7 +195,7 @@ transition_lr0(State* s)
             // do nothing.
         } else { // do transit operation.
             SymbolTblNode* scanned_symbol = get_scanned_symbol(c);
-            if (strlen(scanned_symbol->symbol) == 0) { // empty reduction.
+            if (scanned_symbol->symbol->empty()) { // empty reduction.
                 continue;
             }
             State* new_state =
@@ -337,14 +338,15 @@ generate_lr0_parsing_machine()
     State* new_state = states_new->states_head;
 
     if (debug_gen_parsing_machine) {
-        yyprintf("\n\n--generate parsing machine--\n");
+        *fp_v << std::endl
+              << std::endl
+              << "--generate parsing machine--" << std::endl;
     }
 
     while (new_state != nullptr) {
         if (debug_gen_parsing_machine) {
-            yyprintf("%d states, current state is %d\n",
-                     states_new->state_count,
-                     new_state->state_no);
+            *fp_v << states_new->state_count << " states, current state is "
+                  << new_state->state_no << std::endl;
         }
 
         get_closure_lr0(new_state); // get closure of this state.

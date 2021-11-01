@@ -116,7 +116,7 @@ write_tokens_to_compiler_file(std::ofstream& fp, std::ofstream& fp_h)
     int index = 0;
     int i = 0;
     for (SymbolNode* a = tokens; a != nullptr; a = a->next, i++) {
-        if (a->snode->TP->is_quoted || strcmp(a->snode->symbol, STR_ERROR) == 0)
+        if (a->snode->TP->is_quoted || *a->snode->symbol == STR_ERROR)
             continue;
 
         fp << "#define " << a->snode->symbol << index + 257 << std::endl;
@@ -238,10 +238,8 @@ find_full_rule(int rule_count) -> Production*
 
         if ((rule = grammar.rules[full_rule]) && (node = rule->nLHS) &&
             (sym = node->snode)) {
-            // TODO : is this really `!= 0` ?
-            // was simply `strncmp(...)` before.
-            if (strncmp("$$", sym->symbol, 2) !=
-                0) /* node symbol starting with $$ we continue */
+            if (sym->symbol->starts_with(
+                  "$$")) /* node symbol starting with $$ we continue */
                 break;
         } else {
             throw std::runtime_error(
@@ -259,17 +257,19 @@ find_mid_prod_index(const Production* rule, const Production* mid_prod_rule)
 {
     const SymbolNode* lnode = mid_prod_rule->nLHS;
     const SymbolTblNode* lsym = lnode->snode;
-    char* l = lsym->symbol;
+    const std::string& l = *lsym->symbol;
     const SymbolNode* rnode = rule->nRHS_head;
     const SymbolTblNode* rsym = nullptr;
-    char* r = nullptr;
 
-    for (int i = 0; rnode; ++i, rnode = rnode->next)
-        if (!((rsym = rnode->snode) && (r = rsym->symbol))) {
+    for (int i = 0; rnode; ++i, rnode = rnode->next) {
+        const std::string& r = *rsym->symbol;
+        if (!(rsym = rnode->snode)) {
             throw std::runtime_error(
               std::string("Did not find mid production rule of ") + l);
-        } else if (strcmp(l, r) == 0)
+        }
+        if (l == r)
             return i;
+    }
     return -1;
 }
 
@@ -774,11 +774,11 @@ print_yytoks(std::ofstream& fp)
 {
     fp << "yytoktype yytoks[] = {" << std::endl;
     for (SymbolNode* a = tokens; a != nullptr; a = a->next) {
-        if (strcmp(a->snode->symbol, STR_ERROR) == 0)
+        if (*a->snode->symbol == STR_ERROR)
             continue;
 
-        if (strlen(a->snode->symbol) == 2 &&
-            a->snode->symbol[0] == '\\') { // escape sequence
+        if (a->snode->symbol->size() == 2 &&
+            (*a->snode->symbol)[0] == '\\') { // escape sequence
             fp << R"(	"\\)" << a->snode->symbol << R"(",	)"
                << a->snode->value << ',' << std::endl;
         } else {
@@ -809,10 +809,10 @@ print_yyreds(std::ofstream& fp)
 
             if (j > 0)
                 a = a->next;
-            const char* symbol = a->snode->symbol;
+            const std::string& symbol = *a->snode->symbol;
 
-            if (strlen(symbol) == 1 ||
-                (strlen(symbol) == 2 && symbol[0] == '\\')) {
+            if (symbol.size() == 1 ||
+                (symbol.size() == 2 && symbol[0] == '\\')) {
                 fp << '\'' << symbol << '\'';
             } else {
                 fp << symbol;
@@ -1136,9 +1136,9 @@ write_lrk_table_arrays(std::ofstream& fp)
                 fp << std::endl;
             fp << "  ";
         }
-        if (strcmp("$accept", ParsingTblColHdr[i]->symbol) == 0) {
+        if (*ParsingTblColHdr[i]->symbol == "$accept") {
             fp << "CONST_ACC";
-        } else if (strcmp("$end", ParsingTblColHdr[i]->symbol) == 0) {
+        } else if (*ParsingTblColHdr[i]->symbol == "$end") {
             fp << 0;
         } else {
             fp << ParsingTblColHdr[i]->value;
