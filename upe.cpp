@@ -33,6 +33,7 @@
 #include "y.hpp"
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <stdexcept>

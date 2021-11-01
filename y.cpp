@@ -30,6 +30,7 @@
 #include "y.hpp"
 #include "lane_tracing.hpp"
 #include <cstddef>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -40,8 +41,6 @@ FILE* fp_v;
 
 Options Options::
   inner{}; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-std::mutex Options::
-  inner_lock{}; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 std::string y_tab_c;
 std::string y_tab_h;
@@ -358,7 +357,7 @@ free_vars()
     hash_tbl_destroy();
 
     if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
-        queue_destroy(config_queue);
+        Queue::destroy(config_queue);
     }
 }
 
@@ -488,7 +487,7 @@ init()
     }
 
     if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
-        config_queue = queue_create(); // for getClosure().
+        config_queue = Queue::create(); // for getClosure().
     }
 
     // for finding same/compatible states fast.
@@ -1363,8 +1362,8 @@ get_config_successors(State* s)
     static Context tmp_context;
     tmp_context.nContext = nullptr;
 
-    while (queue_count(config_queue) > 0) {
-        Configuration* config = s->config[queue_pop(config_queue)];
+    while (config_queue->count() > 0) {
+        Configuration* config = s->config[config_queue->pop()];
 
         if (config->marker >= 0 &&
             config->marker < grammar.rules[config->ruleID]->RHS_count) {
@@ -1388,7 +1387,7 @@ get_config_successors(State* s)
                     if (index == -1) { // new config.
                         add_successor_config_to_state(
                           s, r->ruleID, &tmp_context);
-                        queue_push(config_queue, s->config.size() - 1);
+                        config_queue->push(s->config.size() - 1);
 
                     } else if (combine_context(
                                  s->config[index]->context,
@@ -1400,11 +1399,11 @@ get_config_successors(State* s)
                             continue;
                         if (get_scanned_symbol(s->config[index])->is_terminal())
                             continue;
-                        if (queue_exist(config_queue, index) == 1)
+                        if (config_queue->exist(index) == 1)
                             continue;
 
                         // else, insert to config_queue.
-                        queue_push(config_queue, index);
+                        config_queue->push(index);
                     }
                     // else { // same config, do nothing. }
 
@@ -1548,9 +1547,9 @@ void
 get_closure(State* s)
 {
     if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
-        // queue_clear(config_queue);
+        // config_queue->clear();
         for (int i = 0; i < s->config.size(); i++) {
-            queue_push(config_queue, i);
+            config_queue->push(i);
         }
         get_config_successors(s);
     } else {
@@ -1977,8 +1976,8 @@ propagate_context_change(const State* s)
                 is_changed = true;
 
                 if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
-                    // queue_clear(config_queue);
-                    queue_push(config_queue, config_index);
+                    // config_queue->clear();
+                    config_queue->push(config_index);
                     get_config_successors(t);
                 } else {
                     get_successor_for_config(t, d);
@@ -2012,8 +2011,8 @@ combine_compatible_states(State* s_dest, const State* s_src) -> bool
             is_changed = true;
 
             if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
-                // queue_clear(config_queue);
-                queue_push(config_queue, i);
+                // config_queue->clear();
+                config_queue->push(i);
                 get_config_successors(s_dest);
             } else {
 
@@ -2809,7 +2808,7 @@ show_state_config_info()
 {
 
     if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
-        queue_info(config_queue);
+        config_queue->info();
     } else {
         yyprintf("%d states in total.\n", xx);
         yyprintf("before combine: total cfg: %d, max cfg: %d, "

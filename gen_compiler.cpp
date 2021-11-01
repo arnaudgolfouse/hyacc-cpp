@@ -30,6 +30,8 @@
 #include "lane_tracing.hpp"
 #include "y.hpp"
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -1056,7 +1058,7 @@ auto
 use_lrk() -> bool
 {
     return Options::get().use_lr_k &&
-           (lrk_pt_array != nullptr && lrk_pt_array->max_k >= 2);
+           (lrk_pt_array != nullptr && lrk_pt_array->max_k() >= 2);
 }
 
 void
@@ -1068,14 +1070,14 @@ write_lrk_table_arrays(std::ofstream& fp)
 
     // yy_lrk_k.
     fp << std::endl << "/* Max K in LR(k). */" << std::endl;
-    fp << "static YYCONST yytabelem yy_lrk_k = " << lrk_pt_array->max_k << ";"
+    fp << "static YYCONST yytabelem yy_lrk_k = " << lrk_pt_array->max_k() << ";"
        << std::endl;
 
     // yy_lrk_rows[].
     fp << std::endl
        << "/* Number of rows in each LR(k) parsing table. */" << std::endl;
     fp << "static YYCONST yytabelem yy_lrk_rows[] = {";
-    for (int i = 2; i <= lrk_pt_array->max_k; i++) {
+    for (size_t i = 2; i <= lrk_pt_array->max_k(); i++) {
         // std::cout << "write LRK table arrays: i = " <<  i << std::endl;
         if (i > 2)
             fp << ", ";
@@ -1091,29 +1093,30 @@ write_lrk_table_arrays(std::ofstream& fp)
     // yy_lrk_r[].
     fp << std::endl << "/* Values in each LR(k) parsing table. */" << std::endl;
     fp << "static YYCONST yytabelem yy_lrk_r[] = {" << std::endl;
-    for (int i = 2; i <= lrk_pt_array->max_k; i++) {
-        const LRkPT* t = lrk_pt_array->array[i - 2];
+    size_t k = 2;
+    for (const LRkPT* t : lrk_pt_array->array) {
         for (const LRkPTRow* r = t->rows; r != nullptr; r = r->next) {
             fp << "  " << r->state << ", " << r->token->snode->value << ", ";
-            for (int j = 0; j < ParsingTblCols; j++) {
+            for (size_t j = 0; j < ParsingTblCols; j++) {
                 if (r->row[j] != nullptr) {
-                    if (r->row[j]->end ==
-                        (Configuration*)CONST_CONFLICT_SYMBOL) {
+                    if (reinterpret_cast<uintptr_t>(r->row[j]->end) ==
+                        CONST_CONFLICT_SYMBOL) {
                         fp << j << ", " << -2 << ", ";
                     } else {
                         fp << j << ", " << r->row[j]->end->ruleID << ", ";
                     }
                 }
             }
-            if (i == lrk_pt_array->max_k && r->next == nullptr) {
+            if (k == lrk_pt_array->max_k() && r->next == nullptr) {
                 fp << "-1";
             } else {
                 fp << "-1, ";
             }
             fp << std::endl;
         }
-        if (i < lrk_pt_array->max_k)
+        if (k < lrk_pt_array->max_k())
             fp << std::endl;
+        k++;
     }
     fp << "};" << std::endl;
 

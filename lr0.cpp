@@ -28,6 +28,7 @@
 
 #include "y.hpp"
 #include <cstddef>
+#include <cstring>
 
 static void
 propagate_originator_change(State* s);
@@ -48,8 +49,8 @@ add_successor_config_to_state_lr0(State* s, int rule_id)
 void
 get_config_successors_lr0(State* s)
 {
-    while (queue_count(config_queue) > 0) {
-        Configuration* config = s->config[queue_pop(config_queue)];
+    while (config_queue->count() > 0) {
+        Configuration* config = s->config[config_queue->pop()];
 
         if (config->marker >= 0 &&
             config->marker < grammar.rules[config->ruleID]->RHS_count) {
@@ -66,8 +67,8 @@ get_config_successors_lr0(State* s)
 
                     if (index == -1) { // new config.
                         add_successor_config_to_state_lr0(s, r->ruleID);
-                        queue_push(config_queue,
-                                   static_cast<int>(s->config.size()) - 1);
+                        config_queue->push(static_cast<int>(s->config.size()) -
+                                           1);
                         index = static_cast<int>(s->config.size()) - 1;
                     } // else is an existing old config, do nothing.
 
@@ -80,9 +81,9 @@ get_config_successors_lr0(State* s)
 void
 get_closure_lr0(State* s)
 {
-    // queue_clear(config_queue);
+    // config_queue->clear();
     for (int i = 0; i < s->config.size(); i++) {
-        queue_push(config_queue, i);
+        config_queue->push(i);
     }
     get_config_successors_lr0(s);
 }

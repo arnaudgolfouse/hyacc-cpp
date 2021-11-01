@@ -29,6 +29,7 @@
 
 #include "y.hpp"
 #include <array>
+#include <cstring>
 #include <fstream>
 #include <ios>
 #include <iostream>

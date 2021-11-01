@@ -30,6 +30,7 @@
  */
 
 #include "y.hpp"
+#include <cstring>
 #include <iostream>
 
 constexpr bool DEBUG_HASHTBL = false;
@@ -225,7 +226,7 @@ find_in_inc_symbol_list(SymbolList a, SymbolTblNode* s) -> SymbolNode*
  * @Return: the result list.
  */
 auto
-insert_inc_symbol_list(SymbolList a,  SymbolTblNode* n) -> SymbolNode*
+insert_inc_symbol_list(SymbolList a, SymbolTblNode* n) -> SymbolNode*
 {
     SymbolNode *b = nullptr, *b_prev = nullptr;
     if (nullptr == n)

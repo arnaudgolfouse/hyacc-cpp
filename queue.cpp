@@ -37,194 +37,145 @@ constexpr size_t QUEUE_INIT_SIZE = 256; // hidden from outside
 constexpr bool DEBUG_QUEUE = false;
 
 auto
-queue_create() -> Queue*
+Queue::create() -> Queue*
 {
     Queue* q = new Queue;
     if (q == nullptr) {
         throw std::runtime_error("out of memory");
     }
-
-    q->size = QUEUE_INIT_SIZE;
-    q->array = new int[q->size];
-    if (q->array == nullptr) {
-        throw std::runtime_error("out of memory");
-    }
-
-    q->head = 0;
-    q->tail = 0;
-    q->count = 0;
-
+    q->capacity = QUEUE_INIT_SIZE;
+    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
+    q->array = new int[q->capacity];
+    q->size = q->start = 0;
     q->max_count = q->sum_count = q->call_count = 0;
-
     return q;
 }
 
 void
-queue_destroy(Queue* q)
+Queue::expand()
 {
+    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
+    auto* new_array = new int[this->capacity * 2];
+    size_t this_i = this->start;
+    for (size_t i = 0; i < this->size; i++, this_i++) {
+        if (this_i == this->capacity) {
+            this_i = 0;
+        }
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        new_array[i] = this->array[this_i];
+    }
+    delete[] this->array;
+    this->array = new_array;
+    this->start = 0;
+    this->capacity *= 2;
+}
+
+void
+Queue::destroy(Queue* q) noexcept
+{
+    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
     delete[] q->array;
     delete q;
 }
 
 void
-queue_clear(Queue* q)
+Queue::clear() noexcept
 {
-    q->head = 0;
-    q->tail = 0;
-    q->count = 0;
+    this->size = 0;
+    this->start = 0;
 }
 
 void
-queue_clear_all(Queue* q)
+Queue::clear_all() noexcept
 {
-    q->head = 0;
-    q->tail = 0;
-    q->count = 0;
-    q->max_count = q->sum_count = q->call_count = 0;
+    this->clear();
+    this->max_count = 0;
+    this->sum_count = 0;
+    this->call_count = 0;
 }
 
 void
-queue_expand(Queue* q)
+Queue::push(int n)
 {
-    if (q->count < q->size)
-        return;
-    int* new_array = new int[2 * q->size];
-    if (new_array == nullptr) {
-        throw std::runtime_error("out of memory");
-    }
-
-    int* old_array = q->array;
-
-    // copy
-    int pt = q->head;
-    int i = 0;
-    for (; i < q->count; i++) {
-        new_array[i] = q->array[pt];
-        pt++;
-        if (pt == q->size)
-            pt = 0;
-    }
-
-    q->array = new_array;
-    q->size *= 2;
-    q->head = 0;
-    q->tail = i;
-
-    delete[] old_array;
-
-    // std::cout << "expand queue size to " <<  q->size<< ": ";
-    //  queue_dump(q);std::cout  << std::endl;
-}
-
-/*
- * push at tail.
- */
-void
-queue_push(Queue* q, int n)
-{
-    if (q->count >= q->size)
-        queue_expand(q);
-
     if (n == QUEUE_ERR_CODE) {
         throw std::runtime_error(
           "Queue error: push a number that equals QUEUE_ERR_CODE");
     }
+    if (this->size == this->capacity) {
+        this->expand();
+    }
+    this->get_no_check(this->size) = n;
+    this->size += 1;
 
-    q->array[q->tail] = n;
-    q->tail++;
-    q->count++;
-
-    // wrap around.
-    if (q->tail == q->size)
-        q->tail = 0;
-
-    // std::cout << "push " <<  n<< " (size=" <<  q->count<< "): ";
-    //  queue_dump(q);std::cout  << std::endl;
+    // std::cout << "push " << n << " (size=" << this->size << "): ";
+    // this->dump();
+    // std::cout << std::endl;
 
     if constexpr (DEBUG_QUEUE) {
-        if (q->max_count < q->count)
-            q->max_count = q->count;
-        q->call_count++;
-        q->sum_count += q->count;
+        if (this->max_count < this->size)
+            this->max_count = this->size;
+        this->call_count++;
+        this->sum_count += this->size;
     }
 }
 
-/*
- * pop at front
- */
 auto
-queue_pop(Queue* q) -> int
+Queue::pop() noexcept -> int
 {
-    if (q->count == 0)
+    if (this->size == 0)
         return QUEUE_ERR_CODE;
 
-    int item = q->array[q->head];
-    q->head++;
-    if (q->head == q->size)
-        q->head = 0;
-
-    q->count--;
-
-    // std::cout << "pop " <<  item<< " (size=" <<  q->count<< "): ";
-    //  queue_dump(q);std::cout  << std::endl;
-
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    int item = this->array[this->start];
+    this->start += 1;
+    if (this->start == this->capacity) {
+        this->start = 0;
+    }
+    this->size -= 1;
+    // std::cout << "pop " << item << " (size=" << this->size << "): ";
+    // this->dump();
+    // std::cout << std::endl;
     return item;
 }
 
 auto
-queue_peek(Queue* q) -> int
+Queue::peek() const noexcept -> int
 {
-    if (q->count == 0)
+    if (this->size == 0)
         return QUEUE_ERR_CODE;
-    return q->array[q->head];
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    return this->array[this->start];
 }
 
 auto
-queue_count(Queue* q) -> int
+Queue::exist(const int n) const noexcept -> bool
 {
-    return q->count;
-}
-
-/*
- * Check if number n exists in the q.
- */
-auto
-queue_exist(Queue* q, int n) -> int
-{
-    int pt = q->head;
-    for (int i = 0; i < q->count; i++) {
-        if (q->array[pt] == n)
-            return 1;
-        pt++;
-        if (pt == q->size)
-            pt = 0;
+    for (size_t i = 0; i < this->size; i++) {
+        const int item = this->get_no_check(i);
+        if (item == n)
+            return true;
     }
-    return 0;
+    return false;
 }
 
 void
-queue_dump(Queue* q)
+Queue::dump() const noexcept
 {
-    int pt = q->head;
-    for (int i = 0; i < q->count; i++) {
-        std::cout << "[" << pt << "] " << q->array[pt] << " ";
-        pt++;
-        if (pt == q->size)
-            pt = 0;
+    for (size_t i = 0; i < this->size; i++) {
+        std::cout << "[" << i << "] " << this->get_no_check(i) << " ";
     }
     std::cout << std::endl;
 }
 
-/*
- * Print the usage information of the queue.
- */
 void
-queue_info(Queue* q)
+Queue::info() const noexcept
 {
     if constexpr (DEBUG_QUEUE) {
-        std::cout << "queue_push is called " << q->call_count << " times, ";
-        std::cout << "max count: " << q->max_count
+        std::cout << "queue_push is called " << this->call_count << " times, ";
+        std::cout << "max count: " << this->max_count
                   << ", average count: " << std::setprecision(2)
-                  << ((double)q->sum_count) / q->call_count << std::endl;
+                  << (static_cast<double>(this->sum_count)) /
+                       static_cast<double>(this->call_count)
+                  << std::endl;
     }
 }

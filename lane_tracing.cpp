@@ -29,6 +29,7 @@
 #include "stack_config.hpp"
 #include "y.hpp"
 #include <cstddef>
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
 #include <string>

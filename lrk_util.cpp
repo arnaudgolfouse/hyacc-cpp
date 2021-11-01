@@ -30,11 +30,13 @@
 
 #include "lane_tracing.hpp"
 #include "y.hpp"
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <ostream>
 #include <stdexcept>
+#include <vector>
 
 //////////////////////////////////////////////////////////////////
 // Functions for ConfigPairNode. START.
@@ -605,12 +607,7 @@ LRkPTArray::create() noexcept -> LRkPTArray*
 {
 
     auto* a = new LRkPTArray;
-    a->size = 10; // initial max number of entries: 10.
-    a->array = new LRkPT*[a->size];
-    for (size_t i = 0; i < a->size; i++) { // initialize to nullptr.
-        a->array[i] = nullptr;
-    }
-    a->max_k = 1;
+    a->array = std::vector<LRkPT*>(10, nullptr);
     return a;
 }
 
@@ -623,19 +620,14 @@ LRkPTArray::add(LRkPT* t) noexcept
     if (nullptr == t)
         return;
 
-    if (this->max_k >= this->size + 1) { // expand this->array.
-        HYY_EXPAND(&this->array, this->size * 2);
-        this->size = this->size * 2;
+    while (t->k - 2 >= this->array.size()) {
+        this->array.push_back(nullptr);
     }
-    if (this->array[t->k - 2] == nullptr) {
+    if (this->array[t->k - 2] == nullptr)
         this->array[t->k - 2] = t;
-        if (this->max_k < t->k) {
-            this->max_k = t->k;
-        }
-    } else {
+    else
         std::cerr << "Error: LR(" << t->k << ") table already exists"
                   << std::endl;
-    }
 }
 
 /*
@@ -644,7 +636,7 @@ LRkPTArray::add(LRkPT* t) noexcept
 auto
 LRkPTArray::get(int k) const noexcept -> LRkPT*
 {
-    if (k < 2 || k > this->max_k)
+    if (k < 2 || k > this->max_k())
         return nullptr;
     if (this->array[k - 2] == nullptr) {
         std::cerr << "Warning: LR(" << k << ") table is empty" << std::endl;
@@ -679,12 +671,15 @@ void
 LRkPTArray::dump() const noexcept
 {
     write_parsing_tbl_col_hdr();
-    std::cout << "===LRkPTArray_dump [max_k = " << this->max_k
+    std::cout << "===LRkPTArray_dump [max_k = " << this->max_k()
               << "]===" << std::endl;
 
-    for (int i = 2; i <= this->max_k; i++) {
+    size_t i = 2;
+    for (const LRkPT* elem : this->array) {
         std::cout << "LR(" << i << ") p.t." << std::endl;
-        this->array[i - 2]->dump();
+        // TODO: check for nullptr ???
+        elem->dump();
+        i++;
     }
 
     std::cout << "====================================" << std::endl;
@@ -704,11 +699,14 @@ LRkPTArray::dump_file() const noexcept
     }
 
     write_parsing_tbl_col_hdr_file(fp2);
-    fp2 << "===LRkPTArray_dump [max_k = " << this->max_k << "]===" << std::endl;
+    fp2 << "===LRkPTArray_dump [max_k = " << this->max_k()
+        << "]===" << std::endl;
 
-    for (int i = 2; i <= this->max_k; i++) {
+    size_t i = 2;
+    for (const LRkPT* elem : this->array) {
         fp2 << "=LR(" << i << ") p.t." << std::endl;
-        lrk_pt_dump_file(this->array[i - 2], fp2);
+        lrk_pt_dump_file(elem, fp2);
+        i++;
     }
 
     fp2.close();

@@ -20,7 +20,9 @@
 #pragma once
 
 #include "y.hpp"
+#include <cstddef>
 #include <cstdint>
+#include <vector>
 
 /*
  * lane_tracing.h
@@ -297,10 +299,13 @@ struct LRkPT
 //
 struct LRkPTArray
 {
-    LRkPT** array;
-    int max_k; // number of entries in array is max_k - 1.
-    int size;  // 0 <= max_k - 2 <= size - 1
+    std::vector<LRkPT*> array;
 
+    /// `max_k` is `array.size() + 1`
+    [[nodiscard]] constexpr inline auto max_k() const noexcept -> size_t
+    {
+        return this->array.size() + 1;
+    }
     static auto create() noexcept -> LRkPTArray*;
     void add(LRkPT* t) noexcept;
     [[nodiscard]] auto get(int k) const noexcept -> LRkPT*;

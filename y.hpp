@@ -29,15 +29,10 @@
  * @last modified: 3/24/2009
  ****************************************************************/
 
-#include <array>
 #include <atomic>
-#include <cctype>  /* isspace, isdigit. */
-#include <cstdlib> /* exit, malloc, realloc, free, system. */
-#include <cstring> /* strtok, strcpy, strcmp. */
+#include <cstddef>
 #include <memory>
-#include <mutex>
-#include <ostream>
-#include <stdexcept>
+#include <queue>
 #include <string>
 #include <vector>
 
@@ -107,8 +102,6 @@ class Options
   private:
     static Options
       inner; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-    static std::mutex
-      inner_lock; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
   public:
     static auto get() -> Options& { return Options::inner; }
@@ -265,38 +258,48 @@ constexpr int QUEUE_ERR_CODE = -10000000;
 
 struct Queue
 {
+    static auto create() -> Queue*;
+    static void destroy(Queue* q) noexcept;
+    void clear() noexcept;
+    void clear_all() noexcept;
+    /// Push at tail.
+    void push(int n);
+    /// Pop at front
+    auto pop() noexcept -> int;
+    [[nodiscard]] auto peek() const noexcept -> int;
+    /// Check if number n exists in the queue.
+    [[nodiscard]] auto exist(int n) const noexcept -> bool;
+    [[nodiscard]] constexpr inline auto count() const noexcept -> size_t
+    {
+        return this->size;
+    }
+    void dump() const noexcept;
+    /// Print the usage information of the queue.
+    void info() const noexcept;
+
+  private:
     int* array;
-    int head;
-    int tail;
-    int count;
-    int size;
+    size_t capacity;
+    size_t size;
+    size_t start;
 
     /* These three are for collecting information purpose. */
-    long max_count;
-    long sum_count;
-    long call_count;
-};
+    size_t max_count;
+    size_t sum_count;
+    size_t call_count;
 
-auto
-queue_create() -> Queue*;
-void
-queue_destroy(Queue* q);
-void
-queue_expand(Queue* q);
-void
-queue_push(Queue* q, int n);
-auto
-queue_pop(Queue* q) -> int;
-auto
-queue_peek(Queue* q) -> int;
-auto
-queue_exist(Queue* q, int n) -> int;
-void
-queue_dump(Queue* q);
-auto
-queue_count(Queue* q) -> int;
-void
-queue_info(Queue* q);
+    void expand();
+    [[nodiscard]] inline auto get_no_check(size_t i) const noexcept -> int
+    {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        return this->array[(i + this->start) % this->capacity];
+    }
+    [[nodiscard]] inline auto get_no_check(size_t i) noexcept -> int&
+    {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        return this->array[(i + this->start) % this->capacity];
+    }
+};
 
 extern Queue* config_queue;
 
