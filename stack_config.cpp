@@ -28,6 +28,7 @@
  */
 
 #include "stack_config.hpp"
+#include "y.hpp"
 #include <cstddef>
 #include <iostream>
 
@@ -56,7 +57,7 @@ Stack::destroy(Stack* s)
 }
 
 void
-Stack::dump() const
+Stack::dump(const Grammar& grammar) const noexcept
 {
     constexpr size_t LINE_SIZE = 10;
     std::cout << "stack capacity: " << this->array.capacity()
@@ -74,7 +75,7 @@ Stack::dump() const
         } else if (c == reinterpret_cast<Configuration*>(-1)) {
             std::cout << "*" << std::endl;
         } else {
-            stdout_write_config(c);
+            stdout_write_config(grammar, c);
         }
     }
     putchar('\n');

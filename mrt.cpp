@@ -300,7 +300,7 @@ MRTreeNode::insert_parent_child_relation(
 }
 
 auto
-build_multirooted_tree() -> MRLeaves
+build_multirooted_tree(const Grammar& grammar) -> MRLeaves
 {
     // initialization.
     all_parents = create_mr_parents();

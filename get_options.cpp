@@ -93,50 +93,38 @@ show_helpmsg_exit(const ErrorFlags error_flags)
  * Get output file name if -o or --outfile-name==
  * switches are used.
  */
-void
-get_outfile_name(const std::string name)
+static auto
+get_outfile_name(const std::string name) -> FileNames
 {
+    FileNames files;
     if (name.empty()) {
         show_helpmsg_exit(ErrorFlags::NO_OUTFILE_NAME);
     }
-    // std::cout << "len = " <<  len<< ", name = " <<  name << std::endl;
-    std::string y_tab_c_temp = name;
-    y_tab_c_temp += ".cpp";
-    y_tab_c = y_tab_c_temp;
-    std::string y_tab_h_temp = name;
-    y_tab_h_temp += ".hpp";
-    y_tab_h = y_tab_h_temp;
-    std::string y_output_temp = name;
-    y_output_temp += ".output";
-    y_output = y_output_temp;
-    std::string y_gviz_temp = name;
-    y_gviz_temp += ".gviz";
-    y_gviz = y_gviz_temp;
+    // std::cout << "len = " << name.size() << ", name = " << name << std::endl;
+    files.y_tab_c = name + ".cpp";
+    files.y_tab_h = name + ".hpp";
+    files.y_output = name + ".output";
+    files.y_gviz = name + ".gviz";
+    return files;
 }
 
 /*
  * Get output file name if -b or --file_prefix==
  * switches are used.
  */
-void
-get_filename_prefix(std::string name)
+static auto
+get_filename_prefix(std::string name) -> FileNames
 {
+    FileNames files;
     if (name.empty()) {
         show_helpmsg_exit(ErrorFlags::NO_OUTFILE_NAME);
     }
-    // std::cout << "len = " <<  len<< ", name = " <<  name << std::endl;
-    std::string y_tab_c_temp = name;
-    y_tab_c_temp += ".tab.cpp";
-    y_tab_c = y_tab_c_temp;
-    std::string y_tab_h_temp = name;
-    y_tab_h_temp += ".tab.hpp";
-    y_tab_h = y_tab_h_temp;
-    std::string y_output_temp = name;
-    y_output_temp += ".output";
-    y_output = y_output_temp;
-    std::string y_gviz_temp = name;
-    y_gviz_temp += ".gviz";
-    y_gviz = y_gviz_temp;
+    // std::cout << "len = " << name.size() << ", name = " << name << std::endl;
+    files.y_tab_c = name + ".tab.cpp";
+    files.y_tab_h = name + ".tab.hpp";
+    files.y_output = name + ".output";
+    files.y_gviz = name + ".gviz";
+    return files;
 }
 
 static void
@@ -145,8 +133,8 @@ write_options(int infile_index, const std::span<const char* const> args)
     // exit(0);
 }
 
-void
-init_options(Options& options)
+static auto
+init_options(Options& options) -> FileNames
 {
     options.use_combine_compatible_config = true;
 
@@ -175,10 +163,11 @@ init_options(Options& options)
     options.use_yydebug = false;
     options.use_lines = true;
     options.use_verbose = false; /* not implemented in code yet */
-    y_tab_c = "y.tab.cpp";
-    y_tab_h = "y.tab.hpp";
-    y_output = "y.output";
-    y_gviz = "y.gviz";
+    FileNames files;
+    files.y_tab_c = "y.tab.cpp";
+    files.y_tab_h = "y.tab.hpp";
+    files.y_output = "y.output";
+    files.y_gviz = "y.gviz";
     options.use_output_filename = false;
     options.use_filename_prefix = false;
     options.use_header_file = false;
@@ -190,6 +179,7 @@ init_options(Options& options)
     options.use_lr_k = false;
 
     options.show_originators = false;
+    return files;
 }
 
 void
@@ -490,13 +480,15 @@ get_mnemonic_long_option(Options& options, const std::string& s)
  *   optimization 3: further remove repeated states after 2.
  */
 auto
-get_options(const std::span<const char* const> args, Options& options) -> int
+get_options(const std::span<const char* const> args,
+            Options& options,
+            FileNames* files) -> int
 {
     if (args.size() == 1) {
         show_helpmsg_exit(ErrorFlags::NO_INPUT_FILE);
     }
 
-    init_options(options);
+    *files = init_options(options);
 
     int infile_index = -1;
     for (int i = 1; i < args.size(); i++) {
@@ -506,12 +498,12 @@ get_options(const std::span<const char* const> args, Options& options) -> int
         size_t len = argv_i.size();
 
         if (options.use_output_filename) { // get output file name.
-            get_outfile_name(argv_i);
+            *files = get_outfile_name(argv_i);
             options.use_output_filename = false;
             continue;
         }
         if (options.use_filename_prefix) { // -b
-            get_filename_prefix(argv_i);
+            *files = get_filename_prefix(argv_i);
             options.use_filename_prefix = false;
             continue;
         }

@@ -31,10 +31,12 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <queue>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 constexpr size_t SYMBOL_INIT_SIZE = 128; /* Init size of a symbol string. */
@@ -58,23 +60,6 @@ constexpr bool ADD_GOAL_RULE = true;
 
 /* store output of y.output. */
 extern std::unique_ptr<std::ofstream> fp_v;
-
-template<typename T>
-constexpr auto
-HYY_EXPAND(T** name, size_t new_size)
-{
-    delete[] * name;
-    *name = new T[new_size];
-    if (name == nullptr) {
-        throw std::runtime_error("HYY_EXPAND error: out of memory");
-    }
-}
-
-inline void
-YYERR_EXIT(const char* msg)
-{
-    throw std::runtime_error(msg);
-}
 
 //////////////////////////////////////////////////////////////////
 // Options that can be turned on/off in get_options.c
@@ -126,13 +111,19 @@ class Options
     std::atomic_bool show_originators;
 };
 
-/* used by gen_compiler.c, value obtained in get_options.c */
-extern std::string y_tab_c;
-extern std::string y_tab_h;
-/* used by y.c, value obtained in get_options.c */
-extern std::string y_output;
-/* used by gen_graphviz.c, value obtained in get_options.c */
-extern std::string y_gviz;
+/// Names of various files.
+struct FileNames
+{
+    /// Used by gen_compiler.c, value obtained in get_options.cpp.
+    std::string y_tab_c{};
+    /// Used by gen_compiler.c, value obtained in get_options.cpp.
+    std::string y_tab_h{};
+    /// used by y.c, value obtained in get_options.cpp.
+    std::string y_output{};
+    /// used by gen_graphviz.c, value obtained in get_options.cpp.
+    std::string y_gviz{};
+};
+
 /* Max K used for LR(k) */
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,readability-identifier-naming)
 extern std::atomic_int MAX_K;
@@ -180,7 +171,7 @@ struct SymbolTableNode
     int seq; /* sequence (column) number in parsing table. */
     RuleIDNode* ruleIDList;
     SymbolTableNode* next;
-    const char* token_type;
+    std::optional<std::string> token_type;
 
     [[nodiscard]] constexpr inline auto is_terminal() const noexcept -> bool
     {
@@ -341,11 +332,9 @@ struct Production
  */
 struct OriginatorList
 {
-    struct ConfigurationNode** list;
-    int count;
-    int size;
+    std::vector<struct ConfigurationNode*> list;
 };
-extern int OriginatorList_Len_Init;
+extern size_t OriginatorList_Len_Init;
 
 /*
  * This has the same structure as OriginatorList.
@@ -445,6 +434,8 @@ struct StateNode
     unsigned int padding : 28;
 
     static void destroy_state(State* s);
+    void get_closure(const struct Grammar& grammar);
+    void transition(const Grammar& grammar);
 };
 
 /*
@@ -488,7 +479,8 @@ struct Grammar
     /*
      * Returns number of rules excluding unit productions.
      */
-    auto get_opt_rule_count() -> size_t const;
+    [[nodiscard]] auto get_opt_rule_count() const noexcept -> size_t;
+    [[nodiscard]] auto get_rule_count() const noexcept -> size_t;
     /*
      * Write terminals of the given grammar.
      */
@@ -510,9 +502,35 @@ struct Grammar
     [[nodiscard]] auto is_unit_production(size_t rule_no) const -> bool;
 };
 
-extern Grammar grammar; /* Used by the entire program. */
+// extern Grammar grammar; /* Used by the entire program. */
 
 extern StateCollection* states_new;
+
+/// Position in an input file.
+struct Position
+{
+    uint32_t line{ 0 };
+    uint32_t col{ 0 };
+};
+
+/// Output of `get_yacc_grammar`.
+struct GetYaccGrammarOutput
+{
+    /// Final position.
+    Position position;
+    /// Parsed grammar.
+    Grammar grammar;
+    // token symbol.
+    std::string ysymbol;
+    // Invariant : ysymbol_pt <= ysymbol.size()
+    size_t ysymbol_pt;
+
+    /*
+     * Note: At this time, don't worry about whether the first
+     * char of a symbol should be a letter.
+     */
+    void add_char_to_symbol(char c);
+};
 
 /* for indexed access of states_new states */
 struct StateArray
@@ -583,22 +601,19 @@ extern std::string HYACC_PATH;
  * Function headers.
  *************************/
 
-/* Functions from grammars.c */
-extern void
-use_grammar(int grammar_index);
-
 /* functions in y.c */
 extern auto
 create_context() -> Context*;
-extern auto
-create_production(char* lhs, char* rhs[], int rhs_count) -> Production*;
 // extern Configuration * createConfig();
 extern auto
-create_config(int rule_id, int marker, int is_core_config) -> Configuration*;
+create_config(const Grammar& grammar,
+              int rule_id,
+              int marker,
+              int is_core_config) -> Configuration*;
 extern auto
 create_state() -> State*;
 extern auto
-is_goal_symbol(const SymbolTblNode* snode) -> bool;
+is_goal_symbol(const Grammar& grammar, const SymbolTblNode* snode) -> bool;
 extern auto
 get_actual_state(int virtual_state) -> int;
 extern void
@@ -617,26 +632,37 @@ is_same_state(const State* s1, const State* s2) -> bool;
 extern auto
 is_compatible_states(const State* s1, const State* s2) -> bool;
 extern auto
-combine_compatible_states(State* s_dest, const State* s_src) -> bool;
+combine_compatible_states(const Grammar& grammar,
+                          State* s_dest,
+                          const State* s_src) -> bool;
 
 extern auto
-is_final_configuration(const Configuration* c) -> bool;
+is_final_configuration(const Grammar& grammar, const Configuration* c) -> bool;
 extern auto
-is_empty_production(const Configuration* c) -> bool;
+is_empty_production(const Grammar& grammar, const Configuration* c) -> bool;
 extern auto
 add_symbol2_context(SymbolTblNode* snode, Context* c) -> bool;
 extern auto
 is_compatible_successor_config(const State* s, int rule_id) -> int;
 extern void
-insert_action(SymbolTblNode* lookahead, int row, int state_dest);
+insert_action(const Grammar& grammar,
+              SymbolTblNode* lookahead,
+              int row,
+              int state_dest);
 extern void
-insert_reduction_to_parsing_table(const Configuration* c, int state_no);
+insert_reduction_to_parsing_table(const Grammar& grammar,
+                                  const Configuration* c,
+                                  int state_no);
 extern void
 copy_config(Configuration* c_dest, const Configuration* c_src);
 extern void
-add_core_config2_state(State* s, Configuration* new_config);
+add_core_config2_state(const Grammar& grammar,
+                       State* s,
+                       Configuration* new_config);
 extern auto
-add_transition_states2_new(StateCollection* coll, State* src_state) -> bool;
+add_transition_states2_new(const Grammar& grammar,
+                           StateCollection* coll,
+                           State* src_state) -> bool;
 extern void
 add_state_to_state_array(StateArray& a, State* s);
 extern void
@@ -644,7 +670,7 @@ add_successor(State* s, State* n);
 extern void
 expand_parsing_table();
 extern auto
-get_theads(SymbolNode* str) -> SymbolNode*;
+get_theads(const Grammar& grammar, SymbolNode* str) -> SymbolNode*;
 extern void
 show_theads(SymbolList alpha, SymbolList theads);
 extern auto
@@ -658,32 +684,30 @@ mandatory_update_action(SymbolTblNode* lookahead, int row, int state_dest);
 extern void
 free_context(Context* c);
 extern void
-get_reachable_states(int cur_state, std::vector<int>& states_reachable);
+get_reachable_states(const Grammar& grammar,
+                     int cur_state,
+                     std::vector<int>& states_reachable);
 extern void
 print_parsing_table_note();
-extern auto
-get_grammar_rule_count() -> size_t;
 extern auto
 insert_symbol_list_unique_inc(SymbolList list,
                               SymbolTblNode* snode,
                               bool* exist) -> SymbolNode*;
 extern void
-print_parsing_table(); // for DEBUG use.
+print_parsing_table(const Grammar& grammar); // for DEBUG use.
 
-extern void
-get_closure(State* s);
-extern void
-transition(State* s);
 extern auto
 has_common_core(State* s1, State* s2) -> bool;
 extern auto
 combine_context(Context* c_dest, Context* c_src) -> bool;
 extern void
-get_context(const Configuration* cfg, Context* context);
+get_context(const Grammar& grammar, const Configuration* cfg, Context* context);
 extern void
-update_state_parsing_tbl_entry(const State* s);
+update_state_parsing_tbl_entry(const Grammar& grammar, const State* s);
 extern void
-propagate_context_change(const State* s);
+propagate_context_change(const Grammar& grammar, const State* s);
+extern void
+write_parsing_table_col_header(const Grammar& grammar);
 
 extern void
 insert_state_to_pm(State* s);
@@ -731,19 +755,19 @@ update_action(size_t col, size_t row, int state_dest)
 extern void
 write_actual_state_array();
 extern void
-remove_unit_production();
+remove_unit_production(const Grammar& grammar);
 extern void
-print_final_parsing_table();
+print_final_parsing_table(const Grammar& grammar);
 extern void
-further_optimization();
+further_optimization(const Grammar& grammar);
 extern void
 get_actual_state_no();
 extern void
-print_condensed_final_parsing_table();
+print_condensed_final_parsing_table(const Grammar& grammar);
 
 /* Defined in get_yacc_grammar.c */
 extern auto
-get_yacc_grammar(const std::string& infile) -> Grammar;
+get_yacc_grammar(const std::string& infile) -> GetYaccGrammarOutput;
 
 /* Defined in version.c */
 extern void
@@ -755,21 +779,25 @@ show_manpage();
 
 /* Defined in get_options.c */
 extern auto
-get_options(std::span<const char* const> args, Options& options) -> int;
+get_options(std::span<const char* const> args,
+            Options& options,
+            FileNames* files) -> int;
 
 /* Defined in gen_compiler.cpp */
 // Length is ParsingTblRows (?)
 extern std::vector<int> final_state_list; // for final states.
 extern void
-generate_compiler(const std::string& infile);
+generate_compiler(GetYaccGrammarOutput& yacc_grammar_output,
+                  const std::string& infile,
+                  const FileNames& files);
 
 /* functions in symbol_table.c */
 extern void
 hash_tbl_init();
 extern auto
-hash_tbl_insert(const std::string& symbol) -> SymbolTblNode*;
+hash_tbl_insert(std::string_view symbol) -> SymbolTblNode*;
 extern auto
-hash_tbl_find(const std::string& symbol) -> SymbolTblNode*;
+hash_tbl_find(std::string_view symbol) -> SymbolTblNode*;
 extern void
 hash_tbl_dump();
 extern void
@@ -802,7 +830,8 @@ insert_inc_symbol_list(SymbolList a, SymbolTblNode* n) -> SymbolNode*;
 extern void
 init_state_hash_tbl();
 extern auto
-search_state_hash_tbl(State* s, int* is_compatible) -> State*;
+search_state_hash_tbl(const Grammar& grammar, State* s, int* is_compatible)
+  -> State*;
 extern auto
 search_same_state_hash_tbl(State* s) -> State*;
 extern void
@@ -845,13 +874,15 @@ extern const char* const STR_ERROR;
 
 /* function in gen_graphviz.c */
 extern void
-gen_graphviz_input(); /* For O0, O1 */
+gen_graphviz_input(const Grammar& grammar,
+                   const std::string& y_gviz); /* For O0, O1 */
 extern void
-gen_graphviz_input2(); /* For O2, O3 */
+gen_graphviz_input2(const Grammar& grammar,
+                    const std::string& y_gviz); /* For O2, O3 */
 
 /* functions in lr0.c */
 extern void
-generate_lr0_parsing_machine();
+generate_lr0_parsing_machine(const Grammar& grammar);
 extern auto
 get_scanned_symbol(const Configuration* c) -> SymbolTblNode*; // in y.c
 extern auto
@@ -860,9 +891,9 @@ extern auto
 find_state_for_scanned_symbol(const StateCollection* c,
                               const SymbolTblNode* symbol) -> State*;
 extern void
-update_parsing_table_lr0();
+update_parsing_table_lr0(const Grammar& grammar);
 extern void
-output_parsing_table_lalr();
+output_parsing_table_lalr(const Grammar& grammar);
 
 /* list of inadequate states for lane-tracing. */
 
@@ -891,20 +922,18 @@ write_config_originators(const Configuration& c);
 extern void
 write_config_transitors(const Configuration& c);
 extern void
-lane_tracing();
+lane_tracing(const Grammar& grammar);
 extern void
-stdout_write_config(const Configuration* c);
+stdout_write_config(const Grammar& grammar, const Configuration* c);
 extern auto
 is_inadequate_state(int state_no) -> bool;
 /* used by both originator list and transitor list */
 extern void
-expand_originator_list(OriginatorList* o);
-extern void
-lane_tracing_reduction(Configuration* c);
+lane_tracing_reduction(const Grammar& grammar, Configuration* c);
 
 // these are used in lane_tracing.c and lrk.c only.
 extern void
-my_write_state(State* s);
+my_write_state(const Grammar& grammar, const State& s);
 extern void
 my_show_t_heads(SymbolList alpha, SymbolList theads);
 extern auto

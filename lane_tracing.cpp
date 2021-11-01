@@ -79,24 +79,26 @@ SymbolList EDGE_PUSHING_CONTEXT_GENERATED;
  */
 
 static void
-get_originators(Configuration* c0, Configuration* c);
+get_originators(const Grammar& grammar, Configuration* c0, Configuration* c);
 static void
-get_transitors(Configuration* c0, Configuration* c);
-
+do_loop(const Grammar& grammar);
 static void
-do_loop();
-static void
-check_lane_top();
+check_lane_top(const Grammar& grammar);
 static auto
 find_successor_state_no(int state_no, const SymbolTblNode* snode) -> int;
-void
-my_write_state(State* s);
 static void
-set_transitors_pass_thru_on(const Configuration* cur_config, Configuration* o);
+set_transitors_pass_thru_on(const Grammar& grammar,
+                            const Configuration& cur_config,
+                            Configuration* o);
 static auto
-inherit_parent_context(State* s, State* parent) -> bool;
+inherit_parent_context(const Grammar& grammar, State* s, State* parent) -> bool;
 static void
 clear_state_context(State* s);
+static void
+lt_phase2_propagate_context_change(const Grammar& grammar,
+                                   int state_no,
+                                   LtCluster* c,
+                                   LtTblEntry* e);
 
 /*
  * Initialize this to nullptr at the beginning of phase2_regeneration2().
@@ -123,7 +125,9 @@ dump_lt_tbl();
 static auto
 lt_tbl_find_entry(int from_state) -> LtTblEntry*;
 static auto
-cluster_trace_new_chain_all(int parent_state, const LtTblEntry* e) -> bool;
+cluster_trace_new_chain_all(const Grammar& grammar,
+                            int parent_state,
+                            const LtTblEntry* e) -> bool;
 
 void
 dump_llist_context_set(LlistContextSet* contxt_set)
@@ -534,7 +538,7 @@ llist_context_set_get(LtTblEntry* e) -> LlistContextSet*
 {
 
     if (e == nullptr) {
-        throw std::runtime_error("LlistContextSet_get error: e is nullptr");
+        throw std::runtime_error("llist_context_set_get error: e is nullptr");
     }
 
     if (e->ctxt_set == nullptr) { // empty, insert as the first one.
@@ -587,7 +591,7 @@ lt_tbl_entry_add_context(State* from, SymbolList ctxt)
     LtTblEntry* e = lt_tbl_entry_find_insert(from);
     if (nullptr == e) {
         throw std::runtime_error(
-          std::string("LtTblEntry_addContext error: state ") +
+          std::string("lt_tbl_entry_add_context error: state ") +
           std::to_string(from->state_no) + " NOT found\n");
     }
 
@@ -851,15 +855,7 @@ auto
 clone_originator_list(OriginatorList* o) -> OriginatorList*
 {
     auto* s = new OriginatorList;
-    s->size = o->size;
-    s->count = o->count;
-    s->list = new Configuration*[s->size];
-
-    int ct = s->count;
-    for (int i = 0; i < ct; i++) {
-        s->list[i] = o->list[i];
-    }
-
+    s->list = o->list;
     return s;
 }
 
@@ -886,8 +882,8 @@ copy_config_lalr(Configuration* dst, Configuration* src)
     dst->transitors = clone_originator_list(src->transitors);
 }
 
-auto
-clone_state(const State* s) -> State*
+static auto
+clone_state(const Grammar& grammar, const State* s) -> State*
 {
     auto* t = new State;
 
@@ -896,7 +892,7 @@ clone_state(const State* s) -> State*
     t->core_config_count = s->core_config_count;
 
     for (size_t i = 0; i < t->config.size(); i++) {
-        t->config[i] = create_config(-1, 0, 1);
+        t->config[i] = create_config(grammar, -1, 0, 1);
         copy_config_lalr(t->config[i], s->config[i]);
         t->config[i]->owner = t;
     }
@@ -1008,8 +1004,9 @@ lane_head_tail_pairs_replace(LtCluster* c,
  *   if a splitted state is created, return it's state_no.
  *   else, return the old state_no.
  */
-auto
-cluster_add_lt_tbl_entry(LtCluster* c,
+static auto
+cluster_add_lt_tbl_entry(const Grammar& grammar,
+                         LtCluster* c,
                          int from_state,
                          LlistContextSet* e_ctxt,
                          int e_parent_state_no,
@@ -1022,7 +1019,7 @@ cluster_add_lt_tbl_entry(LtCluster* c,
         // add it to the end of states_new array, and add here.
         State* s_parent = states_new_array->state_list[e_parent_state_no];
         State* s = states_new_array->state_list[state_no];
-        State* s_copy = clone_state(s);
+        State* s_copy = clone_state(grammar, s);
         // insert a state to the parsing machine. Defined in y.c.
         insert_state_to_pm(s_copy);
 
@@ -1141,33 +1138,36 @@ combine_cluster(LtCluster* c_new, LtCluster* c_old)
 
 /// functions for updating context in phase 2 regeneration. START.
 
-/*
- * Use macro since it's faster.
- * Called by cluster_trace_new_chain() only.
- */
-#define inherit_propagate(state_no, parent_state_no, container, e)             \
-    {                                                                          \
-        State *s, *s_p;                                                        \
-        s = states_new_array->state_list[state_no];                            \
-        s_p = states_new_array->state_list[parent_state_no];                   \
-        if (true == inherit_parent_context(s, s_p)) {                          \
-            get_closure(s); /* needed only if context changed.*/               \
-            lt_phase2_propagate_context_change(state_no, container, e);        \
-        }                                                                      \
-        /*else {std::cout << "::no propagation for state " <<  state_no <<     \
-         * std::endl; }*/                                                      \
+/// Called by cluster_trace_new_chain() only.
+inline void
+inherit_propagate(const Grammar& grammar,
+                  int state_no,
+                  int parent_state_no,
+                  LtCluster* container,
+                  LtTblEntry* e)
+{
+    State* s = states_new_array->state_list[state_no];
+    State* s_p = states_new_array->state_list[parent_state_no];
+    if (inherit_parent_context(grammar, s, s_p)) {
+        s->get_closure(grammar); /* needed only if context changed.*/
+        lt_phase2_propagate_context_change(grammar, state_no, container, e);
     }
+    /*else {std::cout << "::no propagation for state " <<  state_no <<
+     * std::endl; }*/
+}
 
-#define clear_inherit_regenerate(state_no, parent_state_no)                    \
-    {                                                                          \
-        State *s, *s_p;                                                        \
-        s = states_new_array->state_list[state_no];                            \
-        s_p = states_new_array->state_list[parent_state_no];                   \
-        clear_state_context(s);                                                \
-        if (true == inherit_parent_context(s, s_p)) {                          \
-            get_closure(s); /* needed only if context changed.*/               \
-        }                                                                      \
+inline void
+clear_inherit_regenerate(const Grammar& grammar,
+                         int state_no,
+                         int parent_state_no)
+{
+    State* s = states_new_array->state_list[state_no];
+    State* s_p = states_new_array->state_list[parent_state_no];
+    clear_state_context(s);
+    if (inherit_parent_context(grammar, s, s_p)) {
+        s->get_closure(grammar); /* needed only if context changed.*/
     }
+}
 
 /*
  * Called by phase2_regeneration2() only.
@@ -1176,7 +1176,7 @@ combine_cluster(LtCluster* c_new, LtCluster* c_old)
  * to the goal rule before get_closure() !
  */
 inline void
-clear_regenerate(int state_no)
+clear_regenerate(const Grammar& grammar, int state_no)
 {
     State* s = states_new_array->state_list[state_no];
     clear_state_context(s);
@@ -1186,7 +1186,7 @@ clear_regenerate(int state_no)
           SymbolNode::create(hash_tbl_find(STR_END));
         s->config[0]->context->context_count = 1;
     }
-    get_closure(s);
+    s->get_closure(grammar);
 }
 
 /*
@@ -1197,7 +1197,10 @@ clear_regenerate(int state_no)
  * LtTblEntry's to_states list.
  */
 void
-lt_phase2_propagate_context_change(int state_no, LtCluster* c, LtTblEntry* e)
+lt_phase2_propagate_context_change(const Grammar& grammar,
+                                   int state_no,
+                                   LtCluster* c,
+                                   LtTblEntry* e)
 {
     if (e == nullptr) {
         return;
@@ -1228,13 +1231,13 @@ lt_phase2_propagate_context_change(int state_no, LtCluster* c, LtTblEntry* e)
                 std::cout << "--to state: " << t->n << ", actual: " << t2->n2
                           << std::endl;
             }
-            inherit_propagate(t2->n2, state_no, c, f);
+            inherit_propagate(grammar, t2->n2, state_no, c, f);
         }
     }
 }
 
 auto
-inherit_parent_context(State* s, State* parent) -> bool
+inherit_parent_context(const Grammar& grammar, State* s, State* parent) -> bool
 {
     if (s == nullptr || parent == nullptr)
         return false;
@@ -1246,15 +1249,15 @@ inherit_parent_context(State* s, State* parent) -> bool
 
         if (0 && s->state_no == 39) {
             std::cout << "before: " << std::endl;
-            my_write_state(s);
-            my_write_state(parent);
+            my_write_state(grammar, *s);
+            my_write_state(grammar, *parent);
         }
     }
 
     bool is_changed = false;
     const SymbolTblNode* trans_symbol = s->trans_symbol->snode;
     for (const auto& c_p : parent->config) {
-        if (is_final_configuration(c_p))
+        if (is_final_configuration(grammar, c_p))
             continue;
         if (trans_symbol != get_scanned_symbol(c_p))
             continue;
@@ -1275,7 +1278,7 @@ inherit_parent_context(State* s, State* parent) -> bool
     if constexpr (DEBUG_PHASE_2_REGENERATE2) {
         if (0 && s->state_no == 39) {
             std::cout << "after: " << std::endl;
-            my_write_state(s);
+            my_write_state(grammar, *s);
         }
     }
 
@@ -1309,8 +1312,10 @@ clear_state_context(State* s)
  *  false - combined with a cluster in all_clusters..
  *  true - NOT combined with another cluster in all_clusters.
  */
-auto
-cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
+static auto
+cluster_trace_new_chain(const Grammar& grammar,
+                        int parent_state_no,
+                        int state_no) -> bool
 {
     bool is_new_chain = true;
     LtCluster* c = new_cluster;
@@ -1337,7 +1342,7 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
                       << ": inherit context from state " << parent_state_no
                       << " & propagate" << std::endl;
         }
-        inherit_propagate(ret_state, parent_state_no, c, e);
+        inherit_propagate(grammar, ret_state, parent_state_no, c, e);
 
         replace_successor(states_new_array->state_list[parent_state_no],
                           states_new_array->state_list[ret_state],
@@ -1389,7 +1394,8 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
                               << ": inherit context from state "
                               << parent_state_no << ", ";
                 }
-                inherit_propagate(state_no, parent_state_no, container, e);
+                inherit_propagate(
+                  grammar, state_no, parent_state_no, container, e);
 
                 container_not_found = false;
                 break;
@@ -1405,7 +1411,7 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
                           << " is NOT in any cluster yet" << std::endl;
             }
             ret_state = cluster_add_lt_tbl_entry(
-              c, state_no, e_ctxt, parent_state_no, false);
+              grammar, c, state_no, e_ctxt, parent_state_no, false);
 
             if (c->pairwise_disjoint &&
                 pairwise_disjoint(c->ctxt_set) == false) {
@@ -1420,14 +1426,14 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
                           << ": clear, inherit context from state "
                           << parent_state_no << ", ";
             }
-            clear_inherit_regenerate(state_no, parent_state_no);
+            clear_inherit_regenerate(grammar, state_no, parent_state_no);
 
         } else {
             // e is already in another cluster, e.g., first_container;
             // but combined context are NOT pairwise-disjoint.
             // so make a copy e' of e and add it to c.
             ret_state = cluster_add_lt_tbl_entry(
-              c, state_no, e_ctxt, parent_state_no, true);
+              grammar, c, state_no, e_ctxt, parent_state_no, true);
             if ((c->pairwise_disjoint = pairwise_disjoint(c->ctxt_set)) ==
                 false) {
                 all_pairwise_disjoint = false;
@@ -1437,11 +1443,11 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
                           << ": clear, inherit context from state "
                           << parent_state_no << ", ";
             }
-            clear_inherit_regenerate(ret_state, parent_state_no);
+            clear_inherit_regenerate(grammar, ret_state, parent_state_no);
         }
 
         if (nullptr != e) { // recursively trace the chain.
-            is_new_chain = cluster_trace_new_chain_all(ret_state, e);
+            is_new_chain = cluster_trace_new_chain_all(grammar, ret_state, e);
         }
     }
 
@@ -1452,13 +1458,15 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
  * parent_state: state_no of the parent state.
  */
 auto
-cluster_trace_new_chain_all(int parent_state, const LtTblEntry* e) -> bool
+cluster_trace_new_chain_all(const Grammar& grammar,
+                            int parent_state,
+                            const LtTblEntry* e) -> bool
 {
     bool is_new_chain = true;
 
     // recursively trace the chain.
     for (const LlistInt* s = e->to_states; s != nullptr; s = s->next) {
-        if (false == cluster_trace_new_chain(parent_state, s->n)) {
+        if (false == cluster_trace_new_chain(grammar, parent_state, s->n)) {
             is_new_chain = false;
         }
     }
@@ -1481,8 +1489,8 @@ all_clusters_add(LtCluster* c)
     }
 }
 
-void
-phase2_regeneration2()
+static void
+phase2_regeneration2(const Grammar& grammar)
 {
     bool is_new_chain = true;
 
@@ -1501,11 +1509,11 @@ phase2_regeneration2()
             std::cout << "=>1. clear and regenerate context for state "
                       << x->from_state << std::endl;
         }
-        clear_regenerate(x->from_state);
+        clear_regenerate(grammar, x->from_state);
 
         x->processed = true;
 
-        is_new_chain = cluster_trace_new_chain_all(x->from_state, x);
+        is_new_chain = cluster_trace_new_chain_all(grammar, x->from_state, x);
 
         // add new_cluster to the all_clusters list.
         if (true == is_new_chain) {
@@ -1519,7 +1527,7 @@ phase2_regeneration2()
 
     // if the parsing machine is expanded, update the parsing table.
     if (states_new->state_count > ParsingTblRows) {
-        update_parsing_table_lr0();
+        update_parsing_table_lr0(grammar);
     }
 
     std::cout << "LT-LTT end: states count: " << states_new->state_count
@@ -1589,7 +1597,8 @@ static auto
 add_lane_head_list(laneHead* lh_list, State* s) -> laneHead*
 {
     if (s == nullptr) {
-        YYERR_EXIT("lane_tracing.c addLaneHead error: s is nullptr");
+        throw std::runtime_error(
+          "lane_tracing.cpp add_lane_head_list error: s is nullptr");
     }
 
     if (nullptr == lh_list) {
@@ -1636,20 +1645,8 @@ auto
 create_originator_list() -> OriginatorList*
 {
     auto* o = new OriginatorList;
-    o->size = OriginatorList_Len_Init;
-    o->count = 0;
-    o->list = new Configuration*[o->size];
+    o->list.reserve(OriginatorList_Len_Init);
     return o;
-}
-
-void
-expand_originator_list(OriginatorList* o)
-{
-    if (nullptr == o || o->count < o->size)
-        return;
-
-    o->size *= 2;
-    HYY_EXPAND(&o->list, o->size);
 }
 
 /*
@@ -1670,17 +1667,12 @@ insert_originator_list(Configuration* c, Configuration* originator, int cycle)
     if (c == originator && cycle == 0) {
         return false;
     }
-
-    if (o->count == o->size) {
-        expand_originator_list(o);
-    }
-
-    for (int i = 0, ct = o->count; i < ct; i++) {
-        if (originator == o->list[i])
+    for (const auto& item : o->list) {
+        if (originator == item)
             return false; // already exists.
     }
 
-    o->list[o->count++] = originator;
+    o->list.push_back(originator);
     c->ORIGINATOR_CHANGED = true;
     return true;
 }
@@ -1691,8 +1683,7 @@ write_originator_list(OriginatorList* o)
     if (o == nullptr)
         return;
 
-    for (int i = 0; i < o->count; i++) {
-        const Configuration* c = o->list[i];
+    for (const ConfigurationNode* c : o->list) {
         std::cout << c->owner->state_no << "." << c->ruleID << " ";
     }
 }
@@ -1710,17 +1701,12 @@ insert_transitor_list(Configuration* c, Configuration* transitor) -> bool
     if (c == transitor)
         return false;
 
-    if (o->count == o->size) {
-        expand_originator_list(o);
-    }
-
-    const int ct = o->count;
-    for (int i = 0; i < ct; i++) {
-        if (transitor == o->list[i])
+    for (const ConfigurationNode* item : o->list) {
+        if (transitor == item)
             return false; // already exists.
     }
 
-    o->list[o->count++] = transitor;
+    o->list.push_back(transitor);
     return true;
 }
 
@@ -1840,7 +1826,7 @@ void
 my_write_config_originators(const Configuration* c);
 
 void
-stdout_write_config(const Configuration* c)
+stdout_write_config(const Grammar& grammar, const Configuration* c)
 {
     if (c == nullptr) {
         return;
@@ -1854,13 +1840,13 @@ stdout_write_config(const Configuration* c)
               << "[LANE_CON: " << c->LANE_CON << "]" << std::endl;
 }
 void
-my_write_state(const State* s)
+my_write_state(const Grammar& grammar, const State& s)
 {
-    std::cout << "state_no: " << s->state_no
-              << " (core: " << s->core_config_count << ")" << std::endl;
+    std::cout << "state_no: " << s.state_no << " (core: " << s.core_config_count
+              << ")" << std::endl;
 
-    for (const auto& config : s->config) {
-        stdout_write_config(config);
+    for (const auto& config : s.config) {
+        stdout_write_config(grammar, config);
     }
 }
 
@@ -1870,14 +1856,13 @@ my_write_state(const State* s)
 void
 write_config_originators(const Configuration& c)
 {
-    const int ct = c.originators->count;
+    const size_t ct = c.originators->list.size();
     if (ct == 0)
         return;
 
     *fp_v << "      " << ct << " originator" << ((ct > 1) ? "s" : "") << ": "
           << std::endl;
-    for (int i = 0; i < ct; i++) {
-        const Configuration* o = c.originators->list[i];
+    for (const Configuration* o : c.originators->list) {
         *fp_v << "      originator (" << o->owner->state_no << "." << o->ruleID
               << "." << o->marker << ") " << std::endl;
     }
@@ -1886,14 +1871,13 @@ write_config_originators(const Configuration& c)
 void
 write_config_transitors(const Configuration& c)
 {
-    const int ct = c.transitors->count;
+    const size_t ct = c.transitors->list.size();
     if (ct == 0)
         return;
 
     *fp_v << "      " << ct << " transitor" << ((ct > 1) ? "s" : "") << ": "
           << std::endl;
-    for (int i = 0; i < ct; i++) {
-        const Configuration* o = c.transitors->list[i];
+    for (const Configuration* o : c.transitors->list) {
         *fp_v << "      transitor (" << o->owner->state_no << "." << o->ruleID
               << "." << o->marker << ") " << std::endl;
     }
@@ -1902,10 +1886,9 @@ write_config_transitors(const Configuration& c)
 void
 my_write_config_originators(const Configuration* c)
 {
-    const int ct = c->originators->count;
+    const size_t ct = c->originators->list.size();
     std::cout << "config has " << ct << " originators: " << std::endl;
-    for (int i = 0; i < ct; i++) {
-        const Configuration* o = c->originators->list[i];
+    for (const Configuration* o : c->originators->list) {
         std::cout << "      originator (" << o->owner->state_no << "."
                   << o->ruleID << ") " << std::endl;
     }
@@ -1915,7 +1898,8 @@ my_write_config_originators(const Configuration* c)
  * get context for reduce productions in conflict states.
  */
 static void
-get_inadequate_state_reduce_config_context(const State* s)
+get_inadequate_state_reduce_config_context(const Grammar& grammar,
+                                           const State* s)
 {
     if constexpr (DEBUG_PHASE_1) {
         std::cout << "state " << s->state_no << " [" << s->config.size()
@@ -1925,8 +1909,8 @@ get_inadequate_state_reduce_config_context(const State* s)
 
     for (const auto& config : s->config) {
         Configuration* c = config;
-        if (is_final_configuration(c)) {
-            lane_tracing_reduction(c);
+        if (is_final_configuration(grammar, c)) {
+            lane_tracing_reduction(grammar, c);
             if constexpr (DEBUG_PHASE_1) {
                 std::cout << ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
                           << std::endl;
@@ -1936,7 +1920,7 @@ get_inadequate_state_reduce_config_context(const State* s)
 }
 
 static void
-lane_tracing_phase1()
+lane_tracing_phase1(const Grammar& grammar)
 {
     if constexpr (DEBUG_PHASE_1) {
         std::cout << states_inadequate->states.size()
@@ -1945,7 +1929,7 @@ lane_tracing_phase1()
 
     for (const int state_no : states_inadequate->states) {
         const State* s = states_new_array->state_list[state_no];
-        get_inadequate_state_reduce_config_context(s);
+        get_inadequate_state_reduce_config_context(grammar, s);
     }
 
     // next will check resolved conflicts.
@@ -1976,7 +1960,7 @@ find_successor_state_no(int state_no, const SymbolTblNode* snode) -> int
  * Clear a parsing table row where lookahead is terminal.
  */
 inline void
-clear_state_terminal_transitions(int state_no)
+clear_state_terminal_transitions(const Grammar& grammar, int state_no)
 {
     size_t start = (static_cast<size_t>(state_no) * ParsingTblCols);
     size_t end = (state_no * ParsingTblCols) + (grammar.terminal_count + 1);
@@ -2006,10 +1990,10 @@ clear_state_conflicts(int state_no)
  * }
  */
 static void
-resolve_lalr1_conflicts()
+resolve_lalr1_conflicts(const Grammar& grammar)
 {
     if constexpr (DEBUG_RESOLVE_CONFLICT) {
-        print_parsing_table();
+        print_parsing_table(grammar);
     }
 
     states_inadequate->count_unresolved = states_inadequate->states.size();
@@ -2027,7 +2011,7 @@ resolve_lalr1_conflicts()
             std::cout << "-----clear state[" << i << "] = " << state_no
                       << ". len=" << ct << std::endl;
         }
-        clear_state_terminal_transitions(state_no);
+        clear_state_terminal_transitions(grammar, state_no);
 
         // clear all the conflicts associated with S.
         clear_state_conflicts(state_no);
@@ -2035,18 +2019,20 @@ resolve_lalr1_conflicts()
         // re-insert actions into parsing table for this state.
         for (int j = static_cast<int>(state->config.size() - 1); j >= 0; j--) {
             const Configuration* config = state->config[j];
-            if (is_final_configuration(config) && config->context != nullptr) {
+            if (is_final_configuration(grammar, config) &&
+                config->context != nullptr) {
                 // insert reduce
                 for (const SymbolNode* contxt = config->context->nContext;
                      contxt != nullptr;
                      contxt = contxt->next) {
                     insert_action(
-                      contxt->snode, state_no, (-1) * config->ruleID);
+                      grammar, contxt->snode, state_no, (-1) * config->ruleID);
                 }
             } else if (config->nMarker != nullptr &&
                        config->nMarker->snode->is_terminal()) {
                 // insert shift.
                 insert_action(
+                  grammar,
                   config->nMarker->snode,
                   state_no,
                   find_successor_state_no(state_no, config->nMarker->snode));
@@ -2063,7 +2049,7 @@ resolve_lalr1_conflicts()
     }
 
     if constexpr (DEBUG_RESOLVE_CONFLICT) {
-        print_parsing_table();
+        print_parsing_table(grammar);
     }
 }
 
@@ -2115,7 +2101,7 @@ remove_pass_through_states(laneHead* lh_list) -> laneHead*
 }
 
 static void
-gpm(State* new_state)
+gpm(const Grammar& grammar, State* new_state)
 {
     if (Options::get().debug_gen_parsing_machine) {
         std::cout << std::endl
@@ -2131,10 +2117,10 @@ gpm(State* new_state)
                   << new_state->state_no << std::endl;
         }
 
-        get_closure(new_state); // get closure of this state.
+        new_state->get_closure(grammar); // get closure of this state.
 
         // get successor states and add them to states_new.
-        transition(new_state);
+        new_state->transition(grammar);
 
         new_state = new_state->next; // point to next unprocessed state.
     }
@@ -2162,12 +2148,12 @@ write_state_no_array(const StateNoArray* a, char* name)
  * Adapted from transition() in y.c.
  */
 static auto
-get_state_successors(const State* s) -> StateCollection*
+get_state_successors(const Grammar& grammar, const State* s) -> StateCollection*
 {
     StateCollection* coll = create_state_collection();
 
     for (const auto& c : s->config) {
-        if (is_final_configuration(c)) {
+        if (is_final_configuration(grammar, c)) {
             // do nothing.
         } else { // do transit operation.
             SymbolTblNode* scanned_symbol = get_scanned_symbol(c);
@@ -2183,7 +2169,7 @@ get_state_successors(const State* s) -> StateCollection*
                 coll->add_state2(new_state);
             }
             // create a new core config for new_state.
-            Configuration* new_config = create_config(-1, 0, 1);
+            Configuration* new_config = create_config(grammar, -1, 0, 1);
 
             new_config->owner = new_state;
             copy_config(new_config, c);
@@ -2192,7 +2178,7 @@ get_state_successors(const State* s) -> StateCollection*
             if (new_config->nMarker != nullptr)
                 new_config->nMarker = new_config->nMarker->next;
 
-            add_core_config2_state(new_state, new_config);
+            add_core_config2_state(grammar, new_state, new_config);
         }
     } // end for
 
@@ -2229,10 +2215,12 @@ get_successor_index(const State* s, const SymbolTblNode* trans_symbol) -> int
  *          false if an existing state is found.
  */
 static auto
-add_split_state(State* y, State* s, int successor_index) -> bool
+add_split_state(const Grammar& grammar, State* y, State* s, int successor_index)
+  -> bool
 {
     int is_compatible = 0;
-    State* os = search_state_hash_tbl(y, &is_compatible); // same or compatible.
+    State* os =
+      search_state_hash_tbl(grammar, y, &is_compatible); // same or compatible.
 
     if (os == nullptr) { // No existing state found. Add Y as a new state.
         y->state_no = states_new->state_count;
@@ -2299,7 +2287,7 @@ static void
 regenerate_state_context(State* s, State* t)
 {
     if (t->core_config_count != s->core_config_count) {
-        YYERR_EXIT("regenerate error: inequal config_count");
+        throw std::runtime_error("regenerate error: inequal config_count");
     }
 
     // clear the context of S.
@@ -2340,14 +2328,14 @@ combine_state_context(State* s_dest, State* s_src) -> bool
  * or keep unchanged.
  */
 static void
-update_state_reduce_action(State* s)
+update_state_reduce_action(const Grammar& grammar, State* s)
 {
     int state_dest = 0;
     char action = 0;
 
     for (const auto& c : s->config) {
         // update reduce action for final/empty production.
-        if (is_final_configuration(c) ||
+        if (is_final_configuration(grammar, c) ||
             get_scanned_symbol(c)->symbol->empty()) {
             const SymbolNode* lookahead = c->context->nContext;
             for (; lookahead != nullptr; lookahead = lookahead->next) {
@@ -2362,8 +2350,10 @@ update_state_reduce_action(State* s)
                                       s->state_no,
                                       (-1) * c->ruleID);
                     } else { // else, is "s" or "acc".
-                        insert_action(
-                          lookahead->snode, s->state_no, (-1) * c->ruleID);
+                        insert_action(grammar,
+                                      lookahead->snode,
+                                      s->state_no,
+                                      (-1) * c->ruleID);
                     }
                 }
             }
@@ -2402,7 +2392,7 @@ update_state_reduce_action(State* s)
  * ==END==
  */
 static void
-phase2_regeneration(laneHead* lh_list)
+phase2_regeneration(const Grammar& grammar, laneHead* lh_list)
 {
     laneHead* h = lh_list;
     State* new_state = nullptr;
@@ -2411,16 +2401,16 @@ phase2_regeneration(laneHead* lh_list)
     // 1) handle the head states and PASS_THRU states.
     for (; h != nullptr; h = h->next) {
         State* s = h->s;
-        get_closure(s); // get_closure() is defined in y.c
-        update_state_reduce_action(s);
+        s->get_closure(grammar); // get_closure() is defined in y.c
+        update_state_reduce_action(grammar, s);
 
         if constexpr (DEBUG_PHASE_2_REGENERATE) {
             std::cout << std::endl
                       << "==reg" << std::endl
                       << "erate state " << s->state_no << std::endl;
-            my_write_state(s);
+            my_write_state(grammar, *s);
         }
-        const StateCollection* coll = get_state_successors(s);
+        const StateCollection* coll = get_state_successors(grammar, s);
 
         for (State* y = coll->states_head; y != nullptr; y = y->next) {
             int successor_index =
@@ -2463,7 +2453,7 @@ phase2_regeneration(laneHead* lh_list)
                     combine_state_context(y0, y);
                     lh_list = add_unique_queue(y0, lh_list);
                 } else {
-                    if (add_split_state(y, s, successor_index)) {
+                    if (add_split_state(grammar, y, s, successor_index)) {
                         if (new_state == nullptr) {
                             new_state = y;
                         }
@@ -2482,7 +2472,7 @@ phase2_regeneration(laneHead* lh_list)
         if constexpr (DEBUG_PHASE_2_REGENERATE) {
             std::cout << "GRM(new_state) now." << std::endl;
         }
-        gpm(new_state);
+        gpm(grammar, new_state);
     }
 }
 
@@ -2502,7 +2492,7 @@ write_the_symbol_list(SymbolList a)
 }
 
 static auto
-get_the_context(const Configuration* o) -> SymbolNode*
+get_the_context(const Grammar& grammar, const Configuration* o) -> SymbolNode*
 {
     if (o == nullptr)
         return nullptr;
@@ -2513,7 +2503,7 @@ get_the_context(const Configuration* o) -> SymbolNode*
 
     SymbolNode* gamma = scanned_symbol->next;
     SymbolNode* gamma_theads =
-      get_theads(gamma); // Note nullptr is a valid terminal.
+      get_theads(grammar, gamma); // Note nullptr is a valid terminal.
 
     // note that "" will be the first node in the INC list,
     // so it's not so inefficient.
@@ -2551,12 +2541,14 @@ get_the_context(const Configuration* o) -> SymbolNode*
  * c is the originator of c0.
  */
 auto
-trace_back(const Configuration* c0, Configuration* c, laneHead* lh_list)
-  -> laneHead*
+trace_back(const Grammar& grammar,
+           const Configuration* c0,
+           Configuration* c,
+           laneHead* lh_list) -> laneHead*
 {
     c->LANE_CON = 1; // set as config on conflicting lane.
 
-    if (c->LANE_END == 1) {
+    if (c->LANE_END == 1u) {
         if constexpr (DEBUG_PHASE_2) {
             std::cout << "END config FOUND: " << c->owner->state_no << "."
                       << c->ruleID << std::endl
@@ -2595,11 +2587,8 @@ trace_back(const Configuration* c0, Configuration* c, laneHead* lh_list)
         return lh_list; // should NEVER happen.
     }
 
-    const int len = c->originators->count;
-    for (int i = 0; i < len; i++) {
-        Configuration* o = c->originators->list[i];
-
-        set_transitors_pass_thru_on(c, o); // set PASS_THRU ON.
+    for (Configuration* o : c->originators->list) {
+        set_transitors_pass_thru_on(grammar, *c, o); // set PASS_THRU ON.
         if (o->LANE_CON == 0) {
             if constexpr (DEBUG_PHASE_2) {
                 std::cout << "config on lane: " << o->owner->state_no << "."
@@ -2613,7 +2602,7 @@ trace_back(const Configuration* c0, Configuration* c, laneHead* lh_list)
                 }
             }
 
-            lh_list = trace_back(c, o, lh_list);
+            lh_list = trace_back(grammar, c, o, lh_list);
         } else {
             if constexpr (DEBUG_PHASE_2) {
                 std::cout << "already traced: " << o->owner->state_no << "."
@@ -2635,7 +2624,7 @@ trace_back_lrk(const Configuration* c0, Configuration* c)
 {
     c->LANE_CON = 1; // set as config on conflicting lane.
 
-    if (c->LANE_END == 1) {
+    if (c->LANE_END == 1u) {
         if constexpr (DEBUG_PHASE_2) {
             std::cout << "END config FOUND: " << c->owner->state_no << "."
                       << c->ruleID << std::endl
@@ -2668,10 +2657,7 @@ trace_back_lrk(const Configuration* c0, Configuration* c)
         return; // should NEVER happen.
     }
 
-    const int len = c->originators->count;
-    for (int i = 0; i < len; i++) {
-        Configuration* o = c->originators->list[i];
-
+    for (Configuration* o : c->originators->list) {
         if (o->LANE_CON == 0u) {
             if constexpr (DEBUG_PHASE_2) {
                 std::cout << "config on lane: " << o->owner->state_no << "."
@@ -2706,10 +2692,7 @@ trace_back_lrk_clear(const Configuration* c0, Configuration* c)
         return;
     } // should NEVER happen.
 
-    const int len = c->originators->count;
-    for (int i = 0; i < len; i++) {
-        Configuration* o = c->originators->list[i];
-
+    for (Configuration* o : c->originators->list) {
         if (o->LANE_CON == 1u) {
             trace_back_lrk_clear(c, o);
         }
@@ -2723,11 +2706,13 @@ trace_back_lrk_clear(const Configuration* c0, Configuration* c)
  * Do this by tracing back each final config from this state.
  */
 static auto
-get_state_conflict_lane_head(int state_no, laneHead* lh_list) -> laneHead*
+get_state_conflict_lane_head(const Grammar& grammar,
+                             int state_no,
+                             laneHead* lh_list) -> laneHead*
 {
     const State* s = states_new_array->state_list[state_no];
     for (const auto& con : s->config) {
-        if (is_final_configuration(con)) {
+        if (is_final_configuration(grammar, con)) {
             if constexpr (DEBUG_PHASE_2) {
                 std::cout << std::endl
                           << "final config: " << state_no << '.' << con->ruleID
@@ -2740,7 +2725,7 @@ get_state_conflict_lane_head(int state_no, laneHead* lh_list) -> laneHead*
                           << con->ruleID << std::endl;
             }
             cur_red_config = con;
-            lh_list = trace_back(nullptr, con, lh_list);
+            lh_list = trace_back(grammar, nullptr, con, lh_list);
         }
     }
 
@@ -2752,7 +2737,7 @@ get_state_conflict_lane_head(int state_no, laneHead* lh_list) -> laneHead*
  * and their associated conflicting contexts.
  */
 static auto
-get_conflict_lane_head() -> laneHead*
+get_conflict_lane_head(const Grammar& grammar) -> laneHead*
 {
     laneHead* lane_head_list = nullptr;
 
@@ -2768,8 +2753,8 @@ get_conflict_lane_head() -> laneHead*
                     std::cout << " [" << states_new_array->rr_count[state_no]
                               << " r/r conflicts]";
                 }
-                lane_head_list =
-                  get_state_conflict_lane_head(state_no, lane_head_list);
+                lane_head_list = get_state_conflict_lane_head(
+                  grammar, state_no, lane_head_list);
             }
 
             if constexpr (DEBUG_GET_LANEHEAD) {
@@ -2788,18 +2773,18 @@ get_conflict_lane_head() -> laneHead*
 }
 
 static void
-lane_tracing_phase2()
+lane_tracing_phase2(const Grammar& grammar)
 {
     lane_head_tail_pairs = nullptr; // for LR(k) use only.
     LT_tbl = nullptr;               // initialize the LT_tbl.
 
-    const int ct = states_inadequate->count_unresolved;
+    const size_t ct = states_inadequate->count_unresolved;
     if constexpr (DEBUG_PHASE_2) {
         std::cout << "phase 2. unresolved inadequate states: " << ct
                   << std::endl;
     }
 
-    laneHead* lane_head_list = get_conflict_lane_head();
+    laneHead* lane_head_list = get_conflict_lane_head(grammar);
     if (lane_head_list == nullptr) {
         std::cout << "laneHeadList is nullptr. return" << std::endl;
         return;
@@ -2814,34 +2799,34 @@ lane_tracing_phase2()
     }
 
     if (!Options::get().use_combine_compatible_states) {
-        phase2_regeneration2(); // using all_clusters.
+        phase2_regeneration2(grammar); // using all_clusters.
     } else {
-        phase2_regeneration(lane_head_list);
+        phase2_regeneration(grammar, lane_head_list);
     }
 }
 
 void
-lane_tracing()
+lane_tracing(const Grammar& grammar)
 {
     auto& options = Options::get();
     IN_EDGE_PUSHING_LANE_TRACING = false;
     MAX_K = 1; // max K used in LR(k).
 
-    lane_tracing_phase1();
-    resolve_lalr1_conflicts();
+    lane_tracing_phase1(grammar);
+    resolve_lalr1_conflicts(grammar);
 
     if (options.use_lane_tracing && states_inadequate->count_unresolved > 0) {
-        lane_tracing_phase2();
-        resolve_lalr1_conflicts();   ///
-        output_parsing_table_lalr(); ///
+        lane_tracing_phase2(grammar);
+        resolve_lalr1_conflicts(grammar);   ///
+        output_parsing_table_lalr(grammar); ///
 
         if (options.use_lr_k && rr_count > 0) {
             lrk_pt_array = nullptr; // initialize for use in gen_compiler.
             // do LR(k) if there are still r/r conflicts.
-            lane_tracing_lrk();
+            lane_tracing_lrk(grammar);
         }
     } else {
-        output_parsing_table_lalr(); // is this needed?
+        output_parsing_table_lalr(grammar); // is this needed?
     }
 
     if (GRAMMAR_AMBIGUOUS) {
@@ -2854,12 +2839,12 @@ lane_tracing()
 /* Functions for lane tracing */
 
 static void
-dump_stacks()
+dump_stacks(const Grammar& grammar)
 {
     std::cout << "__STACK__" << std::endl;
-    STACK->dump();
+    STACK->dump(grammar);
     std::cout << "__LANE__" << std::endl;
-    LANE->dump();
+    LANE->dump(grammar);
 }
 
 /*
@@ -2985,7 +2970,7 @@ get_contexts_generated(SymbolList list, bool* null_possible) -> SymbolList
 }
 
 static void
-stack_operation(int* fail_ct, Configuration* o)
+stack_operation(const Grammar& grammar, int* fail_ct, Configuration* o)
 {
     Configuration* tmp = nullptr;
 
@@ -3015,7 +3000,7 @@ stack_operation(int* fail_ct, Configuration* o)
     }
 
     if constexpr (DEBUG_PHASE_1) {
-        dump_stacks();
+        dump_stacks(grammar);
     }
 }
 
@@ -3091,7 +3076,8 @@ context_adding(SymbolList context_generated, int cur_config_index)
 }
 
 static void
-context_adding_routine(SymbolList context_generated,
+context_adding_routine(const Grammar& grammar,
+                       SymbolList context_generated,
                        Configuration* o,
                        int cur_config_index,
                        int* fail_ct)
@@ -3105,7 +3091,7 @@ context_adding_routine(SymbolList context_generated,
         }
 
         TRACE_FURTHER = FLAG_OFF;
-        stack_operation(fail_ct, o);
+        stack_operation(grammar, fail_ct, o);
     }
 
     if constexpr (DEBUG_PHASE_1) {
@@ -3120,14 +3106,14 @@ context_adding_routine(SymbolList context_generated,
  * Pre-assumption: c is a reduction.
  */
 void
-lane_tracing_reduction(Configuration* c)
+lane_tracing_reduction(const Grammar& grammar, Configuration* c)
 {
     if (c == nullptr)
         return;
 
     if constexpr (DEBUG_PHASE_1) {
         std::cout << "work on reduce config: ";
-        stdout_write_config(c);
+        stdout_write_config(grammar, c);
     }
 
     if (c->COMPLETE == 1u) {
@@ -3149,7 +3135,7 @@ lane_tracing_reduction(Configuration* c)
         std::cout << "DO_LOOP:" << std::endl;
     }
 
-    do_loop();
+    do_loop(grammar);
 }
 
 /*
@@ -3209,9 +3195,8 @@ write_config(Configuration* c)
 static auto
 is_on_transitor_chain(Configuration* c, Configuration* o) -> bool
 {
-    const int ct = c->originators->count;
-    for (int i = 0; i < ct; i++) {
-        if (c->originators->list[i] == o)
+    for (const Configuration* orig : c->originators->list) {
+        if (orig == o)
             return true;
     }
     return false;
@@ -3220,16 +3205,14 @@ is_on_transitor_chain(Configuration* c, Configuration* o) -> bool
 /*
  * o - the originator. o does not change in the call stack.
  */
-static void
-set_transitors_pass_thru_on(const Configuration* cur_config, Configuration* o)
+void
+set_transitors_pass_thru_on(const Grammar& grammar,
+                            const Configuration& cur_config,
+                            Configuration* o)
 {
     // find the next transitor for originator o.
-    const int ct = cur_config->transitors->count;
-
-    for (int i = 0; i < ct; i++) {
-        Configuration* c = cur_config->transitors->list[i];
-
-        get_originators(c, c);
+    for (Configuration* c : cur_config.transitors->list) {
+        get_originators(grammar, c, c);
 
         if (is_on_transitor_chain(c, o)) {
 
@@ -3237,14 +3220,14 @@ set_transitors_pass_thru_on(const Configuration* cur_config, Configuration* o)
                 if constexpr (DEBUG_PHASE_2_GET_TBL) {
                     std::cout << "B: next entry in entry_table: ("
                               << c->owner->state_no << "." << c->ruleID << ", "
-                              << cur_config->owner->state_no << "."
-                              << cur_config->ruleID << ")" << std::endl;
+                              << cur_config.owner->state_no << "."
+                              << cur_config.ruleID << ")" << std::endl;
                 }
                 // add another entry to LT_tbl.
-                lt_tbl_entry_add(c->owner, cur_config->owner);
+                lt_tbl_entry_add(c->owner, cur_config.owner);
             }
 
-            if (c->owner != cur_config->owner && c->owner != o->owner) {
+            if (c->owner != cur_config.owner && c->owner != o->owner) {
                 // use this criteria because: cur_config does not need to be
                 // handled here since it's already handled in trace_back().
                 // you also don't want to set o->owner to be PASS_THRU, since
@@ -3255,12 +3238,12 @@ set_transitors_pass_thru_on(const Configuration* cur_config, Configuration* o)
                 }
                 c->owner->PASS_THRU = 1;
             }
-            set_transitors_pass_thru_on(c, o);
+            set_transitors_pass_thru_on(grammar, *c, o);
         } // end is_on_transitor_chain.
     }
 
-    if (o->owner == cur_config->owner) {
-        get_the_context(o);
+    if (o->owner == cur_config.owner) {
+        get_the_context(grammar, o);
     }
 }
 
@@ -3270,7 +3253,7 @@ set_transitors_pass_thru_on(const Configuration* cur_config, Configuration* o)
  * let s = c->owner, find transitors for c in parent states of s.
  */
 static void
-get_transitors(Configuration* c0, Configuration* c)
+get_transitors(const Grammar& grammar, Configuration* c0, Configuration* c)
 {
     const auto& l = c->owner->parents_list;
     if (l == nullptr) {
@@ -3298,7 +3281,7 @@ get_transitors(Configuration* c0, Configuration* c)
                               << std::endl;
                 }
                 insert_transitor_list(c, t);
-                get_originators(c0, t);
+                get_originators(grammar, c0, t);
             }
         }
     }
@@ -3316,8 +3299,8 @@ get_transitors(Configuration* c0, Configuration* c)
  * Originator: a config d in current state,
  *   d.scanned_symbol = c.LHS_symbol
  */
-static void
-get_originators(Configuration* c0, Configuration* c)
+void
+get_originators(const Grammar& grammar, Configuration* c0, Configuration* c)
 {
     if constexpr (DEBUG_GET_ORIGINATOR) {
         std::cout << "-- current config: " << c->owner->state_no << "."
@@ -3325,7 +3308,7 @@ get_originators(Configuration* c0, Configuration* c)
     }
 
     if (c->isCoreConfig == 1u) { // core config, search parent states.
-        get_transitors(c0, c);
+        get_transitors(grammar, c0, c);
     } else { // not core config. find originators in current state.
         for (const auto& d : c->owner->config) {
             if (c == d) {
@@ -3351,40 +3334,36 @@ get_originators(Configuration* c0, Configuration* c)
 ///!!!!!!!!!!!!!!!!!!!!!!!!!!! END.
 
 static void
-do_loop()
+do_loop(const Grammar& grammar)
 {
     Configuration* cur_config = LANE->top();
     const size_t cur_config_index = LANE->count() - 1;
 
     if (cur_config == LT_MARKER || cur_config == LT_ZERO ||
         cur_config == nullptr) { // should never happen.
-        throw std::runtime_error("DO_LOOP cur_config error");
+        throw std::runtime_error("do_loop cur_config error");
     }
 
     if constexpr (DEBUG_GET_ORIGINATOR) {
-        std::cout << "==call get_originators(cur_config) in DO_LOOP()=="
+        std::cout << "==call get_originators(cur_config) in do_loop()=="
                   << std::endl;
     }
-    get_originators(cur_config, cur_config);
+    get_originators(grammar, cur_config, cur_config);
 
-    const int ct = cur_config->originators->count;
     int fail_ct = 0;
 
     if constexpr (DEBUG_PHASE_1) {
         std::cout << "++++++++++TOP of LANE is: ";
-        stdout_write_config(cur_config);
+        stdout_write_config(grammar, cur_config);
     }
 
-    for (int i = 0; i < ct; i++) {
-
+    for (ConfigurationNode* o : cur_config->originators->list) {
         if constexpr (DEBUG_PHASE_1) {
             std::cout << "________NEXT ORIGINATOR___________________"
                       << std::endl;
         }
 
         SymbolNode* contexts_generated = nullptr;
-        Configuration* o = cur_config->originators->list[i];
-
         SymbolNode* scanned_symbol = o->nMarker;
         SymbolNode* gamma = nullptr;
         if (scanned_symbol == nullptr)
@@ -3393,7 +3372,7 @@ do_loop()
             gamma = scanned_symbol->next;
 
         if constexpr (DEBUG_PHASE_1) {
-            stdout_write_config(o);
+            stdout_write_config(grammar, o);
             std::cout << "gamma: "
                       << (gamma == nullptr ? "nullptr"
                                            : gamma->snode->symbol->c_str())
@@ -3405,7 +3384,7 @@ do_loop()
             if constexpr (DEBUG_PHASE_1) {
                 std::cout << "gamma not nullptr, get theads." << std::endl;
             }
-            gamma_theads = get_theads(gamma); // get Heads.
+            gamma_theads = get_theads(grammar, gamma); // get Heads.
             if constexpr (DEBUG_PHASE_1) {
                 my_show_t_heads(gamma, gamma_theads);
             }
@@ -3496,7 +3475,7 @@ do_loop()
             }
             // CONTEXT adding routine.
             context_adding_routine(
-              contexts_generated, o, cur_config_index, &fail_ct);
+              grammar, contexts_generated, o, cur_config_index, &fail_ct);
 
         } else {
             if constexpr (DEBUG_PHASE_1) {
@@ -3511,7 +3490,7 @@ do_loop()
                 contexts_generated = combine_context_list(contexts_generated,
                                                           o->context->nContext);
                 context_adding_routine(
-                  contexts_generated, o, cur_config_index, &fail_ct);
+                  grammar, contexts_generated, o, cur_config_index, &fail_ct);
             } else {
                 if constexpr (DEBUG_PHASE_1) {
                     std::cout << "testB false" << std::endl;
@@ -3526,14 +3505,17 @@ do_loop()
 
                     contexts_generated = combine_context_list(
                       contexts_generated, o->context->nContext);
-                    context_adding_routine(
-                      contexts_generated, o, cur_config_index, &fail_ct);
+                    context_adding_routine(grammar,
+                                           contexts_generated,
+                                           o,
+                                           cur_config_index,
+                                           &fail_ct);
                 } else {
                     if constexpr (DEBUG_PHASE_1) {
                         std::cout << "test_c false" << std::endl;
                     }
 
-                    stack_operation(&fail_ct, o);
+                    stack_operation(grammar, &fail_ct, o);
                 }
             }
         } // end of else (test_a false).
@@ -3550,14 +3532,14 @@ do_loop()
         }
 
         TEST_FAILED = FLAG_OFF;
-        do_loop();
+        do_loop(grammar);
     } else {
-        check_lane_top();
+        check_lane_top(grammar);
     }
 }
 
 static void
-pop_lane()
+pop_lane(const Grammar& grammar)
 {
 
     if constexpr (DEBUG_PHASE_1) {
@@ -3565,11 +3547,11 @@ pop_lane()
     }
 
     LANE->pop();
-    check_lane_top();
+    check_lane_top(grammar);
 }
 
 static void
-check_stack_top()
+check_stack_top(const Grammar& grammar)
 {
     Configuration* top = STACK->top();
 
@@ -3579,7 +3561,7 @@ check_stack_top()
         }
 
         STACK->pop();
-        pop_lane();
+        pop_lane(grammar);
 
     } else {
         if constexpr (DEBUG_PHASE_1) {
@@ -3592,7 +3574,7 @@ check_stack_top()
             }
 
             STACK->pop();
-            check_stack_top();
+            check_stack_top(grammar);
         } else {
             if constexpr (DEBUG_PHASE_1) {
                 std::cout << "__top COMPLETE OFF" << std::endl;
@@ -3601,13 +3583,13 @@ check_stack_top()
             STACK->pop();
             LANE->push(top);
             top->IN_LANE = FLAG_ON;
-            do_loop();
+            do_loop(grammar);
         }
     }
 }
 
 static void
-propogate_context_sets(Configuration* c)
+propogate_context_sets(const Grammar& grammar, Configuration* c)
 {
     if (c == nullptr || c->COMPLETE == 0u || c->isCoreConfig == 1u)
         return;
@@ -3615,7 +3597,7 @@ propogate_context_sets(Configuration* c)
     if constexpr (DEBUG_PHASE_1) {
         std::cout << "===config " << c->owner->state_no << "." << c->ruleID
                   << " heuristic propogate context sets===" << std::endl;
-        stdout_write_config(c);
+        stdout_write_config(grammar, c);
     }
 
     State* s = c->owner;
@@ -3638,8 +3620,8 @@ propogate_context_sets(Configuration* c)
     }
 }
 
-static void
-check_lane_top()
+void
+check_lane_top(const Grammar& grammar)
 {
     Configuration* lane_top = LANE->top();
 
@@ -3648,7 +3630,7 @@ check_lane_top()
             std::cout << "check lane top true" << std::endl;
         }
 
-        check_stack_top();
+        check_stack_top(grammar);
     } else {
         if constexpr (DEBUG_PHASE_1) {
             std::cout << "check lane top false" << std::endl;
@@ -3659,14 +3641,14 @@ check_lane_top()
                 std::cout << "lane top is ZERO." << std::endl;
             }
 
-            pop_lane();
+            pop_lane(grammar);
         } else {
             lane_top->IN_LANE = FLAG_OFF;
             lane_top->COMPLETE = FLAG_ON;
 
             /// 12-19-2008.
             if (IN_EDGE_PUSHING_LANE_TRACING == false) {
-                propogate_context_sets(lane_top);
+                propogate_context_sets(grammar, lane_top);
             }
             if (LANE->count() == 1) { // the starting reduction
                                       /////////// END PROGRAMING ///////////////
@@ -3675,7 +3657,7 @@ check_lane_top()
                               << std::endl;
                 }
             } else {
-                pop_lane();
+                pop_lane(grammar);
             }
         }
     }

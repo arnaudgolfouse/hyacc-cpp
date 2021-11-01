@@ -802,8 +802,10 @@ get_string_with_k_non_vanish_symbol(SymbolList alpha, int k) -> SymbolList
 // return the new list.
 //
 auto
-replace_with_rhs(SymbolList new_list, SymbolNode* n_prev, int rule_id)
-  -> SymbolNode*
+replace_with_rhs(const Grammar& grammar,
+                 SymbolList new_list,
+                 SymbolNode* n_prev,
+                 int rule_id) -> SymbolNode*
 {
     SymbolNode *rhs_tail = nullptr, *tmp = nullptr;
 
@@ -902,7 +904,7 @@ lrk_theads_truncate_list_by_k(SymbolList s, int k) -> SymbolList
 }
 
 void
-List::add_derivatives(ObjectItem* o, int j, int k)
+List::add_derivatives(const Grammar& grammar, ObjectItem* o, int j, int k)
 {
     // get the (j)-th symbol.
     auto* m = static_cast<SymbolNode*>(o->object);
@@ -927,7 +929,7 @@ List::add_derivatives(ObjectItem* o, int j, int k)
             n = n->next;
         }
 
-        new_list = replace_with_rhs(new_list, n_prev, r->ruleID);
+        new_list = replace_with_rhs(grammar, new_list, n_prev, r->ruleID);
         // assumption: new_list != nullptr, t != nullptr.
         if (nullptr != new_list) {
             new_list = lrk_theads_truncate_list_by_k(new_list, k);
@@ -1080,7 +1082,8 @@ List::lrk_theads_rm_theads(int k, List* t_heads)
  * This is a set of strings.
  */
 auto
-lrk_theads(SymbolList alpha, int k) -> std::shared_ptr<List>
+lrk_theads(const Grammar& grammar, SymbolList alpha, int k)
+  -> std::shared_ptr<List>
 {
     if (alpha == nullptr)
         return nullptr;
@@ -1094,7 +1097,7 @@ lrk_theads(SymbolList alpha, int k) -> std::shared_ptr<List>
     for (int j = 0; j < k; j++) {
         ObjectItem* o = t->head;
         while (o != nullptr) {
-            t->add_derivatives(o, j, k);
+            t->add_derivatives(grammar, o, j, k);
             o = o->next;
         }
 

@@ -115,7 +115,7 @@ test_str()
 }
 
 static void
-test_lrk_theads()
+test_lrk_theads(const Grammar& grammar)
 {
     std::cout << "test_lrk_theads(), on G_thead." << std::endl;
     SymbolList alpha = SymbolNode::create(hash_tbl_find("X"));
@@ -127,7 +127,7 @@ test_lrk_theads()
     t->next = SymbolNode::create(hash_tbl_find("U"));
     t = t->next;
 
-    std::shared_ptr<List> th = lrk_theads(alpha, 2);
+    std::shared_ptr<List> th = lrk_theads(grammar, alpha, 2);
     th->dump(&print_symbol_list);
     exit(0);
 }
@@ -265,11 +265,11 @@ insert_lrk_pt(int state_no,
 }
 
 static void
-lrk_config_lane_tracing(Configuration* c)
+lrk_config_lane_tracing(const Grammar& grammar, Configuration* c)
 {
     EDGE_PUSHING_CONTEXT_GENERATED = nullptr;
     IN_EDGE_PUSHING_LANE_TRACING = true;
-    lane_tracing_reduction(c);
+    lane_tracing_reduction(grammar, c);
 
     // pretend that c is a reduce configuration.
     c->LANE_END = 0;
@@ -342,7 +342,7 @@ fill_set_c2(ConfigPairNode* n,
  * @Input: inadequate state no.: state_no.
  */
 static void
-edge_pushing(int state_no)
+edge_pushing(const Grammar& grammar, int state_no)
 {
     CfgCtxt* cc = nullptr;
     Configuration* c = nullptr;
@@ -359,7 +359,7 @@ edge_pushing(int state_no)
 
     for (const auto& i : s->config) {
         c = i;
-        if (true == is_final_configuration(c)) {
+        if (true == is_final_configuration(grammar, c)) {
             // check if this final config's context contains conflict symbol,
             // if so add it to set_c, together with the conflict symbol(s).
             cc = CfgCtxt::create(
@@ -389,7 +389,8 @@ edge_pushing(int state_no)
                 std::cout << "Error: c->nMarker is nullptr. " << std::endl;
                 continue;
             }
-            std::shared_ptr<List> phi = lrk_theads(c->nMarker->next, k1);
+            std::shared_ptr<List> phi =
+              lrk_theads(grammar, c->nMarker->next, k1);
             if (phi == nullptr) {
                 // std::cout << "phi is nullptr. should not!" << std::endl;
                 continue;
@@ -421,7 +422,7 @@ edge_pushing(int state_no)
                         ConfigPairNode* tmp =
                           lane_head_tail_pairs; // store the old list.
                         lane_head_tail_pairs = nullptr;
-                        lrk_config_lane_tracing(c);
+                        lrk_config_lane_tracing(grammar, c);
                         for (ConfigPairNode* n = lane_head_tail_pairs;
                              n != nullptr;
                              n = n->next) {
@@ -504,7 +505,7 @@ update_lr1_parsing_table(int state_no)
 }
 
 void
-lane_tracing_lrk()
+lane_tracing_lrk(const Grammar& grammar)
 {
     if (0 == states_inadequate->count_unresolved)
         return;
@@ -520,7 +521,7 @@ lane_tracing_lrk()
         int ct_rr = states_new_array->rr_count[state_no];
 
         if (state_no >= 0 && ct_rr > 0) {
-            edge_pushing(state_no);
+            edge_pushing(grammar, state_no);
 
             // update corresonding entry in LR(1) parsing table.
             update_lr1_parsing_table(state_no);

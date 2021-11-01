@@ -201,8 +201,10 @@ extern LRkPtEntry* LRk_PT; // extension parsing table for LR(k).
  * Functions in lane_tracing.c
  */
 extern auto
-trace_back(const Configuration* c0, Configuration* c, laneHead* lh_list)
-  -> laneHead*;
+trace_back(const Grammar& grammar,
+           const Configuration* c0,
+           Configuration* c,
+           laneHead* lh_list) -> laneHead*;
 extern void
 trace_back_lrk(const Configuration* c0, Configuration* c);
 extern void
@@ -212,7 +214,7 @@ trace_back_lrk_clear(const Configuration* c0, Configuration* c);
  * Functions in lrk.cpp
  */
 extern void
-lane_tracing_lrk();
+lane_tracing_lrk(const Grammar& grammar);
 
 // Set - a linked list of objects.
 struct ObjectItem
@@ -250,7 +252,7 @@ struct List
     // productions to the j-th symbol, omitting existing strings,
     // and truncate until it contains no more than k non-vanishable
     // symbols.
-    void add_derivatives(ObjectItem* o, int j, int k);
+    void add_derivatives(const Grammar& grammar, ObjectItem* o, int j, int k);
     void dump(void (*list_item_dump)(void*)) const;
 };
 
@@ -333,7 +335,8 @@ struct CfgCtxt
 
 // for LR(k) theads.
 extern auto
-lrk_theads(SymbolList alpha, int k) -> std::shared_ptr<List>;
+lrk_theads(const Grammar& grammar, SymbolList alpha, int k)
+  -> std::shared_ptr<List>;
 
 // in the lane_tracing of edge_pushing.
 extern bool IN_EDGE_PUSHING_LANE_TRACING;

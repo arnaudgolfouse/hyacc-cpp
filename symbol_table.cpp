@@ -35,6 +35,7 @@
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <string_view>
 
 constexpr bool DEBUG_HASHTBL = false;
 
@@ -47,7 +48,7 @@ create_rule_id_node(int rule_id) -> RuleIDNode*
 {
     auto* r = new RuleIDNode;
     if (r == nullptr)
-        YYERR_EXIT("createRuleIDNode: out of memory\n");
+        throw std::runtime_error("create_rule_id_node: out of memory\n");
 
     r->ruleID = rule_id;
     r->next = nullptr;
@@ -69,8 +70,8 @@ write_rule_id_list(const SymbolTblNode* n)
     std::cout << std::endl;
 }
 
-void
-write_non_terminal_rule_id_list()
+static void
+write_non_terminal_rule_id_list(const Grammar& grammar)
 {
     int count = 0;
     std::cout << "--Nonterminal symbol rule index list--" << std::endl;
@@ -105,11 +106,11 @@ auto
 SymbolNode::create(SymbolTblNode* sn) -> SymbolNode*
 {
     if (sn == nullptr)
-        YYERR_EXIT("createSymbolNode error: snode is nullptr\n");
+        throw std::runtime_error("SymbolNode::create error: sn is nullptr\n");
 
     SymbolNode* n = new SymbolNode;
     if (n == nullptr)
-        YYERR_EXIT("createSymbolNode error: out of memory\n");
+        throw std::runtime_error("SymbolNode::create error: out of memory\n");
     n->snode = sn;
     n->next = nullptr;
     return n;
@@ -337,11 +338,12 @@ write_symbol_list(SymbolList a, const char* name)
  * create a symbol table node, used by hash table HashTbl.
  */
 auto
-create_symbol_tbl_node(const std::string& symbol) -> SymbolTblNode*
+create_symbol_tbl_node(const std::string_view symbol) -> SymbolTblNode*
 {
     auto* n = new SymbolTblNode;
     if (n == nullptr)
-        YYERR_EXIT("createSymbolTblNode error: out of memory\n");
+        throw std::runtime_error(
+          "create_symbol_tbl_node error: out of memory\n");
     n->symbol = std::make_shared<std::string>(symbol);
     n->next = nullptr;
     n->type = symbol_type::NEITHER;
@@ -419,7 +421,7 @@ hash_tbl_init()
  * empty string is allowed.
  */
 static auto
-hash_value(const std::string& symbol) -> int
+hash_value(const std::string_view symbol) -> int
 {
     size_t len = symbol.size();
 
@@ -445,7 +447,7 @@ hash_value(const std::string& symbol) -> int
  * this symbol.
  */
 auto
-hash_tbl_insert(const std::string& symbol) -> SymbolTblNode*
+hash_tbl_insert(const std::string_view symbol) -> SymbolTblNode*
 {
     if constexpr (DEBUG_HASHTBL) {
         // std::cout << "hash insert " << symbol << " at " << where <<
@@ -485,7 +487,7 @@ hash_tbl_insert(const std::string& symbol) -> SymbolTblNode*
  * If symbol does not exist, return nullptr.
  */
 auto
-hash_tbl_find(const std::string& symbol) -> SymbolTblNode*
+hash_tbl_find(const std::string_view symbol) -> SymbolTblNode*
 {
     int v = hash_value(symbol);
 

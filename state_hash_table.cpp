@@ -117,7 +117,8 @@ extern bool in_lanetracing;
  * else, return the found state.
  */
 auto
-search_state_hash_tbl(State* s, int* is_compatible) -> State*
+search_state_hash_tbl(const Grammar& grammar, State* s, int* is_compatible)
+  -> State*
 {
     const size_t v = get_state_hash_val(*s);
     auto& cell = StateHashTbl.at(v);
@@ -139,7 +140,7 @@ search_state_hash_tbl(State* s, int* is_compatible) -> State*
         }
         if (Options::get().use_combine_compatible_states) {
             if (is_compatible_states(n->state, s)) {
-                combine_compatible_states(n->state, s);
+                combine_compatible_states(grammar, n->state, s);
                 (*is_compatible) = 1;
                 return n->state;
             }

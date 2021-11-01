@@ -46,7 +46,7 @@ struct Stack
     static auto create2(size_t init_capacity) -> Stack*;
     static void destroy(Stack* s);
 
-    void dump() const;
+    void dump(const Grammar& grammar) const noexcept;
     inline void push(Configuration* n) { this->array.push_back(n); }
     inline auto pop() -> Configuration*
     {

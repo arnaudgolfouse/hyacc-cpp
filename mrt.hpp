@@ -135,4 +135,5 @@ get_parents_for_mr_leaf(const MRLeaves& mr_leaves,
                         size_t leaf_index,
                         MRParents* parents);
 extern auto
-build_multirooted_tree() -> std::vector<std::shared_ptr<MRTreeNode>>;
+build_multirooted_tree(const Grammar& grammar)
+  -> std::vector<std::shared_ptr<MRTreeNode>>;

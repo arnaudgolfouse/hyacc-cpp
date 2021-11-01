@@ -251,7 +251,7 @@ update_r_list(GvNode* r_list, GvNode* s_list) -> GvNode*
  * For O0, O1.
  */
 void
-gen_graphviz_input()
+gen_graphviz_input(const Grammar& grammar, const std::string& y_gviz)
 {
     char action = 0;
     int state = 0;
@@ -272,7 +272,7 @@ gen_graphviz_input()
 
         for (int col = 0; col < ParsingTblCols; col++) {
             SymbolTblNode* n = ParsingTblColHdr[col];
-            if (!is_goal_symbol(n)) {
+            if (!is_goal_symbol(grammar, n)) {
                 get_action(n->type, col, row, &action, &state);
                 /*std::cout  <<  action <<  state<< "\t"; */
                 if (action == 0) {
@@ -305,7 +305,7 @@ gen_graphviz_input()
  * For O2, O3.
  */
 void
-gen_graphviz_input2()
+gen_graphviz_input2(const Grammar& grammar, const std::string& y_gviz)
 {
     char action = 0;
     int state = 0;
@@ -328,7 +328,7 @@ gen_graphviz_input2()
         if (is_reachable_state(row)) {
             for (int col = 0; col < ParsingTblCols; col++) {
                 SymbolTblNode* n = ParsingTblColHdr[col];
-                if (!is_goal_symbol(n) && !is_parent_symbol(n)) {
+                if (!is_goal_symbol(grammar, n) && !is_parent_symbol(n)) {
                     get_action(n->type, col, row, &action, &state);
                     if (action == 's' || action == 'g')
                         state = get_actual_state(state);
