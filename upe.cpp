@@ -221,17 +221,16 @@ get_ups_state(const std::vector<UnitProdState>& ups, const std::vector<int>& a)
 }
 
 auto
-is_unit_production(int rule_no) -> bool
+Grammar::is_unit_production(size_t rule_no) const -> bool
 {
-    if (rule_no >= grammar.rules.size()) {
+    if (rule_no >= this->rules.size()) {
         throw std::runtime_error(
-          std::string("isUnitProduction error: array index (") +
+          std::string("is_unit_production error: array index (") +
           std::to_string(rule_no) + ") out of bound");
     }
-    if (grammar.rules[rule_no]->RHS_count == 1 &&
-        !grammar.rules[rule_no]->nRHS_head->snode->symbol->empty())
+    if (this->rules[rule_no]->RHS_count == 1 &&
+        !this->rules[rule_no]->nRHS_head->snode->symbol->empty())
         return true;
-
     return false;
 }
 
@@ -265,7 +264,7 @@ insert_action_of_symbol(SymbolTblNode* symbol,
     } else if (action == 's' || action == 'g') {
         insert_action(symbol, new_state, state_dest);
     } else if (action == 'r') {
-        if (is_unit_production(state_dest) == false) {
+        if (!grammar.is_unit_production(state_dest)) {
             insert_action(symbol, new_state, (-1) * state_dest);
         }
     }

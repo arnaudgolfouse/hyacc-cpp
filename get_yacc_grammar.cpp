@@ -29,6 +29,7 @@
 
 #include "y.hpp"
 #include <array>
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 #include <ios>
@@ -96,11 +97,25 @@ enum yacc_section1_state
     IS_UNKNOWN
 };
 
-/*
- * Functions declarations.
- */
-void
-add_rhs_symbol(SymbolTblNode* symbol);
+static void
+add_rhs_symbol(Grammar& grammar, SymbolTblNode* symbol)
+{
+    // std::cout  << std::endl<< "==add RHS symbol: " <<  symbol << std::endl;
+    Production* p = grammar.rules.back();
+    p->RHS_count++;
+
+    SymbolNode* s = SymbolNode::create(symbol);
+    if (p->nRHS_head == nullptr) {
+        p->nRHS_head = p->nRHS_tail = s;
+    } else {
+        p->nRHS_tail->next = s;
+        p->nRHS_tail = s;
+    }
+
+    // if s is a terminal, it's the last terminal of p's RHS.
+    if (s->snode->type == symbol_type::TERMINAL && s->snode->TP != nullptr)
+        p->lastTerminal = s->snode;
+}
 
 /*
  * case-insensitive string compare.
@@ -112,18 +127,18 @@ add_rhs_symbol(SymbolTblNode* symbol);
  * Note: strcasecmp() is not an ANSI C function.
  * So use my own to be ANSI C compliant.
  */
-int
-y_strcasecmp(const char* a, const char* b)
+static auto
+y_strcasecmp(const char* a, const char* b) -> int
 {
-    int len_a, len_b, len, i, cmp_val;
-    len_a = strlen(a);
-    len_b = strlen(b);
+    int cmp_val = 0;
+    size_t len_a = strlen(a);
+    size_t len_b = strlen(b);
 
-    len = len_a;
+    size_t len = len_a;
     if (len > len_b)
         len = len_b;
 
-    for (i = 0; i < len; i++) {
+    for (size_t i = 0; i < len; i++) {
         cmp_val = tolower(a[i]) - tolower(b[i]);
         if (cmp_val > 0)
             return 1;
@@ -131,7 +146,7 @@ y_strcasecmp(const char* a, const char* b)
             return -1;
     }
 
-    cmp_val = len_a - len_b;
+    cmp_val = static_cast<int>(len_a) - static_cast<int>(len_b);
     if (cmp_val > 0)
         return 1;
     if (cmp_val < 0)
@@ -140,7 +155,7 @@ y_strcasecmp(const char* a, const char* b)
     return 0;
 }
 
-void
+static void
 init_terminal_property(SymbolTblNode* n)
 {
     n->TP = new TerminalProperty;
@@ -153,11 +168,10 @@ init_terminal_property(SymbolTblNode* n)
  *  A valid identifier: [alph|_](alph|digit|_)*.
  *  where alph is [a-zA-Z], digit is [0-9].
  */
-bool
-validate_identifier(char* s)
+static auto
+validate_identifier(const char* s) -> bool
 {
-    int i;
-    int len = strlen(s);
+    size_t len = strlen(s);
 
     if (len == 0)
         return false;
@@ -165,7 +179,7 @@ validate_identifier(char* s)
     if (!(isalpha(s[0]) || s[0] == '_'))
         return false;
 
-    for (i = 1; i < len; i++) {
+    for (size_t i = 1; i < len; i++) {
         if (!(isalnum(s[i]) || s[i] == '_'))
             return false;
     }
@@ -175,7 +189,7 @@ validate_identifier(char* s)
 /*
  * Assumption: n is a terminal, and n->TP != nullptr.
  */
-void
+static void
 get_terminal_precedence(SymbolTblNode* n, yacc_section1_state state)
 {
     if (n->type != symbol_type::TERMINAL || n->TP == nullptr)
@@ -293,15 +307,15 @@ output_terminal(SymbolNode* tokens_tail,
         add_token(tokens_tail, n);
 }
 
-void
-get_type_symbol(char* token_type)
+static void
+get_type_symbol(const char* token_type)
 {
     SymbolTblNode* n = get_symbol(symbol_type::NONTERMINAL);
     n->token_type = token_type;
 }
 
-void
-get_start_symbol(char* token_type)
+static void
+get_start_symbol(const char* token_type)
 {
     start_symbol = get_symbol(symbol_type::NONTERMINAL);
     start_symbol->token_type = token_type;
@@ -313,7 +327,7 @@ get_start_symbol(char* token_type)
  * Note that atoi() function returns 0 if error occurs,
  * like when the ysymbol is a string "abc" and not a number.
  */
-void
+static void
 get_expect_sr_conflict()
 {
     if (ysymbol_pt == 0)
@@ -351,7 +365,7 @@ get_expect_sr_conflict()
  * char of a symbol should be a letter.
  */
 void
-add_char_to_symbol(char c)
+add_char_to_symbol(const char c)
 {
     if (ysymbol_pt >= ysymbol_size - 1) { // one more for '\0'.
         ysymbol_size *= 2;
@@ -377,7 +391,7 @@ add_char_to_symbol(char c)
  * Every occurence of "%left" or "%right" increases
  * the precedence by 1.
  */
-auto
+static auto
 get_section1_state() -> yacc_section1_state
 {
     if (y_strcasecmp(ysymbol, "token") == 0) {
@@ -416,7 +430,7 @@ get_section1_state() -> yacc_section1_state
 }
 
 static void
-my_perror(const char* msg, int c)
+my_perror(const char* msg, const int c)
 {
     using std::to_string;
     throw std::runtime_error(std::string("\nerror [line ") + to_string(n_line) +
@@ -430,7 +444,7 @@ my_perror(const char* msg, int c)
  *
  * Currently this only gets the "%start" line if there is one.
  */
-auto
+static auto
 process_yacc_file_input_section1(std::ifstream& fp) -> SymbolNode*
 {
     yacc_section1_state state = IS_NONE,
@@ -449,7 +463,6 @@ process_yacc_file_input_section1(std::ifstream& fp) -> SymbolNode*
 
     char c = 0, last_c = '\n', last_last_c = 0;
     while (fp.get(c)) {
-
         if (state != IS_COMMENT && last_c == '\n' && c == '%') {
             // do nothing.
             state = IS_NONE;
@@ -638,7 +651,7 @@ process_yacc_file_input_section1(std::ifstream& fp) -> SymbolNode*
 /*
  * Used by function createNewRule().
  */
-auto
+static auto
 create_empty_production() -> Production*
 {
     auto* p = new Production;
@@ -656,8 +669,8 @@ create_empty_production() -> Production*
     return p;
 }
 
-auto
-create_new_rule() -> Production*
+static auto
+create_new_rule(Grammar& grammar) -> Production*
 {
     grammar.rules.push_back(create_empty_production());
     return grammar.rules.back();
@@ -670,62 +683,42 @@ create_new_rule() -> Production*
  *          be inserted to the position of the mid-production action.
  */
 static void
-insert_mid_prod_rule(int ct)
+insert_mid_prod_rule(Grammar& grammar, int ct)
 {
     constexpr size_t NAME_LHS_SIZE = 20;
     std::array<char, NAME_LHS_SIZE> name_lhs{};
 
-    create_new_rule();
+    create_new_rule(grammar);
 
     // switch the postion of the last two rules.
-    int rule_id = grammar.rules.size() - 1; // last rule's pointer.
+    size_t rule_id = grammar.rules.size() - 1; // last rule's pointer.
     Production* p = grammar.rules[rule_id];
     grammar.rules[rule_id] = grammar.rules[rule_id - 1];
     grammar.rules[rule_id - 1] = p;
 
     // now fill the value of the new added rule.
-    sprintf(name_lhs.data(), "$$%d_@%d", rule_id - 1, ct);
+    sprintf(name_lhs.data(), "$$%lu_@%d", rule_id - 1, ct);
     SymbolTblNode* n = hash_tbl_insert(name_lhs.data());
     n->type = symbol_type::NONTERMINAL;
     p->nLHS = SymbolNode::create(n);
     p->hasCode = 1;
 
-    add_rhs_symbol(n);
+    add_rhs_symbol(grammar, n);
 }
 
-void
-add_lhs_symbol(SymbolTblNode* symbol)
+static void
+add_lhs_symbol(const Grammar& grammar, SymbolTblNode* symbol)
 {
     // std::cout  << std::endl<< "==add LHS symbol: " <<  symbol << std::endl;
     Production* p = grammar.rules.back();
     p->nLHS = SymbolNode::create(symbol);
 }
 
-void
-add_rhs_symbol(SymbolTblNode* symbol)
-{
-    // std::cout  << std::endl<< "==add RHS symbol: " <<  symbol << std::endl;
-    Production* p = grammar.rules.back();
-    p->RHS_count++;
-
-    SymbolNode* s = SymbolNode::create(symbol);
-    if (p->nRHS_head == nullptr) {
-        p->nRHS_head = p->nRHS_tail = s;
-    } else {
-        p->nRHS_tail->next = s;
-        p->nRHS_tail = s;
-    }
-
-    // if s is a terminal, it's the last terminal of p's RHS.
-    if (s->snode->type == symbol_type::TERMINAL && s->snode->TP != nullptr)
-        p->lastTerminal = s->snode;
-}
-
 /*
  * Assumption: symbol is the one after %prec in the RHS of p.
  */
-void
-get_rhs_prec_symbol(char* symbol)
+static void
+get_rhs_prec_symbol(const Grammar& grammar, char* symbol)
 {
     SymbolTblNode* n = hash_tbl_find(symbol);
     if (n == nullptr) {
@@ -740,8 +733,8 @@ get_rhs_prec_symbol(char* symbol)
         p->lastTerminal = n;
 }
 
-void
-set_has_code()
+static void
+set_has_code(const Grammar& grammar)
 {
     grammar.rules.back()->hasCode = 1;
 }
@@ -755,7 +748,7 @@ set_has_code()
 /////////////////////////////////////////////////////////////
 
 static auto
-is_in_vanish_symbol_list(const SymbolTblNode* n) -> bool
+is_in_vanish_symbol_list(const Grammar& grammar, const SymbolTblNode* n) -> bool
 {
     // std::cout << "isInVanishSymbolList input: " <<  symbol << std::endl;
     if (n->symbol->empty()) {
@@ -774,11 +767,11 @@ is_in_vanish_symbol_list(const SymbolTblNode* n) -> bool
 /*
  * Used by the algorithm to find vanish symbol(s) of a grammar.
  */
-auto
-flag_y(Production* p) -> bool
+static auto
+flag_y(const Grammar& grammar, Production* p) -> bool
 {
     for (SymbolNode* a = p->nRHS_head; a != nullptr; a = a->next) {
-        if (is_in_vanish_symbol_list(a->snode) == false)
+        if (is_in_vanish_symbol_list(grammar, a->snode) == false)
             return false;
     }
     return true; // x1,...,xn are all vanish symbols. Flag y.
@@ -805,18 +798,18 @@ flag_y(Production* p) -> bool
  *   3. If any new symbols were flagged in step 2, go
  *      back to step 2.
  */
-void
-get_vanish_symbols(Grammar* g)
+static void
+get_vanish_symbols(Grammar& grammar)
 {
     SymbolNode* tail = nullptr;
-    g->vanish_symbol_count = 0;
+    grammar.vanish_symbol_count = 0;
 
     // find vanish symbols that occur in epsilon-productions.
-    for (auto& rule : g->rules) {
-        if (flag_y(rule)) {
+    for (auto& rule : grammar.rules) {
+        if (flag_y(grammar, rule)) {
 
             if (tail == nullptr) {
-                tail = g->vanish_symbol_list =
+                tail = grammar.vanish_symbol_list =
                   SymbolNode::create(rule->nLHS->snode);
             } else {
                 tail->next = SymbolNode::create(rule->nLHS->snode);
@@ -824,28 +817,28 @@ get_vanish_symbols(Grammar* g)
             }
 
             rule->nLHS->snode->vanishable = true;
-            g->vanish_symbol_count++;
+            grammar.vanish_symbol_count++;
         }
     }
 
     // if so far no vanish symbol, then no epsilon-production.
     // then no more vanish symbols.
-    if (g->vanish_symbol_count == 0)
+    if (grammar.vanish_symbol_count == 0)
         return;
 
     while (true) {
         bool new_vanish_symbol_found = false;
-        for (auto& rule : g->rules) {
-            if (is_in_vanish_symbol_list(rule->nLHS->snode) == false) {
+        for (auto& rule : grammar.rules) {
+            if (is_in_vanish_symbol_list(grammar, rule->nLHS->snode) == false) {
                 // y is not yet a vanish symbol, then:
-                if (flag_y(rule)) {
+                if (flag_y(grammar, rule)) {
                     // we know tail != nullptr
                     tail->next = SymbolNode::create(rule->nLHS->snode);
                     tail = tail->next;
 
                     rule->nLHS->snode->vanishable = true;
 
-                    g->vanish_symbol_count++;
+                    grammar.vanish_symbol_count++;
                     new_vanish_symbol_found = true;
                 }
             }
@@ -862,21 +855,21 @@ get_vanish_symbols(Grammar* g)
  * some rules. If not, such invalid non-terminal will
  * be reported after getSymbolRuleIDList().
  */
-void
-get_non_terminals(Grammar* g)
+static void
+get_non_terminals(Grammar& g)
 {
     int index = 0;
     SymbolNode* tail = nullptr;
-    g->non_terminal_count = 0;
+    g.non_terminal_count = 0;
 
     // First scan LHS of all rules.
-    for (const auto& rule : g->rules) {
-        if (find_in_symbol_list(g->non_terminal_list, rule->nLHS->snode) !=
+    for (const auto& rule : g.rules) {
+        if (find_in_symbol_list(g.non_terminal_list, rule->nLHS->snode) !=
             nullptr) {
             continue;
         }
         if (tail == nullptr) {
-            tail = g->non_terminal_list = SymbolNode::create(rule->nLHS->snode);
+            tail = g.non_terminal_list = SymbolNode::create(rule->nLHS->snode);
         } else {
             tail->next = SymbolNode::create(rule->nLHS->snode);
             tail = tail->next;
@@ -885,19 +878,19 @@ get_non_terminals(Grammar* g)
         if (*tail->snode->symbol != STR_ACCEPT)
             tail->snode->value = (-1) * (++index);
 
-        g->non_terminal_count++;
+        g.non_terminal_count++;
     }
 
     bool has_error = false;
     // Next scan RHS of all rules.
     // no extra non-terminal should appear, since otherwise
     // it's not used as the LHS of any rule.
-    for (const auto& rule : g->rules) {
+    for (const auto& rule : g.rules) {
         for (tail = rule->nRHS_head; tail != nullptr; tail = tail->next) {
             if (tail->snode->type != symbol_type::NONTERMINAL)
                 continue;
 
-            if (find_in_symbol_list(g->non_terminal_list, tail->snode) ==
+            if (find_in_symbol_list(g.non_terminal_list, tail->snode) ==
                 nullptr) {
                 std::cerr << "error: non-termnal '" << tail->snode->symbol
                           << "' is not used as the LHS of any rule"
@@ -915,17 +908,17 @@ get_non_terminals(Grammar* g)
  * This function is called after getNonTerminals().
  * empty string is not included as terminal.
  */
-void
-get_terminals(Grammar* g)
+static void
+get_terminals(Grammar& g)
 {
     SymbolNode* tail = nullptr;
-    g->terminal_count = 0;
+    g.terminal_count = 0;
 
-    for (const auto& rule : g->rules) {
+    for (const auto& rule : g.rules) {
         SymbolNode* s = rule->nRHS_head;
         for (int j = 0; j < rule->RHS_count; j++) {
             if (j > 0)
-                s = s->next; // s: g->rules[i]->RHS[j].
+                s = s->next; // s: g->rules.at(i)->RHS[j].
 
             if (s->snode->type != symbol_type::TERMINAL)
                 continue;
@@ -934,17 +927,17 @@ get_terminals(Grammar* g)
             if (s->snode->symbol->empty())
                 continue;
 
-            if (find_in_symbol_list(g->terminal_list, s->snode) != nullptr)
+            if (find_in_symbol_list(g.terminal_list, s->snode) != nullptr)
                 continue;
 
             if (tail == nullptr) {
-                tail = g->terminal_list = SymbolNode::create(s->snode);
+                tail = g.terminal_list = SymbolNode::create(s->snode);
             } else {
                 tail->next = SymbolNode::create(s->snode);
                 tail = tail->next;
             }
             s->snode->type = symbol_type::TERMINAL;
-            g->terminal_count++;
+            g.terminal_count++;
         } // end of for
     }     // end of for
 }
@@ -952,8 +945,8 @@ get_terminals(Grammar* g)
 /*
  * ref: page 38. The C programming language.
  */
-auto
-get_escape_char(char c) -> char
+static auto
+get_escape_char(const char c) -> char
 {
     switch (c) {
         case 'a':
@@ -1048,8 +1041,8 @@ get_token_value(const std::string& s, int* index) -> int
  * The tokens list can include those after %prec in the
  * rule section, which terminal list does not include.
  */
-void
-get_tokens_value(Grammar* g)
+static void
+get_tokens_value()
 {
     int index = 0;
     for (SymbolNode* a = tokens; a != nullptr; a = a->next) {
@@ -1057,10 +1050,10 @@ get_tokens_value(Grammar* g)
     }
 }
 
-void
-get_goal_symbol(Grammar* g)
+static void
+get_goal_symbol(Grammar& g)
 {
-    g->goal_symbol = SymbolNode::create(g->rules[0]->nLHS->snode);
+    g.goal_symbol = SymbolNode::create(g.rules.at(0)->nLHS->snode);
 }
 
 /*
@@ -1075,10 +1068,10 @@ get_goal_symbol(Grammar* g)
  * Since there are not many symbols, this will take
  * only very little time.
  */
-void
-get_symbol_parsing_tbl_col(Grammar* g)
+static void
+get_symbol_parsing_tbl_col(const Grammar& g)
 {
-    SymbolNode* a = g->terminal_list;
+    SymbolNode* a = g.terminal_list;
     SymbolTblNode* n = hash_tbl_find(STR_END);
     n->seq = 0;
 
@@ -1089,7 +1082,7 @@ get_symbol_parsing_tbl_col(Grammar* g)
 
     for (int i = 1; a != nullptr; a = a->next, i++) {
         n = hash_tbl_find(*a->snode->symbol);
-        n->seq = g->terminal_count + i;
+        n->seq = g.terminal_count + i;
     }
 }
 
@@ -1098,11 +1091,11 @@ get_symbol_parsing_tbl_col(Grammar* g)
  *  This plus the getSymbolParsingTblCol() function make it
  *  easy to refer between column number and column symbol.
  */
-void
-get_parsing_tbl_col_hdr(Grammar* g)
+static void
+get_parsing_tbl_col_hdr(const Grammar& grammar)
 {
     ParsingTblColHdr = std::vector<SymbolTblNode*>(
-      1 + g->terminal_count + g->non_terminal_count, nullptr);
+      1 + grammar.terminal_count + grammar.non_terminal_count, nullptr);
 
     ParsingTblColHdr.at(0) = hash_tbl_find(STR_END);
     ParsingTblCols = 1;
@@ -1111,7 +1104,7 @@ get_parsing_tbl_col_hdr(Grammar* g)
         ParsingTblColHdr.at(ParsingTblCols++) = a->snode;
     }
 
-    for (SymbolNode* a = g->non_terminal_list; a != nullptr; a = a->next) {
+    for (SymbolNode* a = grammar.non_terminal_list; a != nullptr; a = a->next) {
         ParsingTblColHdr.at(ParsingTblCols++) = a->snode;
     }
 }
@@ -1123,14 +1116,14 @@ get_parsing_tbl_col_hdr(Grammar* g)
  * If a non-terminal is not the LHS of any rule,
  * it's an error and should be reported.
  */
-void
-get_symbol_rule_id_list(Grammar* g)
+static void
+get_symbol_rule_id_list(const Grammar& g)
 {
-    for (SymbolNode* a = g->non_terminal_list; a != nullptr; a = a->next) {
+    for (SymbolNode* a = g.non_terminal_list; a != nullptr; a = a->next) {
         SymbolTblNode* n = a->snode;
         RuleIDNode* tail = nullptr;
-        for (int i = 0; i < g->rules.size(); i++) {
-            if (n == g->rules[i]->nLHS->snode) {
+        for (int i = 0; i < g.rules.size(); i++) {
+            if (n == g.rules[i]->nLHS->snode) {
                 RuleIDNode* r = create_rule_id_node(i);
                 if (tail == nullptr) {
                     n->ruleIDList = tail = r;
@@ -1144,33 +1137,33 @@ get_symbol_rule_id_list(Grammar* g)
     // writeNonTerminalRuleIDList();
 }
 
-void
-get_grammar_unit_productions(Grammar* g)
+static void
+get_grammar_unit_productions(const Grammar& g)
 {
-    for (int i = 0; i < g->rules.size(); i++) {
-        if (grammar.rules[i]->RHS_count == 1 &&
-            grammar.rules[i]->nRHS_head->snode->symbol->size() > 0) {
-            g->rules[i]->isUnitProduction = true;
+    for (Production* rule : g.rules) {
+        if (rule->RHS_count == 1 &&
+            rule->nRHS_head->snode->symbol->size() > 0) {
+            rule->isUnitProduction = true;
         }
     }
 }
 
-void
-get_grammar_params()
+static void
+get_grammar_params(Grammar& grammar)
 {
-    get_non_terminals(&grammar);
-    get_terminals(&grammar);
+    get_non_terminals(grammar);
+    get_terminals(grammar);
 
-    get_tokens_value(&grammar);
+    get_tokens_value();
 
-    get_goal_symbol(&grammar);
-    get_vanish_symbols(&grammar);
+    get_goal_symbol(grammar);
+    get_vanish_symbols(grammar);
 
-    get_symbol_parsing_tbl_col(&grammar);
-    get_parsing_tbl_col_hdr(&grammar);
+    get_symbol_parsing_tbl_col(grammar);
+    get_parsing_tbl_col_hdr(grammar);
 
-    get_symbol_rule_id_list(&grammar);
-    get_grammar_unit_productions(&grammar);
+    get_symbol_rule_id_list(grammar);
+    get_grammar_unit_productions(grammar);
 
     // writeSymbolList(grammar.non_terminal_list, "NT list");
     // writeSymbolList(grammar.terminal_list, "T list");
@@ -1199,8 +1192,9 @@ get_grammar_params()
  *
  * Empty string is not allowed.
  */
-auto
-output_nonterminal(SymbolNode* tokens_tail, YACC_STATE state) -> SymbolTblNode*
+static auto
+output_nonterminal(Grammar& grammar, SymbolNode* tokens_tail, YACC_STATE state)
+  -> SymbolTblNode*
 {
     if (ysymbol_pt == 0) {
         if (state == TERMINAL) {
@@ -1221,7 +1215,7 @@ output_nonterminal(SymbolNode* tokens_tail, YACC_STATE state) -> SymbolTblNode*
     }
     if (IS_PREC == 1) {
         // is a ficticious terminal, no token actually.
-        get_rhs_prec_symbol(ysymbol); // ysymbol should exist.
+        get_rhs_prec_symbol(grammar, ysymbol); // ysymbol should exist.
         // std::cout << "%prec on symbol " <<  ysymbol << std::endl;
         IS_PREC = 0;
         ysymbol_pt = 0;
@@ -1246,8 +1240,8 @@ output_nonterminal(SymbolNode* tokens_tail, YACC_STATE state) -> SymbolTblNode*
               to_string(n_col) + "]: symbol " + ysymbol +
               " is declared as terminal but used as non-terminal");
         }
-        create_new_rule(); // CREATE NEW RULE HERE.
-        add_lhs_symbol(n);
+        create_new_rule(grammar); // CREATE NEW RULE HERE.
+        add_lhs_symbol(grammar, n);
 
     } else { // RHS.
         if (n == nullptr) {
@@ -1267,7 +1261,7 @@ output_nonterminal(SymbolNode* tokens_tail, YACC_STATE state) -> SymbolTblNode*
             }
         }
 
-        add_rhs_symbol(n);
+        add_rhs_symbol(grammar, n);
     }
 
     ysymbol_pt = 0;
@@ -1279,7 +1273,7 @@ output_nonterminal(SymbolNode* tokens_tail, YACC_STATE state) -> SymbolTblNode*
  * To be used by the next rule with the same LHS in cases like:
  *   LHS : RHS1 | RHS2 ...
  */
-void
+static void
 get_cur_lhs(SymbolTblNode* n)
 {
     if (n == nullptr) {
@@ -1295,8 +1289,10 @@ get_cur_lhs(SymbolTblNode* n)
  * Processes section 2 (grammar section)
  * of a yacc input file.
  */
-void
-process_yacc_file_input_section2(SymbolNode* tokens_tail, std::ifstream& fp)
+static void
+process_yacc_file_input_section2(Grammar& grammar,
+                                 SymbolNode* tokens_tail,
+                                 std::ifstream& fp)
 {
     // for mid-production actions.
     int mid_prod_code_ct = 0;
@@ -1315,14 +1311,16 @@ process_yacc_file_input_section2(SymbolNode* tokens_tail, std::ifstream& fp)
                 if (isspace(c) && ysymbol_pt == 0) {
                     // Ignore empty spaces before LHS symbol.
                 } else if (c == ':') {
-                    get_cur_lhs(output_nonterminal(tokens_tail,
+                    get_cur_lhs(output_nonterminal(grammar,
+                                                   tokens_tail,
                                                    LHS)); // OUTPUT LHS SYMBOL.
                     if constexpr (DEBUG_YACC_INPUT_PARSER) {
                         std::cout << "-> ";
                     }
                     yacc_sec2_state = RHS;
                 } else if (isspace(c)) {
-                    get_cur_lhs(output_nonterminal(tokens_tail,
+                    get_cur_lhs(output_nonterminal(grammar,
+                                                   tokens_tail,
                                                    LHS)); // OUTPUT LHS SYMBOL.
                     if constexpr (DEBUG_YACC_INPUT_PARSER) {
                         std::cout << "-> ";
@@ -1367,7 +1365,8 @@ process_yacc_file_input_section2(SymbolNode* tokens_tail, std::ifstream& fp)
             case RHS:
                 if (isspace(c)) {
                     if (ysymbol_pt != 0) {
-                        output_nonterminal(tokens_tail,
+                        output_nonterminal(grammar,
+                                           tokens_tail,
                                            RHS); // OUTPUT NEXT RHS SYMBOL.
                     }
                     // else, ignore empty space.
@@ -1375,13 +1374,14 @@ process_yacc_file_input_section2(SymbolNode* tokens_tail, std::ifstream& fp)
                     // std::cout << "terminal starts(line " <<  n_line<< "): ["
                     // <<  c;
                     if (ysymbol_pt != 0) {
-                        output_nonterminal(tokens_tail,
+                        output_nonterminal(grammar,
+                                           tokens_tail,
                                            RHS); // OUTPUT NEXT RHS SYMBOL.
                     }
                     yacc_sec2_state = TERMINAL;
                     if (end_of_code) { // for mid-prod action.
                         mid_prod_code_ct++;
-                        insert_mid_prod_rule(mid_prod_code_ct);
+                        insert_mid_prod_rule(grammar, mid_prod_code_ct);
                         end_of_code = false;
                     }
                 } else if (c == ';') {
@@ -1394,7 +1394,8 @@ process_yacc_file_input_section2(SymbolNode* tokens_tail, std::ifstream& fp)
                           "]: forgot the symbol after %prec?");
                     }
                     if (ysymbol_pt != 0)
-                        output_nonterminal(tokens_tail,
+                        output_nonterminal(grammar,
+                                           tokens_tail,
                                            RHS); // OUTPUT NEXT RHS SYMBOL.
                     if constexpr (DEBUG_YACC_INPUT_PARSER) {
                         std::cout << std::endl;
@@ -1410,16 +1411,17 @@ process_yacc_file_input_section2(SymbolNode* tokens_tail, std::ifstream& fp)
                           "]: forgot the symbol after %prec?");
                     }
                     if (ysymbol_pt != 0)
-                        output_nonterminal(tokens_tail,
+                        output_nonterminal(grammar,
+                                           tokens_tail,
                                            RHS); // OUTPUT NEXT RHS SYMBOL.
                     if constexpr (DEBUG_YACC_INPUT_PARSER) {
                         std::cout << std::endl << curLHS->symbol << " -> ";
                     }
                     // std::cout  << std::endl;
-                    create_new_rule(); // CREATE NEW RULE HERE.
-                    add_lhs_symbol(curLHS);
+                    create_new_rule(grammar); // CREATE NEW RULE HERE.
+                    add_lhs_symbol(grammar, curLHS);
                 } else if (c == '{') {
-                    set_has_code(); // has associated code.
+                    set_has_code(grammar); // has associated code.
                     /// std::cout << "start of code at rule " <<
                     ///  grammar.rule_count<< ":" << std::endl<< "{";
                     yacc_sec2_state = CODE;
@@ -1435,7 +1437,7 @@ process_yacc_file_input_section2(SymbolNode* tokens_tail, std::ifstream& fp)
                 } else {
                     if (end_of_code) { // for mid-prod action.
                         mid_prod_code_ct++;
-                        insert_mid_prod_rule(mid_prod_code_ct);
+                        insert_mid_prod_rule(grammar, mid_prod_code_ct);
                         end_of_code = false;
                     }
                     add_char_to_symbol(c);
@@ -1448,7 +1450,8 @@ process_yacc_file_input_section2(SymbolNode* tokens_tail, std::ifstream& fp)
                                   (ysymbol_pt == 2 && ysymbol[0] == '\\'))) {
                     // std::cout << "] terminal ends" << std::endl;
                     yacc_sec2_state = RHS;
-                    output_nonterminal(tokens_tail,
+                    output_nonterminal(grammar,
+                                       tokens_tail,
                                        TERMINAL); // OUTPUT NEXT RHS SYMBOL. is
                                                   // terminal.
                 } else {
@@ -1522,8 +1525,8 @@ process_yacc_file_input_section2(SymbolNode* tokens_tail, std::ifstream& fp)
  * Otherwise, use the LHS of the first user rule as the
  * RHS of goal production.
  */
-void
-get_goal_rule_rhs()
+static void
+get_goal_rule_rhs(const Grammar& grammar)
 {
     if (grammar.rules.size() > 1) {
         if (start_symbol != nullptr) {
@@ -1540,11 +1543,11 @@ get_goal_rule_rhs()
     }
 }
 
-void
-get_goal_rule_lhs()
+static void
+get_goal_rule_lhs(Grammar& grammar)
 {
     SymbolTblNode* n = hash_tbl_insert(STR_ACCEPT);
-    create_new_rule(); // goal production rule.
+    create_new_rule(grammar); // goal production rule.
     grammar.rules[0]->nLHS = SymbolNode::create(n);
     n->type = symbol_type::NONTERMINAL;
 }
@@ -1556,8 +1559,8 @@ get_goal_rule_lhs()
  * convert them to non-unit productions. This place holder
  * nonterminal will reduce to empty string.
  */
-void
-post_modification(Grammar* g)
+static void
+post_modification(Grammar& grammar)
 {
     auto& options = Options::get();
     // std::cout << "calling post_modification" << std::endl;
@@ -1570,7 +1573,7 @@ post_modification(Grammar* g)
     n->type = symbol_type::NONTERMINAL;
 
     int count = 0;
-    for (const auto& rule : g->rules) {
+    for (const auto& rule : grammar.rules) {
         if (rule->RHS_count == 1 && rule->hasCode == 1u) {
             // std::cout << "rule " <<  i<< " is a unit production with code" <<
             // std::endl;
@@ -1585,7 +1588,7 @@ post_modification(Grammar* g)
     }
 
     if (count > 0) {
-        Production* p = create_new_rule(); // $PlaceHolder -> epsilon
+        Production* p = create_new_rule(grammar); // $PlaceHolder -> epsilon
         p->nLHS = SymbolNode::create(n);
 
         p->RHS_count = 0;
@@ -1595,8 +1598,8 @@ post_modification(Grammar* g)
     }
 }
 
-void
-get_yacc_grammar_init()
+static auto
+get_yacc_grammar_init() -> Grammar
 {
     // insert special symbols to hash table.
     SymbolTblNode* n = hash_tbl_insert(STR_END); // end marker of production.
@@ -1606,8 +1609,9 @@ get_yacc_grammar_init()
     hash_tbl_insert(STR_END);
     n = hash_tbl_insert(STR_EMPTY);
     n->type = symbol_type::TERMINAL;
-    n->vanishable = 1;
+    n->vanishable = true;
 
+    Grammar grammar{};
     grammar.rules.reserve(GRAMMAR_RULE_INIT_MAX_COUNT);
 
     ysymbol_size = SYMBOL_INIT_SIZE;
@@ -1618,6 +1622,7 @@ get_yacc_grammar_init()
     precedence = 0;
     IS_PREC = 0;
     expected_sr_conflict = 0;
+    return grammar;
 }
 
 /*
@@ -1626,8 +1631,8 @@ get_yacc_grammar_init()
  *
  * Called by function main() in y.c.
  */
-void
-get_yacc_grammar(const std::string& infile)
+auto
+get_yacc_grammar(const std::string& infile) -> Grammar
 {
     if constexpr (DEBUG_YACC_INPUT_PARSER) {
         std::cout << "input file: " << infile << std::endl;
@@ -1639,26 +1644,27 @@ get_yacc_grammar(const std::string& infile)
         throw std::runtime_error(std::string("can't open file ") + infile);
     }
 
-    get_yacc_grammar_init();
+    Grammar grammar = get_yacc_grammar_init();
 
     if constexpr (ADD_GOAL_RULE) {
-        get_goal_rule_lhs();
+        get_goal_rule_lhs(grammar);
     }
 
     SymbolNode* tokens_tail = process_yacc_file_input_section1(fp);
-    process_yacc_file_input_section2(tokens_tail, fp);
+    process_yacc_file_input_section2(grammar, tokens_tail, fp);
 
     fp.close();
 
     if constexpr (ADD_GOAL_RULE) {
-        get_goal_rule_rhs();
+        get_goal_rule_rhs(grammar);
     }
-    post_modification(&grammar);
+    post_modification(grammar);
 
-    get_grammar_params();
+    get_grammar_params(grammar);
 
     n_rule = grammar.rules.size();
     n_symbol = grammar.terminal_count + grammar.non_terminal_count;
     n_rule_opt = grammar.get_opt_rule_count();
+    return grammar;
     // writeGrammar(& grammar); exit(0);
 }

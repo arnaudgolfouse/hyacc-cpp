@@ -29,14 +29,19 @@
 
 #include "y.hpp"
 #include "lane_tracing.hpp"
+#include <array>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // FILE* fp_v;
@@ -260,7 +265,7 @@ Grammar::write_rules_no_unit_prod() const
     int i = 0;
     *fp_v << "Rules: " << std::endl;
     for (const auto& rule : this->rules) {
-        if (!is_unit_production(i) || i == 0) {
+        if (!this->is_unit_production(i) || i == 0) {
             *fp_v << "(" << i << ") ";
             rule->write(-1);
             count++;
@@ -274,8 +279,8 @@ auto
 Grammar::get_opt_rule_count() -> size_t const
 {
     size_t count = 0;
-    for (int i = 0; i < this->rules.size(); i++) {
-        if (!is_unit_production(i) || i == 0)
+    for (size_t i = 0; i < this->rules.size(); i++) {
+        if (!this->is_unit_production(i) || i == 0)
             count++;
     }
     return count;
@@ -3143,8 +3148,8 @@ write_state_transition_list()
 /*
  * LR1 function.
  */
-auto
-lr1(int argc, char** argv) -> int
+static auto
+lr1() -> int
 {
     const auto& options = Options::get();
     hash_tbl_init();
@@ -3160,7 +3165,7 @@ lr1(int argc, char** argv) -> int
               << std::endl;
     }
 
-    get_yacc_grammar(hyacc_filename);
+    grammar = get_yacc_grammar(hyacc_filename);
 
     if (options.debug_hash_tbl) {
         hash_tbl_dump();
@@ -3231,8 +3236,8 @@ lr1(int argc, char** argv) -> int
     return 0;
 }
 
-auto
-lr0(int argc, char** argv) -> int
+static auto
+lr0() -> int
 {
     const auto& options = Options::get();
     /// USE_COMBINE_COMPATIBLE_STATES = false; ///
@@ -3249,7 +3254,7 @@ lr0(int argc, char** argv) -> int
               << std::endl;
     }
 
-    get_yacc_grammar(hyacc_filename);
+    grammar = get_yacc_grammar(hyacc_filename);
 
     if (options.debug_hash_tbl) {
         hash_tbl_dump();
@@ -3334,15 +3339,11 @@ lr0(int argc, char** argv) -> int
  * main function.
  */
 auto
-main(int argc, char** argv) -> int
+main(int argc, const char* argv[]) -> int
 {
     try {
         auto& options = Options::get();
-        std::vector<std::string> args;
-        for (size_t i = 0; i < argc; i++) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-            args.emplace_back(argv[i]);
-        }
+        std::span<const char* const> args = std::span(argv, argc);
         int infile_index = 0;
         options.debug_expand_array = false;
 
@@ -3350,13 +3351,11 @@ main(int argc, char** argv) -> int
 
         infile_index = get_options(args, options);
         hyacc_filename = args[infile_index];
-        // std::cout << "file to open: " << hyacc_filename
-        // << std::endl;
 
         if (options.use_lr0) {
-            lr0(argc, argv);
+            lr0();
         } else {
-            lr1(argc, argv);
+            lr1();
         }
 
         if (false) { // for reading memory.

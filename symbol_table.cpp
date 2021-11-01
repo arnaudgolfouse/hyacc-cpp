@@ -342,7 +342,7 @@ create_symbol_tbl_node(const std::string& symbol) -> SymbolTblNode*
     auto* n = new SymbolTblNode;
     if (n == nullptr)
         YYERR_EXIT("createSymbolTblNode error: out of memory\n");
-    *n->symbol = symbol;
+    n->symbol = std::make_shared<std::string>(symbol);
     n->next = nullptr;
     n->type = symbol_type::NEITHER;
     n->vanishable = false; // default value: FALSE

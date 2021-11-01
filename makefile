@@ -102,7 +102,7 @@ install : create_path_file
 
 create_path_file: inst.cpp
 	@echo regenerate file hyacc_path.cpp ...
-	@$(CC) inst.cpp -o inst
+	@$(CC) $(FFLAG) inst.cpp -o inst
 	@./inst $(INSTALL_PATH)
 	@rm -f inst
 

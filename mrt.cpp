@@ -309,7 +309,7 @@ build_multirooted_tree() -> MRLeaves
     mr_leaves.reserve(MR_LEAVES_INIT_MAX_COUNT);
 
     for (int i = 1; i < grammar.rules.size(); i++) {
-        if (is_unit_production(i)) {
+        if (grammar.is_unit_production(i)) {
             std::shared_ptr<MRTreeNode> lhs =
               find_node_in_forest(mr_leaves, grammar.rules[i]->nLHS->snode);
             std::shared_ptr<MRTreeNode> rhs = find_node_in_forest(
@@ -358,11 +358,9 @@ get_node(int leaf_index, MRTreeNode* node, MRParents* parents)
 
     if (is_in_mr_parents(node->symbol->snode, *parents) == false) {
         check_array_size_mr_parents(parents); // expand size if needed.
-
         if (leaf_index_for_parent_done == false) {
             leaf_index_for_parent[parents->size()] = leaf_index;
         }
-
         parents->push_back(SymbolNode::create(node->symbol->snode));
     }
 

@@ -33,6 +33,7 @@
 #include <cstddef>
 #include <memory>
 #include <queue>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -464,9 +465,6 @@ struct StateCollection
  */
 struct Grammar
 {
-    // Production** rules;
-    // int rule_max_count;
-    // int rule_count;
     std::vector<Production*> rules;
     SymbolNode* goal_symbol;
     SymbolList terminal_list;
@@ -480,7 +478,6 @@ struct Grammar
      * Write rules of the given grammar.
      */
     void write_rules() const;
-
     /*
      * Write rules of the given grammar which are not
      * unit productions.
@@ -488,17 +485,14 @@ struct Grammar
      * it is a unit production or not.
      */
     void write_rules_no_unit_prod() const;
-
     /*
      * Returns number of rules excluding unit productions.
      */
     auto get_opt_rule_count() -> size_t const;
-
     /*
      * Write terminals of the given grammar.
      */
     void write_terminals() const;
-
     /*
      * Write non-terminals of the given grammar.
      *
@@ -507,14 +501,13 @@ struct Grammar
      * Leave this out for now.
      */
     void write_non_terminals() const;
-
     void write_vanish_symbols() const;
-
     /*
      * Write the given grammar, including its terminals,
      * non-terminals, goal symbol and rules.
      */
     void write(bool before_rm_unit_prod) const;
+    [[nodiscard]] auto is_unit_production(size_t rule_no) const -> bool;
 };
 
 extern Grammar grammar; /* Used by the entire program. */
@@ -625,8 +618,6 @@ extern auto
 is_compatible_states(const State* s1, const State* s2) -> bool;
 extern auto
 combine_compatible_states(State* s_dest, const State* s_src) -> bool;
-extern auto
-is_unit_production(int rule_no) -> bool;
 
 extern auto
 is_final_configuration(const Configuration* c) -> bool;
@@ -751,8 +742,8 @@ extern void
 print_condensed_final_parsing_table();
 
 /* Defined in get_yacc_grammar.c */
-extern void
-get_yacc_grammar(const std::string& infile);
+extern auto
+get_yacc_grammar(const std::string& infile) -> Grammar;
 
 /* Defined in version.c */
 extern void
@@ -764,7 +755,7 @@ show_manpage();
 
 /* Defined in get_options.c */
 extern auto
-get_options(const std::vector<std::string>& args, Options& options) -> int;
+get_options(std::span<const char* const> args, Options& options) -> int;
 
 /* Defined in gen_compiler.cpp */
 // Length is ParsingTblRows (?)

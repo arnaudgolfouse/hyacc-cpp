@@ -139,8 +139,8 @@ get_filename_prefix(std::string name)
     y_gviz = y_gviz_temp;
 }
 
-void
-write_options(int infile_index, const std::vector<std::string>& args)
+static void
+write_options(int infile_index, const std::span<const char* const> args)
 {
     // exit(0);
 }
@@ -490,7 +490,7 @@ get_mnemonic_long_option(Options& options, const std::string& s)
  *   optimization 3: further remove repeated states after 2.
  */
 auto
-get_options(const std::vector<std::string>& args, Options& options) -> int
+get_options(const std::span<const char* const> args, Options& options) -> int
 {
     if (args.size() == 1) {
         show_helpmsg_exit(ErrorFlags::NO_INPUT_FILE);
