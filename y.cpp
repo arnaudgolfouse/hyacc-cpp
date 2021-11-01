@@ -132,12 +132,10 @@ free_context(Context* c);
 void
 free_config(Configuration* c);
 auto
-get_scanned_symbol(const Configuration* c) -> SymbolTblNode*;
-auto
 is_compatible_config(Configuration* c1, Configuration* c2) -> bool;
 void
 insert_action(SymbolTblNode* lookahead, int row, int state_dest);
-auto
+static auto
 add_to_conflict_array(int state,
                       SymbolTblNode* lookahead,
                       int action1,
@@ -766,26 +764,6 @@ StateNode::destroy_state(State* s)
 }
 
 /*
- * Determine if string s is a non-terminal of grammar g.
- *
- * Instead of searching the entire list of non_terminal_list,
- * use hash table node's type. In O(1) time.
- * The type was obtained when calling get_terminals() and
- * get_nonterminals().
- */
-auto
-is_non_terminal(SymbolTblNode* s) -> bool
-{
-    return s->type == symbol_type::NONTERMINAL;
-}
-
-auto
-is_terminal(SymbolTblNode* s) -> bool
-{
-    return s->type == symbol_type::TERMINAL;
-}
-
-/*
  * Add the given symbol to the context in increasing order.
  * There is no need to sort context later.
  */
@@ -867,7 +845,7 @@ insert_symbol_list_unique_inc(SymbolList list,
 /*
  * Insert symbol to list tail if not exist, un-ordered.
  */
-auto
+static auto
 insert_unique_symbol_list(SymbolList list, SymbolTblNode* snode, bool* exist)
   -> SymbolNode*
 {
@@ -927,7 +905,7 @@ insert_alpha_to_heads(SymbolNode* s, SymbolNode* heads, SymbolNode* theads)
             heads->next =
               insert_unique_symbol_list(heads->next, a->snode, &exist);
         } else { // not vanlish symbol. break after insertion.
-            if (is_terminal(a->snode)) { // here actually can insert to tail.
+            if (a->snode->is_terminal()) { // here actually can insert to tail.
                 theads->next =
                   insert_symbol_list_unique_inc(theads->next, a->snode, &exist);
             } else { // non_terminal.
@@ -957,7 +935,7 @@ insert_rhs_to_heads(SymbolNode* s, SymbolNode* heads, SymbolNode* theads)
             heads->next =
               insert_unique_symbol_list(heads->next, a->snode, &exist);
         } else { // not vanlish symbol. break after inserting last one.
-            if (is_terminal(a->snode)) {
+            if (a->snode->is_terminal()) {
                 theads->next =
                   insert_symbol_list_unique_inc(theads->next, a->snode, &exist);
             } else { // non_terminal.
@@ -1390,9 +1368,9 @@ get_config_successors(State* s)
 
         if (config->marker >= 0 &&
             config->marker < grammar.rules[config->ruleID]->RHS_count) {
-            SymbolTblNode* scanned_symbol = get_scanned_symbol(config);
+            const SymbolTblNode* scanned_symbol = get_scanned_symbol(config);
 
-            if (is_non_terminal(scanned_symbol)) {
+            if (scanned_symbol->is_non_terminal()) {
 
                 tmp_context.clear(); // clear tmp_context
                 get_context(config, &tmp_context);
@@ -1412,16 +1390,15 @@ get_config_successors(State* s)
                           s, r->ruleID, &tmp_context);
                         queue_push(config_queue, s->config.size() - 1);
 
-                    } else if (combine_context(s->config[index]->context,
-                                               &tmp_context) ==
-                               true) { // compatible config
+                    } else if (combine_context(
+                                 s->config[index]->context,
+                                 &tmp_context)) { // compatible config
                         // if this config has no successor, don't insert
                         // to config_queue. This saves time. marker = 0
                         // here, no need to check marker >= 0.
                         if (is_final_configuration(s->config[index]))
                             continue;
-                        if (is_terminal(get_scanned_symbol(s->config[index])) ==
-                            true)
+                        if (get_scanned_symbol(s->config[index])->is_terminal())
                             continue;
                         if (queue_exist(config_queue, index) == 1)
                             continue;
@@ -1446,7 +1423,7 @@ get_config_successors(State* s)
 static void
 get_successor_for_config(State* s, const Configuration* config)
 {
-    SymbolTblNode* scanned_symbol = nullptr;
+    const SymbolTblNode* scanned_symbol = nullptr;
     static Context tmp_context;
     tmp_context.nContext = nullptr;
 
@@ -1454,7 +1431,7 @@ get_successor_for_config(State* s, const Configuration* config)
         config->marker < grammar.rules[config->ruleID]->RHS_count) {
         scanned_symbol = get_scanned_symbol(config);
 
-        if (is_non_terminal(scanned_symbol)) {
+        if (scanned_symbol->is_non_terminal()) {
 
             tmp_context.clear(); // clear tmp_context
             get_context(config, &tmp_context);
@@ -1911,7 +1888,7 @@ void
 update_state_parsing_tbl_entry(const State* s)
 {
     for (const auto& config : s->config) {
-        SymbolTblNode* scanned_symbol = get_scanned_symbol(config);
+        const SymbolTblNode* scanned_symbol = get_scanned_symbol(config);
 
         // for final config and empty reduction.
         if (is_final_configuration(config) ||

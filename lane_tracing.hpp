@@ -52,6 +52,9 @@ struct LlistInt
 {
     int n;
     LlistInt* next;
+
+    auto add_inc(int n) noexcept -> LlistInt*;
+    void dump() const noexcept;
 };
 
 /*
@@ -63,6 +66,9 @@ struct LlistInt2
     int n1;
     int n2;
     LlistInt2* next;
+
+    /// Find the node in a LlistInt list whose first entry is n2.
+    auto find_n2(int n2) noexcept -> LlistInt2*;
 };
 
 struct LlistContextSet
@@ -96,6 +102,15 @@ struct LtCluster
     LtCluster* next;
 
     static auto find_actual_containing_cluster(int state_no) -> LtCluster*;
+    void dump() const noexcept;
+    /// Return:
+    ///   the splitted state's no if state_no is in c->states list
+    ///   -1 otherwise.
+    ///
+    /// Note state_no here is the virtual state_no: the one
+    /// splitted from. So there could be more than one cluster
+    /// contain it.
+    [[nodiscard]] auto contain_state(int state_no) const noexcept -> int;
 };
 
 extern LtCluster* all_clusters;
@@ -104,16 +119,6 @@ extern LtCluster* all_clusters;
 
 extern auto
 lt_tbl_entry_find(State* from) -> LtTblEntry*;
-extern void
-cluster_dump(LtCluster* c);
-extern auto
-llist_int_add_inc(LlistInt* list, int n) -> LlistInt*;
-extern auto
-cluster_contain_state(const LtCluster* c, int state_no) -> int;
-extern auto
-llist_int2_find_n2(LlistInt2* list, int n2) -> LlistInt2*;
-extern void
-llist_int_dump(LlistInt* list);
 
 /*
  * Data structures in lrk.c
@@ -133,13 +138,29 @@ struct laneHeadState
 /*
  * For (conflict_config, lane_end_config) pairs.
  */
+using ConfigPairList = struct ConfigPairNode*;
 struct ConfigPairNode
 {
     Configuration* end;   // conflict_config
     Configuration* start; // lane_start_config
     ConfigPairNode* next;
+
+    /*
+     * Functions in lrk_util.cpp
+     */
+    static auto list_combine(ConfigPairList s, ConfigPairList t) noexcept
+      -> ConfigPairList;
+
+    static auto list_insert(ConfigPairList list,
+                            Configuration* conflict_config,
+                            Configuration* lane_start_config) noexcept
+      -> ConfigPairList;
+    static void list_dump(ConfigPairList list);
+    static auto list_find(ConfigPairList list,
+                          Configuration* conflict_config) noexcept
+      -> ConfigPairNode*;
+    static void list_destroy(ConfigPairList list) noexcept;
 };
-using ConfigPairList = ConfigPairNode*;
 
 extern ConfigPairList lane_head_tail_pairs;
 
@@ -190,23 +211,6 @@ trace_back_lrk_clear(const Configuration* c0, Configuration* c);
  */
 extern void
 lane_tracing_lrk();
-
-/*
- * Functions in lrk_util.cpp
- */
-extern auto
-config_pair_list_combine(ConfigPairList t, ConfigPairList s) -> ConfigPairList;
-extern auto
-config_pair_list_insert(ConfigPairList list,
-                        Configuration* conflict_config,
-                        Configuration* lane_start_config) -> ConfigPairList;
-extern void
-config_pair_list_dump(ConfigPairList list);
-extern auto
-config_pair_list_find(ConfigPairList list, Configuration* conflict_config)
-  -> ConfigPairNode*;
-extern void
-config_pair_list_destroy(ConfigPairList list);
 
 // Set - a linked list of objects.
 struct ObjectItem
@@ -272,28 +276,21 @@ struct LRkPT
     int k;         // k in LR(k).
     int row_count; // number of rows.
     LRkPTRow* rows;
-};
 
-extern auto
-lrk_pt_create(int k) -> LRkPT*;
-extern void
-lrk_pt_dump(const LRkPT* t);
-extern auto
-lrk_pt_find(const LRkPT* t, int state, SymbolTblNode* token, bool* found)
-  -> LRkPTRow*;
-extern auto
-lrk_pt_get_entry(LRkPT* t,
-                 int state,
-                 SymbolTblNode* token,
-                 SymbolTblNode* col_token,
-                 bool* exist) -> ConfigPairNode*;
-extern auto
-lrk_pt_add_reduction(LRkPT* t,
-                     int state,
-                     SymbolTblNode* token,
-                     SymbolTblNode* s,
-                     Configuration* c,
-                     Configuration* c_tail) -> bool;
+    static auto create(int k) noexcept -> LRkPT*;
+    void dump() const noexcept;
+    auto find(int state, SymbolTblNode* token, bool* found) const noexcept
+      -> LRkPTRow*;
+    auto get_entry(int state,
+                   SymbolTblNode* token,
+                   const SymbolTblNode* col_token,
+                   bool* exist) noexcept -> ConfigPairNode*;
+    auto add_reduction(int state,
+                       SymbolTblNode* token,
+                       const SymbolTblNode* s,
+                       Configuration* c,
+                       Configuration* c_tail) noexcept -> bool;
+};
 
 //
 // LR(k) parsing table array.
@@ -303,20 +300,15 @@ struct LRkPTArray
     LRkPT** array;
     int max_k; // number of entries in array is max_k - 1.
     int size;  // 0 <= max_k - 2 <= size - 1
+
+    static auto create() noexcept -> LRkPTArray*;
+    void add(LRkPT* t) noexcept;
+    [[nodiscard]] auto get(int k) const noexcept -> LRkPT*;
+    void dump() const noexcept;
+    void dump_file() const noexcept;
 };
 
 extern LRkPTArray* lrk_pt_array; // defined in lrk.c
-
-extern auto
-lrk_pt_array_create() -> LRkPTArray*;
-extern void
-lrk_pt_array_add(LRkPTArray* a, LRkPT* t);
-extern auto
-lrk_pt_array_get(LRkPTArray* a, int k) -> LRkPT*;
-extern void
-lrk_pt_array_dump(LRkPTArray* a);
-extern void
-lrk_pt_array_dump_file(LRkPTArray* a);
 
 //
 // for (configuration, conflict context) pair
@@ -326,15 +318,13 @@ struct CfgCtxt
     Configuration* c;
     SymbolList ctxt; // conflict context symbols
     Configuration* tail;
-};
 
-extern auto
-cfg_ctxt_create(Configuration* c, SymbolList s, Configuration* tail)
-  -> CfgCtxt*;
-extern void
-cfg_ctxt_destroy(CfgCtxt* cc);
-extern void
-cfg_ctxt_dump(const CfgCtxt* cc);
+    static auto create(Configuration* c,
+                       SymbolList s,
+                       Configuration* tail) noexcept -> CfgCtxt*;
+    static void destroy(CfgCtxt* cc) noexcept;
+    void dump() const noexcept;
+};
 
 // for LR(k) theads.
 extern auto

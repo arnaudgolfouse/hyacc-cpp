@@ -50,8 +50,8 @@ create_rule_id_node(int rule_id) -> RuleIDNode*
     return r;
 }
 
-void
-write_rule_id_list(SymbolTblNode* n)
+static void
+write_rule_id_list(const SymbolTblNode* n)
 {
     RuleIDNode* a = nullptr;
     std::cout << n->symbol << ": ";
@@ -133,7 +133,7 @@ free_symbol_node_list(SymbolNode* a)
 }
 
 auto
-find_in_symbol_list(SymbolList a, SymbolTblNode* s) -> SymbolNode*
+find_in_symbol_list(SymbolList a, const SymbolTblNode* s) -> SymbolNode*
 {
     for (SymbolNode* b = a; b != nullptr; b = b->next) {
         if (b->snode == s)
@@ -225,7 +225,7 @@ find_in_inc_symbol_list(SymbolList a, SymbolTblNode* s) -> SymbolNode*
  * @Return: the result list.
  */
 auto
-insert_inc_symbol_list(SymbolList a, SymbolTblNode* n) -> SymbolNode*
+insert_inc_symbol_list(SymbolList a,  SymbolTblNode* n) -> SymbolNode*
 {
     SymbolNode *b = nullptr, *b_prev = nullptr;
     if (nullptr == n)

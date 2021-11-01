@@ -205,6 +205,21 @@ struct SymbolTableNode
     RuleIDNode* ruleIDList;
     SymbolTableNode* next;
     const char* token_type;
+
+    [[nodiscard]] constexpr inline auto is_terminal() const noexcept -> bool
+    {
+        return this->type == symbol_type::TERMINAL;
+    }
+    /// Determine if string s is a non-terminal of grammar g.
+    ///
+    /// Instead of searching the entire list of non_terminal_list,
+    /// use hash table node's type. In O(1) time.
+    /// The type was obtained when calling get_terminals() and
+    /// get_nonterminals().
+    [[nodiscard]] constexpr inline auto is_non_terminal() const noexcept -> bool
+    {
+        return this->type == symbol_type::NONTERMINAL;
+    }
 };
 using SymbolTblNode = struct SymbolTableNode;
 
@@ -322,7 +337,7 @@ struct Production
     unsigned int isUnitProduction : 1; // 1 - true, 0 - false
     unsigned int hasCode : 1; // has associated code: 1 - true, 0 -false
     unsigned int padding : 30;
-    SymbolTblNode* lastTerminal; // for precedence information.
+    const SymbolTblNode* lastTerminal; // for precedence information.
 
     /*
      * marker: mark the position in configuration.
@@ -635,8 +650,6 @@ is_empty_production(const Configuration* c) -> bool;
 extern auto
 add_symbol2_context(SymbolTblNode* snode, Context* c) -> bool;
 extern auto
-is_non_terminal(SymbolTblNode* s) -> bool;
-extern auto
 is_compatible_successor_config(const State* s, int rule_id) -> int;
 extern void
 insert_action(SymbolTblNode* lookahead, int row, int state_dest);
@@ -664,8 +677,6 @@ find_similar_core_config(const State* t,
                          int* config_index) -> Configuration*;
 extern void
 copy_context(Context* dest, const Context* src);
-extern auto
-is_terminal(SymbolTblNode* s) -> bool;
 extern void
 mandatory_update_action(SymbolTblNode* lookahead, int row, int state_dest);
 extern void
@@ -719,8 +730,8 @@ get_col(const SymbolTableNode& n) -> int
 /*
  * Given a SymbolTblNode, returns whether it is vanishable.
  */
-inline auto
-is_vanish_symbol(SymbolTblNode& n) -> bool
+constexpr inline auto
+is_vanish_symbol(const SymbolTblNode& n) -> bool
 {
     return n.vanishable;
 }
@@ -788,7 +799,7 @@ hash_tbl_dump();
 extern void
 hash_tbl_destroy();
 extern auto
-find_in_symbol_list(SymbolList a, SymbolTblNode* s) -> SymbolNode*;
+find_in_symbol_list(SymbolList a, const SymbolTblNode* s) -> SymbolNode*;
 extern auto
 find_in_inc_symbol_list(SymbolList a, SymbolTblNode* s) -> SymbolNode*;
 extern auto

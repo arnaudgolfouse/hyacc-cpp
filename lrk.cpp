@@ -184,7 +184,7 @@ get_last_symbol(SymbolList s) -> SymbolNode*
 static auto
 get_start_config_from_tail(Configuration* c) -> Configuration*
 {
-    ConfigPairNode* n = config_pair_list_find(lane_head_tail_pairs, c);
+    ConfigPairNode* n = ConfigPairNode::list_find(lane_head_tail_pairs, c);
     if (nullptr == n)
         return nullptr;
     return n->start;
@@ -235,30 +235,28 @@ insert_lrk_pt(int state_no,
     bool exist = false;
 
     // create LR(MAX_K) parsing table if it does not exist yet.
-    if (nullptr == (pt = lrk_pt_array_get(lrk_pt_array, MAX_K))) {
-        pt = lrk_pt_create(MAX_K);
-        lrk_pt_array_add(lrk_pt_array, pt);
+    if (nullptr == (pt = lrk_pt_array->get(MAX_K))) {
+        pt = LRkPT::create(MAX_K);
+        lrk_pt_array->add(pt);
     }
 
     for (SymbolNode* token = token_list; token != nullptr;
          token = token->next) {
-        ConfigPairNode* c0 =
-          lrk_pt_get_entry(pt, state_no, token->snode, col, &exist);
+        ConfigPairNode* c0 = pt->get_entry(state_no, token->snode, col, &exist);
         if (exist == false || c0 == nullptr) { // no conflict.
-            lrk_pt_add_reduction(pt, state_no, token->snode, col, c, c_tail);
+            pt->add_reduction(state_no, token->snode, col, c, c_tail);
         } else { // exist is true, and c0 != nullptr.
-            CfgCtxt* cc = cfg_ctxt_create(c, SymbolNode::create(col), c_tail);
+            CfgCtxt* cc = CfgCtxt::create(c, SymbolNode::create(col), c_tail);
             set_c2 = insert_cfg_ctxt_to_set(cc, set_c2);
             if (c0->end ==
                 reinterpret_cast<Configuration*>(CONST_CONFLICT_SYMBOL)) {
                 // do nothing.
             } else {
                 cc =
-                  cfg_ctxt_create(c0->start, SymbolNode::create(col), c0->end);
+                  CfgCtxt::create(c0->start, SymbolNode::create(col), c0->end);
                 set_c2 = insert_cfg_ctxt_to_set(cc, set_c2);
                 // set this entry to CONST_CONFLICT_SYMBOL.
-                lrk_pt_add_reduction(
-                  pt, state_no, token->snode, col, c, c_tail);
+                pt->add_reduction(state_no, token->snode, col, c, c_tail);
             }
         }
     }
@@ -364,7 +362,7 @@ edge_pushing(int state_no)
         if (true == is_final_configuration(c)) {
             // check if this final config's context contains conflict symbol,
             // if so add it to set_c, together with the conflict symbol(s).
-            cc = cfg_ctxt_create(
+            cc = CfgCtxt::create(
               get_start_config_from_tail(c), get_config_conflict_context(c), c);
             c->z = 0;
             set_c = set_insert(set_c, (void*)cc);
@@ -409,7 +407,7 @@ edge_pushing(int state_no)
                                            set_c2);
                 } else if (x_len == k1 - 1) {
                     ConfigPairNode* n =
-                      config_pair_list_find(lane_head_tail_pairs, c);
+                      ConfigPairNode::list_find(lane_head_tail_pairs, c);
                     if (n != nullptr) { // found in cache.
                         std::cout << "found in cache" << std::endl;
                         // this list is in INC order of c.
@@ -434,9 +432,9 @@ edge_pushing(int state_no)
                         if (nullptr == lane_head_tail_pairs) {
                             lane_head_tail_pairs = tmp;
                         } else {
-                            lane_head_tail_pairs = config_pair_list_combine(
+                            lane_head_tail_pairs = ConfigPairNode::list_combine(
                               lane_head_tail_pairs, tmp);
-                            config_pair_list_destroy(tmp);
+                            ConfigPairNode::list_destroy(tmp);
                         }
                     }
                 }
@@ -512,11 +510,11 @@ lane_tracing_lrk()
         return;
     LRk_PT = nullptr; // parsing table extension.
     MAX_K++;          // increment K for LR(k).
-    lrk_pt_array = lrk_pt_array_create();
+    lrk_pt_array = LRkPTArray::create();
 
     std::cout << "\n------------- lane_tracing_LR_k ------------- "
               << "lane head/tail pairs:" << std::endl;
-    config_pair_list_dump(lane_head_tail_pairs);
+    ConfigPairNode::list_dump(lane_head_tail_pairs);
 
     for (const int state_no : states_inadequate->states) {
         int ct_rr = states_new_array->rr_count[state_no];

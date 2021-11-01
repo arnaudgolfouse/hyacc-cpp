@@ -754,7 +754,7 @@ set_has_code()
 /////////////////////////////////////////////////////////////
 
 static auto
-is_in_vanish_symbol_list(SymbolTblNode* n) -> bool
+is_in_vanish_symbol_list(const SymbolTblNode* n) -> bool
 {
     // std::cout << "isInVanishSymbolList input: " <<  symbol << std::endl;
     if (strlen(n->symbol) == 0) {

@@ -116,11 +116,11 @@ bool all_pairwise_disjoint;
 LtTblEntry* LT_tbl;
 
 /* declaration of functions */
-void
+static void
 dump_lt_tbl();
-auto
+static auto
 lt_tbl_find_entry(int from_state) -> LtTblEntry*;
-auto
+static auto
 cluster_trace_new_chain_all(int parent_state, const LtTblEntry* e) -> bool;
 
 void
@@ -234,11 +234,9 @@ llist_int_destroy(LlistInt* list)
  * Add n to the list in INC order.
  */
 auto
-llist_int_add_inc(LlistInt* list, int n) -> LlistInt*
+LlistInt::add_inc(int n) noexcept -> LlistInt*
 {
-    if (list == nullptr) {
-        return llist_int_create(n);
-    }
+    LlistInt* list = this;
     // else, list is not empty. insert in INC order.
 
     int cmp = 0;
@@ -278,12 +276,9 @@ llist_int_add_head(LlistInt* list, int n) -> LlistInt*
 }
 
 void
-llist_int_dump(LlistInt* list)
+LlistInt::dump() const noexcept
 {
-    if (list == nullptr)
-        return;
-
-    for (LlistInt* x = list; x != nullptr; x = x->next) {
+    for (const LlistInt* x = this; x != nullptr; x = x->next) {
         std::cout << x->n << ' ';
     }
 }
@@ -295,7 +290,6 @@ llist_int_dump(LlistInt* list)
 auto
 llist_int2_create(int n1, int n2) -> LlistInt2*
 {
-
     auto* item = new LlistInt2;
     item->n1 = n1;
     item->n2 = n2;
@@ -373,13 +367,10 @@ llist_int2_find_n1(LlistInt2* list, int n1) -> LlistInt2*
     return nullptr;
 }
 
-/*
- * Find the node in a LlistInt list whose first entry is n2.
- */
 auto
-llist_int2_find_n2(LlistInt2* list, int n2) -> LlistInt2*
+LlistInt2::find_n2(int n2) noexcept -> LlistInt2*
 {
-    for (LlistInt2* t = list; t != nullptr; t = t->next) {
+    for (LlistInt2* t = this; t != nullptr; t = t->next) {
         if (t->n2 == n2)
             return t;
     }
@@ -427,7 +418,7 @@ lt_tbl_entry_add_to_state(LtTblEntry* e, State* to)
 {
     if (to == nullptr || e == nullptr)
         return;
-    e->to_states = llist_int_add_inc(e->to_states, to->state_no);
+    e->to_states = e->to_states->add_inc(to->state_no);
 }
 
 /*
@@ -615,7 +606,7 @@ dump_lt_tbl_entry(LtTblEntry* e)
     // dump_config_context.
     dump_llist_context_set(e->ctxt_set);
     std::cout << "\t| ";
-    llist_int_dump(e->to_states);
+    e->to_states->dump();
     std::cout << std::endl;
 }
 
@@ -713,16 +704,16 @@ cluster_destroy(LtCluster* c)
 }
 
 void
-cluster_dump(LtCluster* c)
+LtCluster::dump() const noexcept
 {
     LtTblEntry* e = nullptr;
 
     std::cout << "states: " << std::endl;
-    for (LlistInt2* n = c->states; n != nullptr; n = n->next) {
+    for (LlistInt2* n = this->states; n != nullptr; n = n->next) {
         std::cout << n->n1 << "/" << n->n2 << " [to: ";
         if ((e = lt_tbl_find_entry(n->n1)) != nullptr) {
             for (LlistInt* s = e->to_states; s != nullptr; s = s->next) {
-                LlistInt2* m = llist_int2_find_n1(c->states, s->n);
+                LlistInt2* m = llist_int2_find_n1(this->states, s->n);
                 std::cout << s->n << "/" << ((m == nullptr) ? -1 : m->n2)
                           << " ";
             }
@@ -730,7 +721,7 @@ cluster_dump(LtCluster* c)
         std::cout << "]" << std::endl;
     }
     std::cout << "context sets: ";
-    dump_llist_context_set(c->ctxt_set);
+    dump_llist_context_set(this->ctxt_set);
 
     std::cout << std::endl;
 }
@@ -739,33 +730,24 @@ static void
 all_clusters_dump()
 {
     std::cout << "--all_clusters.START--" << std::endl;
-    for (LtCluster* c = all_clusters; c != nullptr; c = c->next) {
-        cluster_dump(c);
+    for (const LtCluster* c = all_clusters; c != nullptr; c = c->next) {
+        c->dump();
     }
     std::cout << "--END--" << std::endl;
 }
 
-/*
- * Return:
- *   the splitted state's no if state_no is in c->states list
- *   -1 otherwise.
- *
- * Note state_no here is the virtual state_no: the one
- * splitted from. So there could be more than one cluster
- * contain it.
- */
 auto
-cluster_contain_state(const LtCluster* c, int state_no) -> int
+LtCluster::contain_state(int state_no) const noexcept -> int
 {
 
     if (state_no < 0)
         return -1;
     // std::cout << "cluster_cotain_state(state_no: " <<  state_no<< ")" <<
     // std::endl;
-    if (c == nullptr || c->states == nullptr)
+    if (this->states == nullptr)
         return -1;
 
-    for (const LlistInt2* s = c->states; s != nullptr; s = s->next) {
+    for (const LlistInt2* s = this->states; s != nullptr; s = s->next) {
         if (s->n1 == state_no) {
             // std::cout << "found" << std::endl;
             return s->n2;
@@ -1005,8 +987,7 @@ lane_head_tail_pairs_replace(LtCluster* c,
         // covers the situation where n->start->owner is a
         // splitted state.
         if (n->end->owner == s &&
-            llist_int2_find_n2(c->states, n->start->owner->state_no) !=
-              nullptr) {
+            c->states->find_n2(n->start->owner->state_no) != nullptr) {
             // do replacement for n->end: from that in s to s_copy.
             for (int i = 0; i < s->config.size(); i++) {
                 if (s->config[i] == n->end) {
@@ -1096,7 +1077,7 @@ find_containing_cluster(LtCluster* c, int state_no) -> LtCluster*
     }
 
     for (; c != nullptr; c = c->next) {
-        if (cluster_contain_state(c, state_no) >= 0) {
+        if (c->contain_state(state_no) >= 0) {
             return c;
         }
     }
@@ -1347,7 +1328,7 @@ cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
     LlistContextSet* e_ctxt = (e == nullptr) ? nullptr : e->ctxt_set;
 
     // state in in cluster c.
-    int ret_state = cluster_contain_state(c, state_no);
+    int ret_state = c->contain_state(state_no);
     if (ret_state >= 0) {
         if constexpr (DEBUG_PHASE_2_REGENERATE2) {
             std::cout << "=>2. state " << ret_state
@@ -2063,7 +2044,7 @@ resolve_lalr1_conflicts()
                       contxt->snode, state_no, (-1) * config->ruleID);
                 }
             } else if (config->nMarker != nullptr &&
-                       is_terminal(config->nMarker->snode)) {
+                       config->nMarker->snode->is_terminal()) {
                 // insert shift.
                 insert_action(
                   config->nMarker->snode,
@@ -2601,7 +2582,7 @@ trace_back(const Configuration* c0, Configuration* c, laneHead* lh_list)
             // Don't use goal production. As it is the augmented rule, and
             // it generates no context at all.
             if (!(c->owner->state_no == 0 && c->ruleID == 0))
-                lane_head_tail_pairs = config_pair_list_insert(
+                lane_head_tail_pairs = ConfigPairNode::list_insert(
                   lane_head_tail_pairs, cur_red_config, c);
         }
 
@@ -2674,8 +2655,8 @@ trace_back_lrk(const Configuration* c0, Configuration* c)
         // Don't use goal production. As it is the augmented rule, and
         // it generates no context at all.
         if (!(c->owner->state_no == 0 && c->ruleID == 0))
-            lane_head_tail_pairs =
-              config_pair_list_insert(lane_head_tail_pairs, cur_red_config, c);
+            lane_head_tail_pairs = ConfigPairNode::list_insert(
+              lane_head_tail_pairs, cur_red_config, c);
 
         return;
     }

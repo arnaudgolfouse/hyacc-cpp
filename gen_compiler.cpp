@@ -228,8 +228,8 @@ static auto
 find_full_rule(int rule_count) -> Production*
 {
     Production* rule = nullptr;
-    SymbolNode* node = nullptr;
-    SymbolTblNode* sym = nullptr;
+    const SymbolNode* node = nullptr;
+    const SymbolTblNode* sym = nullptr;
 
     for (int full_rule = rule_count; full_rule < grammar.rules.size();
          ++full_rule) {
@@ -255,11 +255,11 @@ static auto
 find_mid_prod_index(const Production* rule, const Production* mid_prod_rule)
   -> int
 {
-    SymbolNode* lnode = mid_prod_rule->nLHS;
-    SymbolTblNode* lsym = lnode->snode;
+    const SymbolNode* lnode = mid_prod_rule->nLHS;
+    const SymbolTblNode* lsym = lnode->snode;
     char* l = lsym->symbol;
-    SymbolNode* rnode = rule->nRHS_head;
-    SymbolTblNode* rsym = nullptr;
+    const SymbolNode* rnode = rule->nRHS_head;
+    const SymbolTblNode* rsym = nullptr;
     char* r = nullptr;
 
     for (int i = 0; rnode; ++i, rnode = rnode->next)
@@ -272,14 +272,14 @@ find_mid_prod_index(const Production* rule, const Production* mid_prod_rule)
 }
 
 static auto
-find_sym(const Production* rule, int dollar_number) -> SymbolTblNode*
+find_sym(const Production* rule, int dollar_number) -> const SymbolTblNode*
 {
-    SymbolTblNode* sym = nullptr;
+    const SymbolTblNode* sym = nullptr;
     if (dollar_number == MAX_RULE_LENGTH)
         return sym;
 
     int i = 1;
-    SymbolNode* node = rule->nRHS_head;
+    const SymbolNode* node = rule->nRHS_head;
     for (; i < dollar_number && node; ++i, node = node->next)
         ;
     if (i != dollar_number) {
@@ -668,10 +668,10 @@ get_index_in_tokens_array(SymbolTblNode* s) -> int
  * non-terminal array of the given grammar.
  * Used in gen_compiler.c.
  */
-auto
-get_non_terminal_index(SymbolTblNode* snode) -> int
+static auto
+get_non_terminal_index(const SymbolTblNode* snode) -> int
 {
-    SymbolNode* a = grammar.non_terminal_list;
+    const SymbolNode* a = grammar.non_terminal_list;
     for (int i = 0; a != nullptr; a = a->next) {
         if (snode == a->snode)
             return i;

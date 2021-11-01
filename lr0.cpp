@@ -55,7 +55,7 @@ get_config_successors_lr0(State* s)
             config->marker < grammar.rules[config->ruleID]->RHS_count) {
             SymbolTblNode* scanned_symbol = get_scanned_symbol(config);
 
-            if (is_non_terminal(scanned_symbol)) {
+            if (scanned_symbol->is_non_terminal()) {
 
                 for (RuleIDNode* r = scanned_symbol->ruleIDList; r != nullptr;
                      r = r->next) {

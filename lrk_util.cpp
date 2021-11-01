@@ -101,7 +101,8 @@ config_pair_cmp(Configuration* end1,
  * Combine list s(ource) to list t(arget).
  */
 auto
-config_pair_list_combine(ConfigPairList t, ConfigPairList s) -> ConfigPairList
+ConfigPairNode::list_combine(ConfigPairList t, ConfigPairList s) noexcept
+  -> ConfigPairList
 {
     if (s == nullptr)
         return t;
@@ -109,7 +110,7 @@ config_pair_list_combine(ConfigPairList t, ConfigPairList s) -> ConfigPairList
         return s;
 
     for (ConfigPairNode* n = s; n != nullptr; n = n->next) {
-        t = config_pair_list_insert(t, n->end, n->start);
+        t = ConfigPairNode::list_insert(t, n->end, n->start);
     }
 
     return t;
@@ -121,9 +122,10 @@ config_pair_list_combine(ConfigPairList t, ConfigPairList s) -> ConfigPairList
  *   lane_start_config's state_no and ruleID.
  */
 auto
-config_pair_list_insert(ConfigPairList list,
-                        Configuration* conflict_config,
-                        Configuration* lane_start_config) -> ConfigPairList
+ConfigPairNode::list_insert(ConfigPairList list,
+                            Configuration* conflict_config,
+                            Configuration* lane_start_config) noexcept
+  -> ConfigPairList
 {
     ConfigPairNode *n = nullptr, *n_prev = nullptr;
 
@@ -171,7 +173,7 @@ config_pair_node_dump(ConfigPairNode* n)
 }
 
 void
-config_pair_list_dump(ConfigPairList list)
+ConfigPairNode::list_dump(ConfigPairList list)
 {
     std::cout << "--ConfigPairList--" << std::endl;
     for (ConfigPairNode* n = list; n != nullptr; n = n->next) {
@@ -184,7 +186,8 @@ config_pair_list_dump(ConfigPairList list)
  * Note that more than one LANE_END configurations could be found.
  */
 auto
-config_pair_list_find(ConfigPairList list, Configuration* conflict_config)
+ConfigPairNode::list_find(ConfigPairList list,
+                          Configuration* conflict_config) noexcept
   -> ConfigPairNode*
 {
     for (ConfigPairNode* n = list; n != nullptr; n = n->next) {
@@ -199,7 +202,7 @@ config_pair_list_find(ConfigPairList list, Configuration* conflict_config)
 }
 
 void
-config_pair_list_destroy(ConfigPairList list)
+ConfigPairNode::list_destroy(ConfigPairList list) noexcept
 {
     ConfigPairNode* n = list;
     while (n != nullptr) {
@@ -382,7 +385,7 @@ List::dump(void (*list_item_dump)(void*)) const
 
 // create a parsing table.
 auto
-lrk_pt_create(int k) -> LRkPT*
+LRkPT::create(int k) noexcept -> LRkPT*
 {
     auto* t = new LRkPT;
     t->k = k;
@@ -392,16 +395,14 @@ lrk_pt_create(int k) -> LRkPT*
 }
 
 void
-lrk_pt_dump(const LRkPT* t)
+LRkPT::dump() const noexcept
 {
-    if (t == nullptr)
-        return;
-    if (t->rows == nullptr) {
-        std::cout << "(empty LR(" << t->k << ") parsing table)" << std::endl;
+    if (this->rows == nullptr) {
+        std::cout << "(empty LR(" << this->k << ") parsing table)" << std::endl;
         return;
     }
 
-    for (LRkPTRow* r = t->rows; r != nullptr; r = r->next) {
+    for (const LRkPTRow* r = this->rows; r != nullptr; r = r->next) {
         std::cout << "[" << r->state << ", " << r->token->snode->symbol << "] ";
         for (int i = 0; i < ParsingTblCols; i++) {
             ConfigPairNode* n = r->row[i];
@@ -464,16 +465,13 @@ lrk_pt_dump_file(const LRkPT* t, std::ofstream& fp)
  *          otherwise, return the row before the insertion point.
  */
 auto
-lrk_pt_find(const LRkPT* t, int state, SymbolTblNode* token, bool* found)
+LRkPT::find(int state, SymbolTblNode* token, bool* found) const noexcept
   -> LRkPTRow*
 {
 
     *found = false;
-    if (nullptr == t)
-        return nullptr;
-
-    LRkPTRow* r = t->rows;
-    if (nullptr == r)
+    LRkPTRow* r = this->rows;
+    if (r == nullptr)
         return nullptr;
 
     LRkPTRow* r_prev = nullptr;
@@ -531,19 +529,14 @@ lrk_pt_add_row(LRkPT* t, LRkPTRow* r_prev, int state, SymbolTblNode* token)
  * Assumptions: t != nullptr.
  */
 auto
-lrk_pt_get_entry(LRkPT* t,
-                 int state,
+LRkPT::get_entry(int state,
                  SymbolTblNode* token,
-                 SymbolTblNode* col_token,
-                 bool* exist) -> ConfigPairNode*
+                 const SymbolTblNode* col_token,
+                 bool* exist) noexcept -> ConfigPairNode*
 {
     bool found = false;
-
     *exist = false;
-    if (t == nullptr)
-        return nullptr; // parsing table not exist.
-
-    LRkPTRow* r = lrk_pt_find(t, state, token, &found);
+    LRkPTRow* r = this->find(state, token, &found);
     if (found == false)
         return nullptr; // row not exist in t.
 
@@ -562,31 +555,27 @@ lrk_pt_get_entry(LRkPT* t,
  * Return: true is confilct occurs, false otherwise.
  */
 auto
-lrk_pt_add_reduction(LRkPT* t,
-                     int state,
+LRkPT::add_reduction(int state,
                      SymbolTblNode* token,
-                     SymbolTblNode* s,
+                     const SymbolTblNode* s,
                      Configuration* c,
-                     Configuration* c_tail) -> bool
+                     Configuration* c_tail) noexcept -> bool
 {
-    if (t == nullptr)
-        return false;
-
     bool found = false;
-    LRkPTRow* r = lrk_pt_find(t, state, token, &found);
+    LRkPTRow* r = this->find(state, token, &found);
 
     if (found == false) { // insert new entry
-        r = lrk_pt_add_row(t, r, state, token);
+        r = lrk_pt_add_row(this, r, state, token);
     }
 
     // now add the reduce action on token s.
     int index = get_col(*s);
-    ConfigPairNode* n = r->row[index];
+    const ConfigPairNode* n = r->row[index];
     if (n == nullptr) {
         r->row[index] = config_pair_node_create(c_tail, c);
         return false;
     }
-    Configuration* prev_entry = n->end; /// start;
+    const Configuration* prev_entry = n->end; /// start;
     if (reinterpret_cast<uintptr_t>(prev_entry) == CONST_CONFLICT_SYMBOL) {
         std::cout << "row [" << r->state << ", " << r->token->snode->symbol
                   << "] r/r conflict: CONFLICT_LABEL:" << c->ruleID
@@ -612,7 +601,7 @@ lrk_pt_add_reduction(LRkPT* t,
 //////////////////////////////////////////////////////////////////
 
 auto
-lrk_pt_array_create() -> LRkPTArray*
+LRkPTArray::create() noexcept -> LRkPTArray*
 {
 
     auto* a = new LRkPTArray;
@@ -629,19 +618,19 @@ lrk_pt_array_create() -> LRkPTArray*
  * Add t to a.
  */
 void
-lrk_pt_array_add(LRkPTArray* a, LRkPT* t)
+LRkPTArray::add(LRkPT* t) noexcept
 {
-    if (nullptr == a || nullptr == t)
+    if (nullptr == t)
         return;
 
-    if (a->max_k >= a->size + 1) { // expand a->array.
-        HYY_EXPAND(&a->array, a->size * 2);
-        a->size = a->size * 2;
+    if (this->max_k >= this->size + 1) { // expand this->array.
+        HYY_EXPAND(&this->array, this->size * 2);
+        this->size = this->size * 2;
     }
-    if (a->array[t->k - 2] == nullptr) {
-        a->array[t->k - 2] = t;
-        if (a->max_k < t->k) {
-            a->max_k = t->k;
+    if (this->array[t->k - 2] == nullptr) {
+        this->array[t->k - 2] = t;
+        if (this->max_k < t->k) {
+            this->max_k = t->k;
         }
     } else {
         std::cerr << "Error: LR(" << t->k << ") table already exists"
@@ -653,15 +642,15 @@ lrk_pt_array_add(LRkPTArray* a, LRkPT* t)
  * Get the LR(k) parsing table for k.
  */
 auto
-lrk_pt_array_get(LRkPTArray* a, int k) -> LRkPT*
+LRkPTArray::get(int k) const noexcept -> LRkPT*
 {
-    if (k < 2 || k > a->max_k)
+    if (k < 2 || k > this->max_k)
         return nullptr;
-    if (a->array[k - 2] == nullptr) {
+    if (this->array[k - 2] == nullptr) {
         std::cerr << "Warning: LR(" << k << ") table is empty" << std::endl;
         return nullptr;
     }
-    return a->array[k - 2];
+    return this->array[k - 2];
 }
 
 static void
@@ -687,18 +676,15 @@ write_parsing_tbl_col_hdr_file(std::ostream& fp)
 }
 
 void
-lrk_pt_array_dump(LRkPTArray* a)
+LRkPTArray::dump() const noexcept
 {
-    if (nullptr == a)
-        return;
-
     write_parsing_tbl_col_hdr();
-    std::cout << "===LRkPTArray_dump [max_k = " << a->max_k
+    std::cout << "===LRkPTArray_dump [max_k = " << this->max_k
               << "]===" << std::endl;
 
-    for (int i = 2; i <= a->max_k; i++) {
+    for (int i = 2; i <= this->max_k; i++) {
         std::cout << "LR(" << i << ") p.t." << std::endl;
-        lrk_pt_dump(a->array[i - 2]);
+        this->array[i - 2]->dump();
     }
 
     std::cout << "====================================" << std::endl;
@@ -708,11 +694,8 @@ lrk_pt_array_dump(LRkPTArray* a)
  * Dump to disk.
  */
 void
-lrk_pt_array_dump_file(LRkPTArray* a)
+LRkPTArray::dump_file() const noexcept
 {
-    if (nullptr == a)
-        return;
-
     std::ofstream fp2;
     fp2.open("y.lrk");
     if (!fp2.is_open()) {
@@ -721,11 +704,11 @@ lrk_pt_array_dump_file(LRkPTArray* a)
     }
 
     write_parsing_tbl_col_hdr_file(fp2);
-    fp2 << "===LRkPTArray_dump [max_k = " << a->max_k << "]===" << std::endl;
+    fp2 << "===LRkPTArray_dump [max_k = " << this->max_k << "]===" << std::endl;
 
-    for (int i = 2; i <= a->max_k; i++) {
+    for (int i = 2; i <= this->max_k; i++) {
         fp2 << "=LR(" << i << ") p.t." << std::endl;
-        lrk_pt_dump_file(a->array[i - 2], fp2);
+        lrk_pt_dump_file(this->array[i - 2], fp2);
     }
 
     fp2.close();
@@ -740,7 +723,8 @@ lrk_pt_array_dump_file(LRkPTArray* a)
 //////////////////////////////////////////////////////////////////
 
 auto
-cfg_ctxt_create(Configuration* c, SymbolList s, Configuration* tail) -> CfgCtxt*
+CfgCtxt::create(Configuration* c, SymbolList s, Configuration* tail) noexcept
+  -> CfgCtxt*
 {
     auto* cc = new CfgCtxt;
     cc->c = c;
@@ -750,24 +734,22 @@ cfg_ctxt_create(Configuration* c, SymbolList s, Configuration* tail) -> CfgCtxt*
 }
 
 void
-cfg_ctxt_destroy(CfgCtxt* cc)
+CfgCtxt::destroy(CfgCtxt* cc) noexcept
 {
     delete cc;
 }
 
 void
-cfg_ctxt_dump(const CfgCtxt* cc)
+CfgCtxt::dump() const noexcept
 {
-    if (nullptr == cc)
-        return;
-    std::cout << "CfgCtxt: " << cc->c->owner->state_no << "." << cc->c->ruleID
-              << " { ";
-    for (SymbolList a = cc->ctxt; a != nullptr; a = a->next) {
+    std::cout << "CfgCtxt: " << this->c->owner->state_no << "."
+              << this->c->ruleID << " { ";
+    for (SymbolList a = this->ctxt; a != nullptr; a = a->next) {
         std::cout << a->snode->symbol << " ";
     }
     std::cout << "}[tail: ";
-    if (cc->tail != nullptr) {
-        std::cout << cc->tail->owner->state_no << "." << cc->tail->ruleID;
+    if (this->tail != nullptr) {
+        std::cout << this->tail->owner->state_no << "." << this->tail->ruleID;
     }
     std::cout << "]" << std::endl;
 }
