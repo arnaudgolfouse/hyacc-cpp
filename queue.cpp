@@ -36,19 +36,13 @@
 constexpr size_t QUEUE_INIT_SIZE = 256; // hidden from outside
 constexpr bool DEBUG_QUEUE = false;
 
-auto
-Queue::create() -> Queue*
+Queue::Queue() noexcept
 {
-    Queue* q = new Queue;
-    if (q == nullptr) {
-        throw std::runtime_error("out of memory");
-    }
-    q->capacity = QUEUE_INIT_SIZE;
+    this->capacity = QUEUE_INIT_SIZE;
     // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
-    q->array = new int[q->capacity];
-    q->size = q->start = 0;
-    q->max_count = q->sum_count = q->call_count = 0;
-    return q;
+    this->array = new int[this->capacity];
+    this->size = this->start = 0;
+    this->max_count = this->sum_count = this->call_count = 0;
 }
 
 void

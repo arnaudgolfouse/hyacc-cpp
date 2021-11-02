@@ -46,10 +46,10 @@ add_successor_config_to_state_lr0(const Grammar& grammar, State* s, int rule_id)
  * the configurations to be processed.
  */
 static void
-get_config_successors_lr0(const Grammar& grammar, State* s)
+get_config_successors_lr0(const Grammar& grammar, Queue& config_queue, State* s)
 {
-    while (config_queue->count() > 0) {
-        Configuration* config = s->config[config_queue->pop()];
+    while (config_queue.count() > 0) {
+        Configuration* config = s->config[config_queue.pop()];
 
         if (config->marker >= 0 &&
             config->marker < grammar.rules[config->ruleID]->RHS_count) {
@@ -67,8 +67,8 @@ get_config_successors_lr0(const Grammar& grammar, State* s)
                     if (index == -1) { // new config.
                         add_successor_config_to_state_lr0(
                           grammar, s, r->ruleID);
-                        config_queue->push(static_cast<int>(s->config.size()) -
-                                           1);
+                        config_queue.push(static_cast<int>(s->config.size()) -
+                                          1);
                         index = static_cast<int>(s->config.size()) - 1;
                     } // else is an existing old config, do nothing.
 
@@ -79,13 +79,13 @@ get_config_successors_lr0(const Grammar& grammar, State* s)
 }
 
 static void
-get_closure_lr0(const Grammar& grammar, State* s)
+get_closure_lr0(const Grammar& grammar, Queue& config_queue, State* s)
 {
     // config_queue->clear();
     for (int i = 0; i < s->config.size(); i++) {
-        config_queue->push(i);
+        config_queue.push(i);
     }
-    get_config_successors_lr0(grammar, s);
+    get_config_successors_lr0(grammar, config_queue, s);
 }
 
 /*
@@ -339,7 +339,7 @@ update_parsing_table_lr0(const Grammar& grammar)
 }
 
 void
-generate_lr0_parsing_machine(const Grammar& grammar)
+generate_lr0_parsing_machine(const Grammar& grammar, Queue& config_queue)
 {
     bool debug_gen_parsing_machine = Options::get().debug_gen_parsing_machine;
     State* new_state = states_new->states_head;
@@ -357,7 +357,8 @@ generate_lr0_parsing_machine(const Grammar& grammar)
                          << std::endl;
         }
 
-        get_closure_lr0(grammar, new_state); // get closure of this state.
+        get_closure_lr0(
+          grammar, config_queue, new_state); // get closure of this state.
 
         // get successor states and add them to states_new.
         transition_lr0(grammar, new_state);

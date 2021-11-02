@@ -98,6 +98,7 @@ static void
 clear_state_context(State* s);
 static void
 lt_phase2_propagate_context_change(const Grammar& grammar,
+                                   std::optional<Queue>& config_queue,
                                    int state_no,
                                    LtCluster* c,
                                    LtTblEntry* e);
@@ -128,6 +129,7 @@ static auto
 lt_tbl_find_entry(int from_state) -> LtTblEntry*;
 static auto
 cluster_trace_new_chain_all(const Grammar& grammar,
+                            std::optional<Queue>& config_queue,
                             int parent_state,
                             const LtTblEntry* e) -> bool;
 
@@ -1143,6 +1145,7 @@ combine_cluster(LtCluster* c_new, LtCluster* c_old)
 /// Called by cluster_trace_new_chain() only.
 inline void
 inherit_propagate(const Grammar& grammar,
+                  std::optional<Queue>& config_queue,
                   int state_no,
                   int parent_state_no,
                   LtCluster* container,
@@ -1151,13 +1154,16 @@ inherit_propagate(const Grammar& grammar,
     State* s = states_new_array->state_list[state_no];
     State* s_p = states_new_array->state_list[parent_state_no];
     if (inherit_parent_context(grammar, s, s_p)) {
-        s->get_closure(grammar); /* needed only if context changed.*/
-        lt_phase2_propagate_context_change(grammar, state_no, container, e);
+        s->get_closure(grammar,
+                       config_queue); /* needed only if context changed.*/
+        lt_phase2_propagate_context_change(
+          grammar, config_queue, state_no, container, e);
     }
 }
 
 inline void
 clear_inherit_regenerate(const Grammar& grammar,
+                         std::optional<Queue>& config_queue,
                          int state_no,
                          int parent_state_no)
 {
@@ -1165,7 +1171,8 @@ clear_inherit_regenerate(const Grammar& grammar,
     State* s_p = states_new_array->state_list[parent_state_no];
     clear_state_context(s);
     if (inherit_parent_context(grammar, s, s_p)) {
-        s->get_closure(grammar); /* needed only if context changed.*/
+        s->get_closure(grammar,
+                       config_queue); /* needed only if context changed.*/
     }
 }
 
@@ -1176,7 +1183,9 @@ clear_inherit_regenerate(const Grammar& grammar,
  * to the goal rule before get_closure() !
  */
 inline void
-clear_regenerate(const Grammar& grammar, int state_no)
+clear_regenerate(const Grammar& grammar,
+                 std::optional<Queue>& config_queue,
+                 int state_no)
 {
     State* s = states_new_array->state_list[state_no];
     clear_state_context(s);
@@ -1186,7 +1195,7 @@ clear_regenerate(const Grammar& grammar, int state_no)
           SymbolNode::create(hash_tbl_find(STR_END));
         s->config[0]->context->context_count = 1;
     }
-    s->get_closure(grammar);
+    s->get_closure(grammar, config_queue);
 }
 
 /*
@@ -1198,6 +1207,7 @@ clear_regenerate(const Grammar& grammar, int state_no)
  */
 void
 lt_phase2_propagate_context_change(const Grammar& grammar,
+                                   std::optional<Queue>& config_queue,
                                    int state_no,
                                    LtCluster* c,
                                    LtTblEntry* e)
@@ -1231,7 +1241,7 @@ lt_phase2_propagate_context_change(const Grammar& grammar,
                 std::cout << "--to state: " << t->n << ", actual: " << t2->n2
                           << std::endl;
             }
-            inherit_propagate(grammar, t2->n2, state_no, c, f);
+            inherit_propagate(grammar, config_queue, t2->n2, state_no, c, f);
         }
     }
 }
@@ -1314,6 +1324,7 @@ clear_state_context(State* s)
  */
 static auto
 cluster_trace_new_chain(const Grammar& grammar,
+                        std::optional<Queue>& config_queue,
                         int parent_state_no,
                         int state_no) -> bool
 {
@@ -1342,7 +1353,8 @@ cluster_trace_new_chain(const Grammar& grammar,
                       << ": inherit context from state " << parent_state_no
                       << " & propagate" << std::endl;
         }
-        inherit_propagate(grammar, ret_state, parent_state_no, c, e);
+        inherit_propagate(
+          grammar, config_queue, ret_state, parent_state_no, c, e);
 
         replace_successor(states_new_array->state_list[parent_state_no],
                           states_new_array->state_list[ret_state],
@@ -1394,8 +1406,12 @@ cluster_trace_new_chain(const Grammar& grammar,
                               << ": inherit context from state "
                               << parent_state_no << ", ";
                 }
-                inherit_propagate(
-                  grammar, state_no, parent_state_no, container, e);
+                inherit_propagate(grammar,
+                                  config_queue,
+                                  state_no,
+                                  parent_state_no,
+                                  container,
+                                  e);
 
                 container_not_found = false;
                 break;
@@ -1426,7 +1442,8 @@ cluster_trace_new_chain(const Grammar& grammar,
                           << ": clear, inherit context from state "
                           << parent_state_no << ", ";
             }
-            clear_inherit_regenerate(grammar, state_no, parent_state_no);
+            clear_inherit_regenerate(
+              grammar, config_queue, state_no, parent_state_no);
 
         } else {
             // e is already in another cluster, e.g., first_container;
@@ -1443,11 +1460,13 @@ cluster_trace_new_chain(const Grammar& grammar,
                           << ": clear, inherit context from state "
                           << parent_state_no << ", ";
             }
-            clear_inherit_regenerate(grammar, ret_state, parent_state_no);
+            clear_inherit_regenerate(
+              grammar, config_queue, ret_state, parent_state_no);
         }
 
         if (nullptr != e) { // recursively trace the chain.
-            is_new_chain = cluster_trace_new_chain_all(grammar, ret_state, e);
+            is_new_chain =
+              cluster_trace_new_chain_all(grammar, config_queue, ret_state, e);
         }
     }
 
@@ -1459,6 +1478,7 @@ cluster_trace_new_chain(const Grammar& grammar,
  */
 auto
 cluster_trace_new_chain_all(const Grammar& grammar,
+                            std::optional<Queue>& config_queue,
                             int parent_state,
                             const LtTblEntry* e) -> bool
 {
@@ -1466,7 +1486,8 @@ cluster_trace_new_chain_all(const Grammar& grammar,
 
     // recursively trace the chain.
     for (const LlistInt* s = e->to_states; s != nullptr; s = s->next) {
-        if (false == cluster_trace_new_chain(grammar, parent_state, s->n)) {
+        if (false == cluster_trace_new_chain(
+                       grammar, config_queue, parent_state, s->n)) {
             is_new_chain = false;
         }
     }
@@ -1490,7 +1511,7 @@ all_clusters_add(LtCluster* c)
 }
 
 static void
-phase2_regeneration2(const Grammar& grammar)
+phase2_regeneration2(const Grammar& grammar, std::optional<Queue>& config_queue)
 {
     bool is_new_chain = true;
 
@@ -1509,11 +1530,12 @@ phase2_regeneration2(const Grammar& grammar)
             std::cout << "=>1. clear and regenerate context for state "
                       << x->from_state << std::endl;
         }
-        clear_regenerate(grammar, x->from_state);
+        clear_regenerate(grammar, config_queue, x->from_state);
 
         x->processed = true;
 
-        is_new_chain = cluster_trace_new_chain_all(grammar, x->from_state, x);
+        is_new_chain =
+          cluster_trace_new_chain_all(grammar, config_queue, x->from_state, x);
 
         // add new_cluster to the all_clusters list.
         if (true == is_new_chain) {
@@ -1645,7 +1667,7 @@ auto
 create_originator_list() -> OriginatorList*
 {
     auto* o = new OriginatorList;
-    o->list.reserve(OriginatorList_Len_Init);
+    o->list.reserve(ORIGINATOR_LIST_LEN_INIT);
     return o;
 }
 
@@ -2101,7 +2123,9 @@ remove_pass_through_states(laneHead* lh_list) -> laneHead*
 }
 
 static void
-gpm(const Grammar& grammar, State* new_state)
+gpm(const Grammar& grammar,
+    std::optional<Queue>& config_queue,
+    State* new_state)
 {
     if (Options::get().debug_gen_parsing_machine) {
         std::cout << std::endl
@@ -2118,10 +2142,11 @@ gpm(const Grammar& grammar, State* new_state)
                          << std::endl;
         }
 
-        new_state->get_closure(grammar); // get closure of this state.
+        new_state->get_closure(grammar,
+                               config_queue); // get closure of this state.
 
         // get successor states and add them to states_new.
-        new_state->transition(grammar);
+        new_state->transition(grammar, config_queue);
 
         new_state = new_state->next; // point to next unprocessed state.
     }
@@ -2204,12 +2229,15 @@ get_successor_index(const State* s, const SymbolTblNode* trans_symbol) -> int
  *          false if an existing state is found.
  */
 static auto
-add_split_state(const Grammar& grammar, State* y, State* s, int successor_index)
-  -> bool
+add_split_state(const Grammar& grammar,
+                std::optional<Queue>& config_queue,
+                State* y,
+                State* s,
+                int successor_index) -> bool
 {
     int is_compatible = 0;
-    State* os =
-      search_state_hash_tbl(grammar, y, &is_compatible); // same or compatible.
+    State* os = search_state_hash_tbl(
+      grammar, config_queue, y, &is_compatible); // same or compatible.
 
     if (os == nullptr) { // No existing state found. Add Y as a new state.
         y->state_no = states_new->state_count;
@@ -2218,7 +2246,7 @@ add_split_state(const Grammar& grammar, State* y, State* s, int successor_index)
             std::cout << "split - add new state " << y->state_no << std::endl;
         }
         states_new->add_state2(y);
-        add_state_to_state_array(*states_new_array, y);
+        states_new_array->add_state(y);
         // update shift action.
         update_action(
           get_col(*y->trans_symbol->snode), s->state_no, y->state_no);
@@ -2377,7 +2405,9 @@ update_state_reduce_action(const Grammar& grammar, State* s)
  * ==END==
  */
 static void
-phase2_regeneration(const Grammar& grammar, laneHead* lh_list)
+phase2_regeneration(const Grammar& grammar,
+                    std::optional<Queue>& config_queue,
+                    laneHead* lh_list)
 {
     laneHead* h = lh_list;
     State* new_state = nullptr;
@@ -2386,7 +2416,8 @@ phase2_regeneration(const Grammar& grammar, laneHead* lh_list)
     // 1) handle the head states and PASS_THRU states.
     for (; h != nullptr; h = h->next) {
         State* s = h->s;
-        s->get_closure(grammar); // get_closure() is defined in y.c
+        s->get_closure(grammar,
+                       config_queue); // get_closure() is defined in y.c
         update_state_reduce_action(grammar, s);
 
         if constexpr (DEBUG_PHASE_2_REGENERATE) {
@@ -2438,7 +2469,8 @@ phase2_regeneration(const Grammar& grammar, laneHead* lh_list)
                     combine_state_context(y0, y);
                     lh_list = add_unique_queue(y0, lh_list);
                 } else {
-                    if (add_split_state(grammar, y, s, successor_index)) {
+                    if (add_split_state(
+                          grammar, config_queue, y, s, successor_index)) {
                         if (new_state == nullptr) {
                             new_state = y;
                         }
@@ -2457,7 +2489,7 @@ phase2_regeneration(const Grammar& grammar, laneHead* lh_list)
         if constexpr (DEBUG_PHASE_2_REGENERATE) {
             std::cout << "GRM(new_state) now." << std::endl;
         }
-        gpm(grammar, new_state);
+        gpm(grammar, config_queue, new_state);
     }
 }
 
@@ -2574,7 +2606,7 @@ trace_back(const Grammar& grammar,
 
     for (Configuration* o : c->originators->list) {
         set_transitors_pass_thru_on(grammar, *c, o); // set PASS_THRU ON.
-        if (o->LANE_CON == 0) {
+        if (o->LANE_CON == 0u) {
             if constexpr (DEBUG_PHASE_2) {
                 std::cout << "config on lane: " << o->owner->state_no << "."
                           << o->ruleID << std::endl;
@@ -2758,7 +2790,7 @@ get_conflict_lane_head(const Grammar& grammar) -> laneHead*
 }
 
 static void
-lane_tracing_phase2(const Grammar& grammar)
+lane_tracing_phase2(const Grammar& grammar, std::optional<Queue>& config_queue)
 {
     lane_head_tail_pairs = nullptr; // for LR(k) use only.
     LT_tbl = nullptr;               // initialize the LT_tbl.
@@ -2784,14 +2816,15 @@ lane_tracing_phase2(const Grammar& grammar)
     }
 
     if (!Options::get().use_combine_compatible_states) {
-        phase2_regeneration2(grammar); // using all_clusters.
+        phase2_regeneration2(grammar, config_queue); // using all_clusters.
     } else {
-        phase2_regeneration(grammar, lane_head_list);
+        phase2_regeneration(grammar, config_queue, lane_head_list);
     }
 }
 
 auto
-lane_tracing(const Grammar& grammar) -> std::optional<LRkPTArray>
+lane_tracing(const Grammar& grammar, std::optional<Queue>& config_queue)
+  -> std::optional<LRkPTArray>
 {
     auto& options = Options::get();
     std::optional<LRkPTArray> lrk_pt_array = std::nullopt;
@@ -2802,7 +2835,7 @@ lane_tracing(const Grammar& grammar) -> std::optional<LRkPTArray>
     resolve_lalr1_conflicts(grammar);
 
     if (options.use_lane_tracing && states_inadequate->count_unresolved > 0) {
-        lane_tracing_phase2(grammar);
+        lane_tracing_phase2(grammar, config_queue);
         resolve_lalr1_conflicts(grammar);   ///
         output_parsing_table_lalr(grammar); ///
 

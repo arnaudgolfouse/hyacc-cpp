@@ -34,6 +34,7 @@
 #include <cstdint>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <queue>
 #include <span>
@@ -231,7 +232,7 @@ constexpr int QUEUE_ERR_CODE = -10000000;
 
 struct Queue
 {
-    static auto create() -> Queue*;
+    explicit Queue() noexcept;
     static void destroy(Queue* q) noexcept;
     void clear() noexcept;
     void clear_all() noexcept;
@@ -273,8 +274,6 @@ struct Queue
         return this->array[(i + this->start) % this->capacity];
     }
 };
-
-extern Queue* config_queue;
 
 /*
  * Use final state default reduction in the hyaccpar parse engine.
@@ -335,7 +334,7 @@ struct OriginatorList
 {
     std::vector<struct ConfigurationNode*> list;
 };
-extern size_t OriginatorList_Len_Init;
+constexpr size_t ORIGINATOR_LIST_LEN_INIT = 2;
 
 /*
  * This has the same structure as OriginatorList.
@@ -439,8 +438,9 @@ struct StateNode
     unsigned int padding : 28;
 
     static void destroy_state(State* s);
-    void get_closure(const struct Grammar& grammar);
-    void transition(const Grammar& grammar);
+    void get_closure(const struct Grammar& grammar,
+                     std::optional<Queue>& config_queue);
+    void transition(const Grammar& grammar, std::optional<Queue>& config_queue);
 };
 
 /*
@@ -572,6 +572,7 @@ struct StateArray
 
     static auto create() -> std::shared_ptr<StateArray>;
     static void expand(StateArray* array, size_t new_size);
+    inline void add_state(State* s) noexcept { this->state_list.push_back(s); }
 };
 
 extern std::shared_ptr<StateArray> states_new_array;
@@ -663,6 +664,7 @@ extern auto
 is_compatible_states(const State* s1, const State* s2) -> bool;
 extern auto
 combine_compatible_states(const Grammar& grammar,
+                          std::optional<Queue>& config_queue,
                           State* s_dest,
                           const State* s_src) -> bool;
 
@@ -691,10 +693,9 @@ add_core_config2_state(const Grammar& grammar,
                        Configuration* new_config);
 extern auto
 add_transition_states2_new(const Grammar& grammar,
+                           std::optional<Queue>& config_queue,
                            StateCollection* coll,
                            State* src_state) -> bool;
-extern void
-add_state_to_state_array(StateArray& a, State* s);
 extern void
 add_successor(State* s, State* n);
 extern void
@@ -735,7 +736,9 @@ get_context(const Grammar& grammar, const Configuration* cfg, Context* context);
 extern void
 update_state_parsing_tbl_entry(const Grammar& grammar, const State* s);
 extern void
-propagate_context_change(const Grammar& grammar, const State* s);
+propagate_context_change(const Grammar& grammar,
+                         std::optional<Queue>& config_queue,
+                         const State* s);
 extern void
 write_parsing_table_col_header(std::ostream& os, const Grammar& grammar);
 
@@ -862,8 +865,10 @@ insert_inc_symbol_list(SymbolList a, SymbolTblNode* n) -> SymbolNode*;
 extern void
 init_state_hash_tbl();
 extern auto
-search_state_hash_tbl(const Grammar& grammar, State* s, int* is_compatible)
-  -> State*;
+search_state_hash_tbl(const Grammar& grammar,
+                      std::optional<Queue>& config_queue,
+                      State* s,
+                      int* is_compatible) -> State*;
 extern auto
 search_same_state_hash_tbl(State* s) -> State*;
 extern void
@@ -914,7 +919,7 @@ gen_graphviz_input2(const Grammar& grammar,
 
 /* functions in lr0.c */
 extern void
-generate_lr0_parsing_machine(const Grammar& grammar);
+generate_lr0_parsing_machine(const Grammar& grammar, Queue& config_queue);
 extern auto
 get_scanned_symbol(const Configuration* c) -> SymbolTblNode*; // in y.c
 extern auto
@@ -950,7 +955,8 @@ create_state_no_array() -> StateNoArray*;
 extern void
 add_state_no_array(StateNoArray* sa, int state_no);
 [[nodiscard]] extern auto
-lane_tracing(const Grammar& grammar) -> std::optional<LRkPTArray>;
+lane_tracing(const Grammar& grammar, std::optional<Queue>& config_queue)
+  -> std::optional<LRkPTArray>;
 extern void
 stdout_write_config(const Grammar& grammar, const Configuration* c);
 extern auto
