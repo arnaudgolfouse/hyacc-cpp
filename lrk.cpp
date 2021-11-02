@@ -33,14 +33,12 @@
 #include <cstddef>
 #include <iostream>
 #include <memory>
+#include <optional>
 
 constexpr bool DEBUG_LRK = false;
 
 /** For (conflict_config, lane_end_config) pairs. */
 ConfigPairList lane_head_tail_pairs;
-
-/** LR(k) parsing table array. */
-LRkPTArray* lrk_pt_array;
 
 static void
 print_int(void* object)
@@ -216,28 +214,28 @@ insert_cfg_ctxt_to_set(CfgCtxt* cc, Set* st) -> Set*
     return st;
 }
 
-/*
- * Note that dummy is set_c2. Use it as global variable instead of passed in
- * to overcome the lack of head pointer problem.
- *
- * Insert c->ruleID to entry col at LR(MAX_K) table row (state_no, token).
- * for each token in token_list (context list).
- */
+/// Note that dummy is set_c2. Use it as global variable instead of passed in
+/// to overcome the lack of head pointer problem.
+///
+/// Insert c->ruleID to entry col at LR(MAX_K) table row (state_no, token).
+/// for each token in token_list (context list).
+/// @param lrk_pt_array LR(k) parsing table array.
 static auto
-insert_lrk_pt(int state_no,
+insert_lrk_pt(LRkPTArray& lrk_pt_array,
+              int state_no,
               SymbolNode* token_list,
               SymbolTblNode* col,
               Configuration* c,
               Configuration* c_tail,
               Set* set_c2) -> Set*
 {
-    LRkPT* pt = nullptr; // LR(k) parsing table where k = MAX_K.
+    LRkPT* pt = lrk_pt_array.get(MAX_K); // LR(k) parsing table where k = MAX_K.
     bool exist = false;
 
     // create LR(MAX_K) parsing table if it does not exist yet.
-    if (nullptr == (pt = lrk_pt_array->get(MAX_K))) {
+    if (nullptr == pt) {
         pt = LRkPT::create(MAX_K);
-        lrk_pt_array->add(pt);
+        lrk_pt_array.add(pt);
     }
 
     for (SymbolNode* token = token_list; token != nullptr;
@@ -316,7 +314,8 @@ get_config_conflict_context(Configuration* c) -> SymbolList
 }
 
 static auto
-fill_set_c2(ConfigPairNode* n,
+fill_set_c2(LRkPTArray& lrk_pt_array,
+            ConfigPairNode* n,
             const Configuration* c,
             Configuration* c_tail,
             int k1,
@@ -331,8 +330,13 @@ fill_set_c2(ConfigPairNode* n,
               << " - 1 = " << n->start->z << std::endl;
     SymbolNode* sn = EDGE_PUSHING_CONTEXT_GENERATED;
     for (; sn != nullptr; sn = sn->next) {
-        set_c2 = insert_lrk_pt(
-          state_no, cc->ctxt, sn->snode, n->start, c_tail, set_c2);
+        set_c2 = insert_lrk_pt(lrk_pt_array,
+                               state_no,
+                               cc->ctxt,
+                               sn->snode,
+                               n->start,
+                               c_tail,
+                               set_c2);
     }
 
     return set_c2;
@@ -342,7 +346,7 @@ fill_set_c2(ConfigPairNode* n,
  * @Input: inadequate state no.: state_no.
  */
 static void
-edge_pushing(const Grammar& grammar, int state_no)
+edge_pushing(LRkPTArray& lrk_pt_array, const Grammar& grammar, int state_no)
 {
     CfgCtxt* cc = nullptr;
     Configuration* c = nullptr;
@@ -400,7 +404,8 @@ edge_pushing(const Grammar& grammar, int state_no)
                 auto* x_str = static_cast<SymbolList>(x->object);
                 int x_len = get_lrk_theads_len(x_str);
                 if (x_len == k1) {
-                    set_c2 = insert_lrk_pt(state_no,
+                    set_c2 = insert_lrk_pt(lrk_pt_array,
+                                           state_no,
                                            cc->ctxt,
                                            get_last_symbol(x_str)->snode,
                                            c,
@@ -415,8 +420,14 @@ edge_pushing(const Grammar& grammar, int state_no)
                         for (; n != nullptr; n = n->next) {
                             if (c != n->end)
                                 break;
-                            set_c2 = fill_set_c2(
-                              n, c, c_tail, k1, set_c2, state_no, cc);
+                            set_c2 = fill_set_c2(lrk_pt_array,
+                                                 n,
+                                                 c,
+                                                 c_tail,
+                                                 k1,
+                                                 set_c2,
+                                                 state_no,
+                                                 cc);
                         }
                     } else {
                         ConfigPairNode* tmp =
@@ -426,8 +437,14 @@ edge_pushing(const Grammar& grammar, int state_no)
                         for (ConfigPairNode* n = lane_head_tail_pairs;
                              n != nullptr;
                              n = n->next) {
-                            set_c2 = fill_set_c2(
-                              n, c, c_tail, k1, set_c2, state_no, cc);
+                            set_c2 = fill_set_c2(lrk_pt_array,
+                                                 n,
+                                                 c,
+                                                 c_tail,
+                                                 k1,
+                                                 set_c2,
+                                                 state_no,
+                                                 cc);
                         }
                         // now combine the two list.
                         if (nullptr == lane_head_tail_pairs) {
@@ -504,14 +521,14 @@ update_lr1_parsing_table(int state_no)
     remove_rr_conflict_from_list(state_no);
 }
 
-void
-lane_tracing_lrk(const Grammar& grammar)
+auto
+lane_tracing_lrk(const Grammar& grammar) -> std::optional<LRkPTArray>
 {
     if (0 == states_inadequate->count_unresolved)
-        return;
+        return std::nullopt;
     LRk_PT = nullptr; // parsing table extension.
     MAX_K++;          // increment K for LR(k).
-    lrk_pt_array = LRkPTArray::create();
+    LRkPTArray lrk_pt_array{};
 
     std::cout << "\n------------- lane_tracing_LR_k ------------- "
               << "lane head/tail pairs:" << std::endl;
@@ -521,10 +538,11 @@ lane_tracing_lrk(const Grammar& grammar)
         int ct_rr = states_new_array->rr_count[state_no];
 
         if (state_no >= 0 && ct_rr > 0) {
-            edge_pushing(grammar, state_no);
+            edge_pushing(lrk_pt_array, grammar, state_no);
 
             // update corresonding entry in LR(1) parsing table.
             update_lr1_parsing_table(state_no);
         }
     }
+    return lrk_pt_array;
 }

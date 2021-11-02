@@ -53,6 +53,7 @@
 #include <array>
 #include <fstream>
 #include <iomanip>
+#include <ostream>
 
 struct StateTableNode
 {
@@ -196,15 +197,15 @@ search_same_state_hash_tbl(State* s) -> State*
  *   number of used hash table cells / hash table size.
  */
 void
-state_hash_tbl_dump()
+state_hash_tbl_dump(std::ostream& os)
 {
     int states_count = 0, list_count = 0;
     StateTblNode* n = nullptr;
 
-    *fp_v << std::endl << "--state hash table--\n";
-    *fp_v << "-----------------------" << std::endl;
-    *fp_v << "cell |   count  | state" << std::endl;
-    *fp_v << "-----------------------" << std::endl;
+    os << std::endl << "--state hash table--\n";
+    os << "-----------------------" << std::endl;
+    os << "cell |   count  | state" << std::endl;
+    os << "-----------------------" << std::endl;
     for (int i = 0; i < SHT_SIZE; i++) {
         if (StateHashTbl.at(i).count == 0)
             continue;
@@ -212,24 +213,24 @@ state_hash_tbl_dump()
         list_count++;
         states_count += StateHashTbl.at(i).count;
 
-        *fp_v << "[" << i << "] (count=" << StateHashTbl.at(i).count << ") : ";
+        os << "[" << i << "] (count=" << StateHashTbl.at(i).count << ") : ";
         if ((n = StateHashTbl.at(i).next) != nullptr) {
-            *fp_v << n->state->state_no;
+            os << n->state->state_no;
 
             n = n->next;
             while (n != nullptr) {
-                *fp_v << ", " << n->state->state_no;
+                os << ", " << n->state->state_no;
                 n = n->next;
             }
         }
-        *fp_v << std::endl;
+        os << std::endl;
     }
 
-    *fp_v << states_count << " states, " << list_count << " lists, in average "
-          << std::setprecision(2) << ((double)states_count) / list_count
-          << " states/list." << std::endl;
-    *fp_v << "load factor: " << std::setprecision(2)
-          << ((double)states_count) / SHT_SIZE
-          << ", hash table cell usage: " << std::setprecision(2)
-          << ((double)list_count) / SHT_SIZE << std::endl;
+    os << states_count << " states, " << list_count << " lists, in average "
+       << std::setprecision(2) << ((double)states_count) / list_count
+       << " states/list." << std::endl;
+    os << "load factor: " << std::setprecision(2)
+       << ((double)states_count) / SHT_SIZE
+       << ", hash table cell usage: " << std::setprecision(2)
+       << ((double)list_count) / SHT_SIZE << std::endl;
 }

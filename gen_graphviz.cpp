@@ -274,8 +274,7 @@ gen_graphviz_input(const Grammar& grammar, const std::string& y_gviz)
         for (int col = 0; col < ParsingTblCols; col++) {
             SymbolTblNode* n = ParsingTblColHdr[col];
             if (!is_goal_symbol(grammar, n)) {
-                int state = 0;
-                char action = get_action(n->type, col, row, &state);
+                auto [action, state] = get_action(n->type, col, row);
                 /*std::cout  <<  action <<  state<< "\t"; */
                 if (action == 0) {
                     /* do nothing */
@@ -329,8 +328,7 @@ gen_graphviz_input2(const Grammar& grammar, const std::string& y_gviz)
             for (int col = 0; col < ParsingTblCols; col++) {
                 SymbolTblNode* n = ParsingTblColHdr[col];
                 if (!is_goal_symbol(grammar, n) && !is_parent_symbol(n)) {
-                    int state = 0;
-                    char action = get_action(n->type, col, row, &state);
+                    auto [action, state] = get_action(n->type, col, row);
                     if (action == 's' || action == 'g')
                         state = get_actual_state(state);
                     /* yyprintf("%c%d\t", action, state); */

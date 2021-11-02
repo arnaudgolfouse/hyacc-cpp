@@ -1664,7 +1664,8 @@ post_modification(Grammar& grammar)
     }
 }
 
-GetYaccGrammarOutput::GetYaccGrammarOutput()
+GetYaccGrammarOutput::GetYaccGrammarOutput(std::ofstream& fp_v)
+  : grammar(fp_v)
 {
     // insert special symbols to hash table.
     SymbolTblNode* n = hash_tbl_insert(STR_END); // end marker of production.
@@ -1693,7 +1694,8 @@ GetYaccGrammarOutput::GetYaccGrammarOutput()
  * Called by function main() in y.c.
  */
 auto
-get_yacc_grammar(const std::string& infile) -> GetYaccGrammarOutput
+get_yacc_grammar(const std::string& infile, std::ofstream& fp_v)
+  -> GetYaccGrammarOutput
 {
     if constexpr (DEBUG_YACC_INPUT_PARSER) {
         std::cout << "input file: " << infile << std::endl;
@@ -1705,7 +1707,7 @@ get_yacc_grammar(const std::string& infile) -> GetYaccGrammarOutput
         throw std::runtime_error(std::string("can't open file ") + infile);
     }
 
-    GetYaccGrammarOutput output = GetYaccGrammarOutput();
+    GetYaccGrammarOutput output = GetYaccGrammarOutput(fp_v);
 
     if constexpr (ADD_GOAL_RULE) {
         get_goal_rule_lhs(output.grammar);

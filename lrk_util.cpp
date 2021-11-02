@@ -168,7 +168,7 @@ config_pair_node_dump(ConfigPairNode* n)
               << " -> " << n->end->owner->state_no << "." << n->end->ruleID
               << ")";
 
-    if (n->start->owner->PASS_THRU == 1) {
+    if (n->start->owner->PASS_THRU == 1u) {
         std::cout << " PASS_THRU. ";
     }
 }
@@ -602,13 +602,9 @@ LRkPT::add_reduction(int state,
 // Functions for LR(k) table array. START.
 //////////////////////////////////////////////////////////////////
 
-auto
-LRkPTArray::create() noexcept -> LRkPTArray*
+LRkPTArray::LRkPTArray() noexcept
 {
-
-    auto* a = new LRkPTArray;
-    a->array = std::vector<LRkPT*>(10, nullptr);
-    return a;
+    this->array = std::vector<LRkPT*>(10, nullptr);
 }
 
 /*
@@ -620,7 +616,7 @@ LRkPTArray::add(LRkPT* t) noexcept
     if (nullptr == t)
         return;
 
-    while (t->k - 2 >= this->array.size()) {
+    while (t->k >= this->array.size() + 2) {
         this->array.push_back(nullptr);
     }
     if (this->array[t->k - 2] == nullptr)

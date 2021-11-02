@@ -35,15 +35,14 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <ostream>
 #include <ranges>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
-
-// FILE* fp_v;
-std::unique_ptr<std::ofstream> fp_v{ nullptr };
 
 Options Options::
   inner{}; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -104,9 +103,7 @@ add_to_conflict_array(int state,
                       int action1,
                       int action2) -> std::shared_ptr<ConflictNode>;
 static void
-write_state_transition_list(const Grammar& grammar);
-static void
-write_symbol_node_array(SymbolNode* str);
+write_state_transition_list(std::ostream& os, const Grammar& grammar);
 
 std::string hyacc_filename;
 
@@ -152,18 +149,18 @@ StateList::clone() -> std::shared_ptr<StateList>
     return std::make_shared<StateList>(*this);
 }
 
-void
-StateList::write() const
+std::ostream&
+operator<<(std::ostream& os, const StateList& state_list)
 {
-    *fp_v << std::endl
-          << "  par" << std::endl
-          << "ts_list(" << this->state_list.size() << "): ";
-    for (int i = 0; i < this->state_list.size(); i++) {
+    os << std::endl
+       << "  parents_list(" << state_list.state_list.size() << "): ";
+    for (int i = 0; i < state_list.state_list.size(); i++) {
         if (i > 0)
-            *fp_v << ", ";
-        *fp_v << this->state_list[i]->state_no;
+            os << ", ";
+        os << state_list.state_list[i]->state_no;
     }
-    *fp_v << std::endl;
+    os << std::endl;
+    return os;
 }
 
 /*
@@ -171,64 +168,63 @@ StateList::write() const
  */
 
 void
-Production::write(int marker) const
+Production::write(std::ostream& os, int marker) const noexcept
 {
-    *fp_v << *this->nLHS->snode->symbol << " ";
-    *fp_v << "-> ";
+    os << *this->nLHS->snode->symbol << " ";
+    os << "-> ";
 
     int i = 0;
     for (SymbolNode* n = this->nRHS_head; n != nullptr; n = n->next) {
         if (i == marker)
-            *fp_v << ". ";
-        *fp_v << *n->snode->symbol << " ";
+            os << ". ";
+        os << *n->snode->symbol << " ";
         i++;
     }
     if (i == marker)
-        *fp_v << ". ";
+        os << ". ";
 
     // print this only when marker = -1.
     // i.e. called from writeGrammar().
     if (marker == -1 && this->isUnitProduction)
-        *fp_v << "(unit production)";
+        os << "(unit production)";
 
     if (marker == -1 && this->lastTerminal != nullptr)
-        *fp_v << " (Precedence Terminal: " << *this->lastTerminal->symbol
-              << ")";
+        os << " (Precedence Terminal: " << *this->lastTerminal->symbol << ")";
 
     // if write configration, then don't go to new line.
     // since the context has not been written.
     if (marker < 0)
-        *fp_v << std::endl;
+        os << std::endl;
 }
 
 void
-Grammar::write_rules() const
+Grammar::write_rules(std::ostream& os) const
 {
     int count = 0;
-    *fp_v << "Rules: " << std::endl;
+    os << "Rules: " << std::endl;
     for (const auto& rule : this->rules) {
-        *fp_v << "(" << count << ") ";
-        rule->write(-1);
+        os << "(" << count << ") ";
+        rule->write(os, -1);
         count++;
     }
-    *fp_v << "Number of Rules: " << count << std::endl;
+    os << "Number of Rules: " << count << std::endl;
 }
 
 void
-Grammar::write_rules_no_unit_prod() const
+Grammar::write_rules_no_unit_prod(std::ostream& os) const
 {
     int count = 0;
     int i = 0;
-    *fp_v << "Rules: " << std::endl;
+    os << "Rules: " << std::endl;
     for (const auto& rule : this->rules) {
         if (!this->is_unit_production(i) || i == 0) {
-            *fp_v << "(" << i << ") ";
-            rule->write(-1);
+            os << "(" << i << ") ";
+            rule->write(os, -1);
             count++;
         }
         i++;
     }
-    *fp_v << "Number of Rules: " << count << std::endl;
+    os << "Number of Rules: " << count << std::endl;
 }
 
 auto
@@ -243,65 +239,63 @@ Grammar::get_opt_rule_count() const noexcept -> size_t
 }
 
 void
-Grammar::write_terminals() const
+Grammar::write_terminals(std::ostream& os) const
 {
-    *fp_v << "Terminals (" << this->terminal_count << "): " << std::endl;
+    os << "Terminals (" << this->terminal_count << "): " << std::endl;
 
     SymbolNode* a = this->terminal_list;
     if (a != nullptr) {
-        *fp_v << *a->snode->symbol << std::endl;
+        os << *a->snode->symbol << std::endl;
         for (a = a->next; a != nullptr; a = a->next) {
-            *fp_v << *a->snode->symbol << std::endl;
+            os << *a->snode->symbol << std::endl;
         }
     }
-    *fp_v << std::endl;
+    os << std::endl;
 }
 
 void
-Grammar::write_non_terminals() const
+Grammar::write_non_terminals(std::ostream& os) const
 {
-    *fp_v << "Non-terminals (" << this->non_terminal_count
-          << "): " << std::endl;
+    os << "Non-terminals (" << this->non_terminal_count << "): " << std::endl;
     SymbolNode* a = this->non_terminal_list;
     if (a != nullptr) {
-        *fp_v << *a->snode->symbol << std::endl;
+        os << *a->snode->symbol << std::endl;
         for (a = a->next; a != nullptr; a = a->next) {
-            *fp_v << *a->snode->symbol << std::endl;
+            os << *a->snode->symbol << std::endl;
         }
     }
-    *fp_v << std::endl;
+    os << std::endl;
 }
 
 void
-Grammar::write_vanish_symbols() const
+Grammar::write_vanish_symbols(std::ostream& os) const
 {
     SymbolNode* a = nullptr;
-    *fp_v << "Vanish symbols (" << this->vanish_symbol_count
-          << "): " << std::endl;
+    os << "Vanish symbols (" << this->vanish_symbol_count << "): " << std::endl;
     if ((a = this->vanish_symbol_list) != nullptr) {
-        *fp_v << *a->snode->symbol << std::endl;
+        os << *a->snode->symbol << std::endl;
         for (a = this->vanish_symbol_list; a != nullptr; a = a->next) {
-            *fp_v << *a->snode->symbol << std::endl;
+            os << *a->snode->symbol << std::endl;
         }
     }
-    *fp_v << std::endl;
+    os << std::endl;
 }
 
 void
-Grammar::write(bool before_rm_unit_prod) const
+Grammar::write(std::ostream& os, bool before_rm_unit_prod) const
 {
-    *fp_v << std::endl << "--Grammar--\n";
-    this->write_terminals();
-    this->write_non_terminals();
-    this->write_vanish_symbols();
-    *fp_v << "Goal symbol: " << *this->goal_symbol->snode->symbol << std::endl;
+    os << std::endl << "--Grammar--\n";
+    this->write_terminals(os);
+    this->write_non_terminals(os);
+    this->write_vanish_symbols(os);
+    os << "Goal symbol: " << *this->goal_symbol->snode->symbol << std::endl;
 
     if (before_rm_unit_prod || !Options::get().use_remove_unit_production) {
-        this->write_rules();
+        this->write_rules(os);
     } else { // after remove unit production.
-        this->write_rules_no_unit_prod();
+        this->write_rules_no_unit_prod(os);
     }
-    *fp_v << std::endl;
+    os << std::endl;
 }
 
 /*
@@ -467,97 +461,91 @@ init(const Grammar& grammar)
     ss_count = rr_count = rs_count = 0;
 }
 
-void
-write_context(Context* c)
+auto
+operator<<(std::ostream& os, const Context& context) -> std::ostream&
 {
-    *fp_v << " {";
+    os << " {";
 
-    const SymbolNode* s = c->nContext;
+    const SymbolNode* s = context.nContext;
     if (s != nullptr) {
-        *fp_v << *s->snode->symbol;
+        os << *s->snode->symbol;
         while ((s = s->next) != nullptr) {
-            *fp_v << ", " << *s->snode->symbol;
+            os << ", " << *s->snode->symbol;
         }
     }
 
+    const Context* c = &context;
     if (Options::get().use_lr_k) {
         // specifically for LR(k). This can be combined with the
         // above if block. Single this part out here is to keep
         // the code easier to maintain for LR(1) and LR(k) separately.
         for (c = c->next; c != nullptr; c = c->next) {
-            *fp_v << "; ";
+            os << "; ";
             if ((s = c->nContext) != nullptr) {
-                *fp_v << *s->snode->symbol;
+                os << *s->snode->symbol;
                 while ((s = s->next) != nullptr) {
-                    *fp_v << ", " << *s->snode->symbol;
+                    os << ", " << *s->snode->symbol;
                 }
             }
         }
     }
 
-    *fp_v << "} ";
+    os << "} ";
+    return os;
 }
 
 static void
-write_configuration(const Grammar& grammar, const Configuration& c)
+write_configuration(std::ostream& os,
+                    const Grammar& grammar,
+                    const Configuration& c)
 {
     auto& options = Options::get();
-    grammar.rules[c.ruleID]->write(c.marker);
+    grammar.rules[c.ruleID]->write(os, c.marker);
 
     if (options.use_lr0 && !options.use_lalr) { // LR(0), no context.
         // do nothing unless is goal production.
         if (c.ruleID == 0)
-            *fp_v << STR_END;
+            os << STR_END;
     } else {
-        write_context(c.context);
+        os << c.context;
     }
 
     if (c.isCoreConfig == 1u)
-        *fp_v << " (core) ";
+        os << " (core) ";
 
     if (options.use_lalr && options.show_originators) {
         if (c.LANE_END == 1u) {
-            *fp_v << " [LANE_END]";
+            os << " [LANE_END]";
         }
         if (c.LANE_CON == 1u) {
-            *fp_v << " [LANE_CON]";
+            os << " [LANE_CON]";
         }
         if (c.COMPLETE == 1u) {
-            *fp_v << " [COMPLETE]";
+            os << " [COMPLETE]";
         }
-        *fp_v << std::endl;
-        // *fp_v << " [owner: " <<  c->owner->state_no<< "]" ;
-        write_config_originators(c); /* in lane_tracing.c */
-        write_config_transitors(c);  /* in lane_tracing.c */
+        os << std::endl;
+        // os << " [owner: " <<  c->owner->state_no<< "]" ;
+        c.write_originators(os); /* in lane_tracing.c */
+        c.write_transitors(os);  /* in lane_tracing.c */
     } else {
-        *fp_v << std::endl;
+        os << std::endl;
     }
 }
 
-void
-write_core_configuration(const Grammar& grammar, State* s)
-{
-    *fp_v << "~~~~~Core configurations.Start~~~~~" << std::endl;
-    for (int i = 0; i < s->core_config_count; i++) {
-        write_configuration(grammar, *s->config[i]);
-    }
-    *fp_v << "~~~~~Core configurations.End~~~~~" << std::endl;
-}
-
-void
-write_successor_list(State& s)
+static void
+write_successor_list(std::ostream& os, State& s)
 {
     if (!s.successor_list.empty())
-        *fp_v << std::endl;
-    // *fp_v << std::endl << "-successor list-\n" ;
+        os << std::endl;
+    // os << std::endl << "-successor list-\n" ;
     for (const auto& successor : s.successor_list) {
-        *fp_v << *successor->trans_symbol->snode->symbol << " : "
-              << successor->state_no << std::endl;
+        os << *successor->trans_symbol->snode->symbol << " : "
+           << successor->state_no << std::endl;
     }
 }
 
-void
-write_state_conflict_list(int state)
+static void
+write_state_conflict_list(std::ostream& os, int state)
 {
     if (Options::get().use_remove_unit_production) {
         state = get_actual_state(state);
@@ -573,56 +561,54 @@ write_state_conflict_list(int state)
 
     for (auto& c = states_new_array->conflict_list[state]; c != nullptr;
          c = c->next) {
-        *fp_v << c->state << ": ";
+        os << c->state << ": ";
         if (c->s > 0) {
-            *fp_v << "shift/reduce conflict ";
-            *fp_v << "(shift " << c->s << ", red'n " << (-1) * c->r << ")";
+            os << "shift/reduce conflict ";
+            os << "(shift " << c->s << ", red'n " << (-1) * c->r << ")";
         } else {
-            *fp_v << "reduce/reduce conflict ";
-            *fp_v << "red'n " << (-1) * c->s << ", red'n " << (-1) * c->r
-                  << "]";
+            os << "reduce/reduce conflict ";
+            os << "red'n " << (-1) * c->s << ", red'n " << (-1) * c->r << "]";
         } // end if
-        *fp_v << " on '" << *c->lookahead->symbol << "'" << std::endl;
+        os << " on '" << *c->lookahead->symbol << "'" << std::endl;
     } // end for
 }
 
-void
-write_grammar_conflict_list()
+static void
+write_grammar_conflict_list(std::ostream& os)
 {
     if (rs_count == 0 && rr_count == 0)
         return;
-    // *fp_v << "==Conflict List==" << std::endl << "\n" ;
-    *fp_v << "Conflicts:";
-    *fp_v << "  " << rs_count << " shift/reduce, " << rr_count
-          << " reduce/reduce" << std::endl
-          << "\n";
+    os << "Conflicts:";
+    os << "  " << rs_count << " shift/reduce, " << rr_count << " reduce/reduce"
+       << std::endl
+       << "\n";
 
     for (int i = 0; i < ParsingTblRows; i++) {
         if (states_new_array->rs_count[i] > 0) {
-            *fp_v << "  state " << i << ": " << states_new_array->rs_count[i]
-                  << " shift/reduce conflict"
-                  << ((states_new_array->rs_count[i] == 1) ? "" : "s");
+            os << "  state " << i << ": " << states_new_array->rs_count[i]
+               << " shift/reduce conflict"
+               << ((states_new_array->rs_count[i] == 1) ? "" : "s");
             if (states_new_array->rr_count[i] > 0) {
-                *fp_v << ", " << states_new_array->rr_count[i]
-                      << " reduce/reduce conflict"
-                      << ((states_new_array->rr_count[i] == 1) ? "" : "s");
+                os << ", " << states_new_array->rr_count[i]
+                   << " reduce/reduce conflict"
+                   << ((states_new_array->rr_count[i] == 1) ? "" : "s");
             }
-            *fp_v << std::endl;
+            os << std::endl;
         } else if (states_new_array->rr_count[i] > 0) {
-            *fp_v << "  state " << i << ": " << states_new_array->rr_count[i]
-                  << " reduce/reduce conflict"
-                  << ((states_new_array->rr_count[i] == 1) ? "" : "s")
-                  << std::endl;
+            os << "  state " << i << ": " << states_new_array->rr_count[i]
+               << " reduce/reduce conflict"
+               << ((states_new_array->rr_count[i] == 1) ? "" : "s")
+               << std::endl;
         }
     }
-    *fp_v << std::endl;
+    os << std::endl;
 }
 
 /*
  *  Used when USE_REMOVE_UNIT_PROD is used.
  */
-void
-write_grammar_conflict_list2()
+static void
+write_grammar_conflict_list2(std::ostream& os)
 {
     int state = 0, diff = 0;
     int final_rs_count = 0;
@@ -631,11 +617,10 @@ write_grammar_conflict_list2()
 
     if (rs_count == 0 && rr_count == 0)
         return;
-    // *fp_v << "==Conflict List==" << std::endl << "\n" ;
-    *fp_v << "Conflicts:";
-    *fp_v << "  " << rs_count << " shift/reduce, " << rr_count
-          << " reduce/reduce]" << std::endl
-          << "\n";
+    os << "Conflicts:";
+    os << "  " << rs_count << " shift/reduce, " << rr_count << " reduce/reduce]"
+       << std::endl
+       << "\n";
 
     for (int i = 0; i < ParsingTblRows; i++) {
         if (!is_reachable_state(i))
@@ -644,73 +629,71 @@ write_grammar_conflict_list2()
         state = get_actual_state(i);
 
         if (a->rs_count[i] > 0) {
-            *fp_v << "  state " << state << ": " << a->rs_count[i]
-                  << " shift/reduce conflict"
-                  << ((a->rs_count[i] == 1) ? "" : "s");
+            os << "  state " << state << ": " << a->rs_count[i]
+               << " shift/reduce conflict"
+               << ((a->rs_count[i] == 1) ? "" : "s");
             final_rs_count += a->rs_count[i];
             if (a->rr_count[i] > 0) {
-                *fp_v << ", " << a->rr_count[i] << " reduce/reduce conflict"
-                      << ((a->rr_count[i] == 1) ? "" : "s");
+                os << ", " << a->rr_count[i] << " reduce/reduce conflict"
+                   << ((a->rr_count[i] == 1) ? "" : "s");
                 final_rr_count += a->rr_count[i];
             }
-            *fp_v << std::endl;
+            os << std::endl;
         } else if (a->rr_count[i] > 0) {
-            *fp_v << "  state " << state << ": " << a->rr_count[i]
-                  << " reduce/reduce conflict"
-                  << ((a->rr_count[i] == 1) ? "" : "s") << std::endl;
+            os << "  state " << state << ": " << a->rr_count[i]
+               << " reduce/reduce conflict"
+               << ((a->rr_count[i] == 1) ? "" : "s") << std::endl;
             final_rr_count += a->rr_count[i];
         }
     }
 
     if ((diff = rs_count - final_rs_count) > 0)
-        *fp_v << "  [" << diff << " shift/reduce conflict"
-              << ((diff > 1) ? "s" : "") << " in removed states]" << std::endl;
+        os << "  [" << diff << " shift/reduce conflict"
+           << ((diff > 1) ? "s" : "") << " in removed states]" << std::endl;
     if ((diff = rr_count - final_rr_count) > 0)
-        *fp_v << "  [" << diff << " reduce/reduce conflict"
-              << ((diff > 1) ? "s" : "") << " in removed states]" << std::endl;
+        os << "  [" << diff << " reduce/reduce conflict"
+           << ((diff > 1) ? "s" : "") << " in removed states]" << std::endl;
 
-    *fp_v << std::endl;
+    os << std::endl;
 }
 
-void
-write_state(const Grammar& grammar, State& s)
+static void
+write_state(std::ostream& os, const Grammar& grammar, State& s)
 {
     auto& options = Options::get();
-    write_state_conflict_list(s.state_no);
+    write_state_conflict_list(os, s.state_no);
 
-    *fp_v << "--state " << s.state_no << "-- config count:" << s.config.size()
-          << ", core_config count:" << s.core_config_count << std::endl;
+    os << "--state " << s.state_no << "-- config count:" << s.config.size()
+       << ", core_config count:" << s.core_config_count << std::endl;
     for (const auto& config : s.config) {
-        write_configuration(grammar, *config);
+        write_configuration(os, grammar, *config);
     }
 
-    write_successor_list(s);
+    write_successor_list(os, s);
 
     if (options.use_lalr && options.show_originators) {
-        s.parents_list->write();
+        os << *s.parents_list;
     }
-
-    // writeCoreConfiguration(s);
-    *fp_v << std::endl;
+    os << std::endl;
 }
 
-void
-write_state_collection(const Grammar& grammar, StateCollection* c)
+static void
+write_state_collection(std::ostream& os,
+                       const Grammar& grammar,
+                       StateCollection* c)
 {
-    *fp_v << "==State Collection: (count=" << c->state_count << ")"
-          << std::endl;
+    os << "==State Collection: (count=" << c->state_count << ")" << std::endl;
 
     State* s = c->states_head;
     while (s != nullptr) {
-        write_state(grammar, *s);
+        write_state(os, grammar, *s);
         s = s->next;
-        // *fp_v << "------------------------------------------" << std::endl ;
-        *fp_v << std::endl;
+        os << std::endl;
     }
 
     if (c->state_count == 0)
-        *fp_v << "(empty)" << std::endl;
-    *fp_v << std::endl;
+        os << "(empty)" << std::endl;
+    os << std::endl;
 }
 
 void
@@ -832,31 +815,31 @@ insert_unique_symbol_list(SymbolList list, SymbolTblNode* snode, bool* exist)
     return list;
 }
 
-void
-write_symbol_node_array(SymbolNode* str)
+static void
+write_symbol_node_array(std::ostream& os, SymbolNode* str)
 {
     for (SymbolNode* a = str; a != nullptr; a = a->next) {
         if (a != str)
-            *fp_v << ", ";
-        *fp_v << *a->snode->symbol;
+            os << ", ";
+        os << *a->snode->symbol;
     }
-    *fp_v << std::endl;
+    os << std::endl;
 }
 
-void
-show_t_heads(const SymbolList alpha, const SymbolList theads)
+static void
+show_t_heads(std::ostream& os, const SymbolList alpha, const SymbolList theads)
 {
-    *fp_v << "string '";
+    os << "string '";
 
     for (SymbolNode* a = alpha; a != nullptr; a = a->next)
-        *fp_v << *a->snode->symbol << " ";
+        os << *a->snode->symbol << " ";
 
-    *fp_v << "' has theads: ";
+    os << "' has theads: ";
 
     for (SymbolNode* a = theads; a != nullptr; a = a->next)
-        *fp_v << *a->snode->symbol << " ";
+        os << *a->snode->symbol << " ";
 
-    *fp_v << std::endl;
+    os << std::endl;
 }
 
 void
@@ -956,9 +939,9 @@ get_theads(const Grammar& grammar, SymbolNode* alpha) -> SymbolNode*
     free_symbol_node(n);
 
     if (Options::get().debug_gen_parsing_machine) {
-        *fp_v << "==getTHeads: theads for: ";
-        write_symbol_node_array(alpha);
-        write_symbol_node_array(theads);
+        grammar.fp_v << "==getTHeads: theads for: ";
+        write_symbol_node_array(grammar.fp_v, alpha);
+        write_symbol_node_array(grammar.fp_v, theads);
     }
 
     return theads;
@@ -992,7 +975,7 @@ get_context(const Grammar& grammar, const Configuration* cfg, Context* context)
         get_context_do(cfg, context);
     } else { // need to find thead(alpha)
         if (Options::get().show_theads)
-            write_configuration(grammar, *cfg);
+            write_configuration(grammar.fp_v, grammar, *cfg);
 
         // alpha is the string after scanned symbol.
         SymbolList alpha =
@@ -1000,7 +983,7 @@ get_context(const Grammar& grammar, const Configuration* cfg, Context* context)
         theads = get_theads(grammar, alpha);
 
         if (Options::get().show_theads) {
-            show_t_heads(alpha, theads);
+            show_t_heads(grammar.fp_v, alpha, theads);
         }
 
         // if theads_count == 0, just copy the context.
@@ -1378,12 +1361,10 @@ get_config_successors(const Grammar& grammar, State* s)
                         // else, insert to config_queue.
                         config_queue->push(index);
                     }
-                    // else { // same config, do nothing. }
-
-                } // end for
-            }     // else, is a terminal, stop.
-        }         // end if config-marker >= 0 ...
-    }             // end of while
+                }
+            }
+        }
+    }
 }
 
 //////////////////////////////////////////////////////
@@ -1434,20 +1415,19 @@ get_successor_for_config(const Grammar& grammar,
  * production and marker, but different in contexts.
  */
 void
-combine_compatible_config(State* s, bool debug_comb_comp_config)
+combine_compatible_config(State* s,
+                          bool debug_comb_comp_config,
+                          std::ofstream& fp_v)
 {
     if (s == nullptr) {
-        // std::cout << "combineCompatibleConfig: warning: s is nullptr" <<
-        // std::endl;
         return;
     }
     if (s->config.size() <= 1)
         return;
 
     if (debug_comb_comp_config) {
-        *fp_v << "combineCompatibleCfg (state " << s->state_no
-              << "). before: " << s->config.size() << ", ";
-        // writeState(s);
+        fp_v << "combineCompatibleCfg (state " << s->state_no
+             << "). before: " << s->config.size() << ", ";
     }
 
     for (size_t i = 1; i < s->config.size(); i++) {
@@ -1460,9 +1440,9 @@ combine_compatible_config(State* s, bool debug_comb_comp_config)
                 free_config(c); // combine config i to j, then remove i.
                 s->config[i] = nullptr;
                 break;
-            } // end if
-        }     // end for
-    }         // end for
+            }
+        }
+    }
 
     // shrink state configs to remove those nullptr ones
     // after the last step.
@@ -1481,8 +1461,7 @@ combine_compatible_config(State* s, bool debug_comb_comp_config)
     s->config.resize(i);
 
     if (debug_comb_comp_config) {
-        *fp_v << "after: " << s->config.size() << std::endl;
-        // writeState(s);
+        fp_v << "after: " << s->config.size() << std::endl;
     }
 }
 
@@ -2042,39 +2021,6 @@ is_same_state(const State* s1, const State* s2) -> bool
     return true;
 }
 
-/*
- * Determine if a state exists in a state collection.
- * This is done by comparing s with each state in sc.
- *
- * NOTE: combining compatible states is done here!
- */
-auto
-is_existing_state(const Grammar& grammar,
-                  const StateCollection* sc,
-                  const State* s,
-                  int* is_compatible) -> State*
-{
-    State* t = sc->states_head;
-    int i = 0; // index of state.
-
-    while (t != nullptr) {
-        if (is_same_state(t, s)) {
-            return t;
-        }
-        if (Options::get().use_combine_compatible_states) {
-            if (is_compatible_states(t, s)) {
-                combine_compatible_states(grammar, t, s);
-                (*is_compatible) = 1;
-                return t;
-            }
-        }
-        i++;
-        t = t->next;
-    }
-
-    return nullptr;
-}
-
 auto
 create_state() -> State*
 {
@@ -2253,8 +2199,6 @@ State::transition(const Grammar& grammar)
     for (const auto& config : this->config) {
         Configuration* c = config;
         if (is_final_configuration(grammar, c)) {
-            // *fp_v << "a final config. so reduce." << std::endl ;
-            //  writeConfiguration(c);
             insert_reduction_to_parsing_table(grammar, c, this->state_no);
         } else { // do transit operation.
             SymbolTblNode* scanned_symbol = get_scanned_symbol(c);
@@ -2337,13 +2281,15 @@ generate_parsing_machine(const Grammar& grammar)
     State* new_state = states_new->states_head;
 
     if (Options::get().debug_gen_parsing_machine) {
-        *fp_v << std::endl << "\n--generate parsing machine--" << std::endl;
+        grammar.fp_v << std::endl
+                     << "\n--generate parsing machine--" << std::endl;
     }
 
     while (new_state != nullptr) {
         if (Options::get().debug_gen_parsing_machine) {
-            *fp_v << states_new->state_count << " states, current state is "
-                  << new_state->state_no << std::endl;
+            grammar.fp_v << states_new->state_count
+                         << " states, current state is " << new_state->state_no
+                         << std::endl;
         }
 
         new_state->get_closure(grammar); // get closure of this state.
@@ -2361,7 +2307,7 @@ generate_parsing_machine(const Grammar& grammar)
 static void
 dump_state_collections(const Grammar& grammar)
 {
-    write_state_collection(grammar, states_new);
+    write_state_collection(grammar.fp_v, grammar, states_new);
 }
 
 /////////////////////////////////////////////////////////////////
@@ -2406,14 +2352,15 @@ expand_parsing_table()
 }
 
 auto
-get_action(symbol_type symbol_type, int col, int row, int* state_dest) -> char
+get_action(symbol_type symbol_type, int col, int row) -> std::pair<char, int>
 {
     char action = '\0';
+    int state_dest = 0;
     const int x = ParsingTable.at(row * ParsingTblCols + col);
 
     if (x == 0) {
-        *state_dest = 0;
-        return action;
+        state_dest = 0;
+        return { action, state_dest };
     }
     if (x > 0) { // 's' or 'g'
         if (symbol_type == symbol_type::TERMINAL) {
@@ -2427,17 +2374,17 @@ get_action(symbol_type symbol_type, int col, int row, int* state_dest) -> char
               to_string(static_cast<int>(symbol_type)) +
               ", col:" + to_string(col));
         }
-        *state_dest = x;
-        return action;
+        state_dest = x;
+        return { action, state_dest };
     }
     if (x == CONST_ACC) { // 'a'
         action = 'a';
-        *state_dest = 0;
-        return action;
+        state_dest = 0;
+        return { action, state_dest };
     } // x < 0, 'r'
     action = 'r';
-    *state_dest = (-1) * x;
-    return action;
+    state_dest = (-1) * x;
+    return { action, state_dest };
 }
 
 /*
@@ -2603,14 +2550,14 @@ is_goal_symbol(const Grammar& grammar, const SymbolTblNode* snode) -> bool
 }
 
 void
-print_parsing_table_note()
+print_parsing_table_note(std::ostream& os)
 {
-    *fp_v << "Note: " << std::endl;
-    *fp_v << "1. si means shift and stack state i" << std::endl;
-    *fp_v << "2. ri means reduce by production numbered i" << std::endl;
-    *fp_v << "3. a0 means accept" << std::endl;
-    *fp_v << "4. gi means go to state i" << std::endl;
-    *fp_v << "5. 0 means error" << std::endl;
+    os << "Note: " << std::endl;
+    os << "1. si means shift and stack state i" << std::endl;
+    os << "2. ri means reduce by production numbered i" << std::endl;
+    os << "3. a0 means accept" << std::endl;
+    os << "4. gi means go to state i" << std::endl;
+    os << "5. 0 means error" << std::endl;
 }
 
 /*
@@ -2623,29 +2570,28 @@ print_parsing_table_note()
  * Parsing table: Ref. Aho&Ullman p219.
  */
 void
-print_parsing_table(const Grammar& grammar)
+print_parsing_table(std::ostream& os, const Grammar& grammar)
 {
     int row_size = ParsingTblRows;
     int col_size = ParsingTblCols;
 
-    *fp_v << std::endl << "--Pars" << std::endl << "g Table--\n";
-    *fp_v << "State\t";
-    write_parsing_table_col_header(grammar);
+    os << std::endl << "--Pars" << std::endl << "g Table--\n";
+    os << "State\t";
+    write_parsing_table_col_header(os, grammar);
 
     for (int row = 0; row < row_size; row++) {
-        *fp_v << row << "\t";
+        os << row << "\t";
         for (int col = 0; col < ParsingTblCols; col++) {
             const SymbolTblNode* n = ParsingTblColHdr.at(col);
             if (!is_goal_symbol(grammar, n)) {
-                int state = 0;
-                char action = get_action(n->type, col, row, &state);
-                *fp_v << action << state << "\t";
+                auto [action, state] = get_action(n->type, col, row);
+                os << action << state << "\t";
             }
         }
-        *fp_v << std::endl;
+        os << std::endl;
     }
 
-    print_parsing_table_note();
+    print_parsing_table_note(os);
 }
 
 /*
@@ -2759,51 +2705,51 @@ get_final_state_list(const Grammar& grammar)
 }
 
 static void
-get_avg_config_count()
+get_avg_config_count(std::ostream& os)
 {
     constexpr size_t LINE_LENGTH = 20;
     size_t i = 0, sum = 0;
     const State* a = states_new->states_head;
     size_t max = a->config.size();
     size_t min = a->config.size();
-    *fp_v << std::endl
-          << "--No. of c" << std::endl
-          << "figurati" << std::endl
-          << "s for each state--\n";
+    os << std::endl
+       << "--No. of c" << std::endl
+       << "figurati" << std::endl
+       << "s for each state--\n";
     for (; a != nullptr; a = a->next) {
         if ((++i) % LINE_LENGTH == 1)
-            *fp_v << std::endl << i << ": ";
-        *fp_v << a->config.size() << " ";
+            os << std::endl << i << ": ";
+        os << a->config.size() << " ";
         sum += a->config.size();
         if (min > a->config.size())
             min = a->config.size();
         if (max < a->config.size())
             max = a->config.size();
     }
-    *fp_v << std::endl;
-    *fp_v << "Average configurations per state: " << std::setprecision(2)
-          << ((double)sum / states_new->state_count) << " (min: " << min
-          << ", max: " << max << ')' << std::endl;
+    os << std::endl;
+    os << "Average configurations per state: " << std::setprecision(2)
+       << ((double)sum / states_new->state_count) << " (min: " << min
+       << ", max: " << max << ')' << std::endl;
 }
 
 static void
-show_state_config_info()
+show_state_config_info(std::ostream& os)
 {
 
     if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
         config_queue->info();
     } else {
-        *fp_v << xx << " states in total." << std::endl;
-        *fp_v << "before combine: total cfg: " << yy << ", max cfg: " << zz
-              << ", cfg/state: " << std::setprecision(2) << ((double)yy) / xx
-              << std::endl; // before combineCompatibleConfig.
-        *fp_v << "after combine: total cfg: " << yyy << ", max cfg: " << zzz
-              << ", cfg/state: " << std::setprecision(2) << ((double)yyy) / xx
-              << std::endl;
+        os << xx << " states in total." << std::endl;
+        os << "before combine: total cfg: " << yy << ", max cfg: " << zz
+           << ", cfg/state: " << std::setprecision(2) << ((double)yy) / xx
+           << std::endl; // before combineCompatibleConfig.
+        os << "after combine: total cfg: " << yyy << ", max cfg: " << zzz
+           << ", cfg/state: " << std::setprecision(2) << ((double)yyy) / xx
+           << std::endl;
     }
 
-    get_avg_config_count();
-    state_hash_tbl_dump();
+    get_avg_config_count(os);
+    state_hash_tbl_dump(os);
 }
 
 /*
@@ -2857,55 +2803,54 @@ show_conflict_count()
 /* Show statistics of the grammar and it's parsing machine.
  */
 static void
-show_stat(const Grammar& grammar)
+show_stat(std::ostream& os, const Grammar& grammar)
 {
     auto& options = Options::get();
     if (!options.use_verbose)
         return;
 
-    write_state_transition_list(grammar);
+    write_state_transition_list(os, grammar);
     if (options.show_state_config_count)
-        show_state_config_info();
+        show_state_config_info(os);
     if (options.show_actual_state_array)
-        write_actual_state_array();
+        write_actual_state_array(grammar.fp_v);
 
-    *fp_v << std::endl;
+    os << std::endl;
     // *fp_v << "--statistics--" << std::endl ;
     // *fp_v << "[Note: A first rule '$accept ->
     //  start_symbol' is added]" << std::endl << "\n" ;*fp_v << "Symbols
     //  count: " <<  n_symbol<< std::endl ;
-    *fp_v << grammar.terminal_count << " terminals, "
-          << grammar.non_terminal_count << " nonterminals" << std::endl;
-    *fp_v << n_rule << " grammar rules" << std::endl;
+    os << grammar.terminal_count << " terminals, " << grammar.non_terminal_count
+       << " nonterminals" << std::endl;
+    os << n_rule << " grammar rules" << std::endl;
     if (options.use_remove_unit_production) {
-        *fp_v << n_rule_opt << " grammar rules after remove unit ";
+        os << n_rule_opt << " grammar rules after remove unit ";
     }
     if (options.use_combine_compatible_states) {
         if (options.use_lr0) {
-            *fp_v << n_state_opt1 << " states without optimization"
-                  << std::endl;
+            os << n_state_opt1 << " states without optimization" << std::endl;
         } else {
-            *fp_v << n_state_opt1 << " states after combine compatible states"
-                  << std::endl;
+            os << n_state_opt1 << " states after combine compatible states"
+               << std::endl;
         }
         if (options.use_remove_unit_production) {
-            *fp_v << n_state_opt12 << " states after remove unit productions"
-                  << std::endl;
+            os << n_state_opt12 << " states after remove unit productions"
+               << std::endl;
             if (options.use_remove_repeated_states)
-                *fp_v << n_state_opt123 << " states after remove repeated ";
+                os << n_state_opt123 << " states after remove repeated ";
         }
     } else {
-        *fp_v << n_state_opt1 << " states without optimization" << std::endl;
+        os << n_state_opt1 << " states without optimization" << std::endl;
     }
 
     // conflicts summary.
-    *fp_v << rs_count << " shift/reduce conflict" << ((rs_count > 1) ? "s" : "")
-          << ", " << rr_count << " reduce/reduce conflict"
-          << ((rr_count > 1) ? "s" : "") << std::endl;
+    os << rs_count << " shift/reduce conflict" << ((rs_count > 1) ? "s" : "")
+       << ", " << rr_count << " reduce/reduce conflict"
+       << ((rr_count > 1) ? "s" : "") << std::endl;
     if (options.use_remove_unit_production && ss_count > 0) {
-        *fp_v << ss_count << " shift/shift conflict"
-              << ((ss_count > 1) ? "s" : "") << std::endl
-              << "\n";
+        os << ss_count << " shift/shift conflict" << ((ss_count > 1) ? "s" : "")
+           << std::endl
+           << "\n";
     }
 
     // print_size();
@@ -2920,7 +2865,7 @@ show_stat(const Grammar& grammar)
  * Under such situation use_lr0 or use_lalr is true.
  */
 static void
-write_parsing_tbl_row_lalr(int state)
+write_parsing_tbl_row_lalr(std::ostream& os, int state)
 {
     int row_start = state * ParsingTblCols;
     int reduction = 1;
@@ -2939,12 +2884,12 @@ write_parsing_tbl_row_lalr(int state)
                 v = get_actual_state(v);
 
             if (ParsingTblColHdr.at(col)->type == symbol_type::TERMINAL) {
-                *fp_v << "  " << *s->symbol << " [" << s->value << "] shift "
-                      << v << std::endl;
+                os << "  " << *s->symbol << " [" << s->value << "] shift " << v
+                   << std::endl;
             }
         } else if (v == CONST_ACC) {
-            *fp_v << "  " << *s->symbol << " [" << s->value << "] Accept"
-                  << std::endl;
+            os << "  " << *s->symbol << " [" << s->value << "] Accept"
+               << std::endl;
         } else if (v < 0) {
             if (reduction > 0) {
                 reduction = v;
@@ -2960,23 +2905,23 @@ write_parsing_tbl_row_lalr(int state)
     // write reduce actions.
     if (only_one_reduction) {
         if (reduction < 0) {
-            *fp_v << "  . reduce (" << (-1) * reduction << ")" << std::endl;
+            os << "  . reduce (" << (-1) * reduction << ")" << std::endl;
         } else {
-            *fp_v << "  . error " << reduction << std::endl;
+            os << "  . error " << reduction << std::endl;
         } // no reduction.
     } else {
         for (int col = 0; col < ParsingTblCols; col++) {
             int v = ParsingTable.at(row_start + col);
             const SymbolTblNode* s = ParsingTblColHdr.at(col);
             if (v < 0 && v != CONST_ACC) {
-                *fp_v << "  " << *s->symbol << " [" << s->value << "] reduce ("
-                      << (-1) * v << ")" << std::endl;
+                os << "  " << *s->symbol << " [" << s->value << "] reduce ("
+                   << (-1) * v << ")" << std::endl;
             }
         }
     }
 
     // write goto action.
-    *fp_v << std::endl;
+    os << std::endl;
     for (int col = 0; col < ParsingTblCols; col++) {
         int v = ParsingTable.at(row_start + col);
         const SymbolTblNode* s = ParsingTblColHdr.at(col);
@@ -2985,29 +2930,29 @@ write_parsing_tbl_row_lalr(int state)
                 v = get_actual_state(v);
 
             if (ParsingTblColHdr.at(col)->type == symbol_type::NONTERMINAL) {
-                *fp_v << "  " << *s->symbol << " [" << s->value << "] goto "
-                      << v << std::endl;
+                os << "  " << *s->symbol << " [" << s->value << "] goto " << v
+                   << std::endl;
             }
         }
     }
 }
 
 static void
-write_parsing_tbl_row(int state)
+write_parsing_tbl_row(std::ostream& os, int state)
 {
     const auto& options = Options::get();
     int row_start = state * ParsingTblCols;
 
-    *fp_v << std::endl;
+    os << std::endl;
 
     if (final_state_list.at(state) < 0) {
-        *fp_v << "  . reduce (" << (-1) * final_state_list.at(state) << ")"
-              << std::endl;
+        os << "  . reduce (" << (-1) * final_state_list.at(state) << ")"
+           << std::endl;
         return;
     }
 
     if (options.use_lr0 || options.use_lalr) {
-        write_parsing_tbl_row_lalr(state);
+        write_parsing_tbl_row_lalr(os, state);
         return;
     }
 
@@ -3019,85 +2964,80 @@ write_parsing_tbl_row(int state)
                 v = get_actual_state(v);
 
             if (ParsingTblColHdr.at(col)->type == symbol_type::NONTERMINAL) {
-                *fp_v << "  " << *s->symbol << " [" << s->value << "] goto "
-                      << v << std::endl;
+                os << "  " << *s->symbol << " [" << s->value << "] goto " << v
+                   << std::endl;
             } else {
-                *fp_v << "  " << *s->symbol << " [" << s->value << "] shift "
-                      << v << std::endl;
+                os << "  " << *s->symbol << " [" << s->value << "] shift " << v
+                   << std::endl;
             }
         } else if (v == CONST_ACC) {
-            *fp_v << "  " << *s->symbol << " [" << s->value << "] Accept"
-                  << std::endl;
+            os << "  " << *s->symbol << " [" << s->value << "] Accept"
+               << std::endl;
         } else if (v < 0) {
-            *fp_v << "  " << *s->symbol << " [" << s->value << "] reduce ("
-                  << (-1) * v << ")" << std::endl;
+            os << "  " << *s->symbol << " [" << s->value << "] reduce ("
+               << (-1) * v << ")" << std::endl;
         }
     }
 }
 
 static void
-write_state_info(const Grammar& grammar, const State& s)
+write_state_info(std::ostream& os, const Grammar& grammar, const State& s)
 {
     const auto& options = Options::get();
-    write_state_conflict_list(s.state_no);
+    write_state_conflict_list(os, s.state_no);
 
     if (s.PASS_THRU == 1u) {
-        *fp_v << "[PASS_THRU]" << std::endl;
+        os << "[PASS_THRU]" << std::endl;
     }
 
-    *fp_v << "state " << s.state_no << std::endl << "\n";
-    *fp_v << "  [config: " << s.config.size()
-          << ", core config: " << s.core_config_count << "]" << std::endl
-          << "\n";
+    os << "state " << s.state_no << std::endl << "\n";
+    os << "  [config: " << s.config.size()
+       << ", core config: " << s.core_config_count << "]" << std::endl
+       << "\n";
 
     for (const auto& i : s.config) {
-        *fp_v << "  (" << i->ruleID << ") ";
-        write_configuration(grammar, *i);
+        os << "  (" << i->ruleID << ") ";
+        write_configuration(os, grammar, *i);
     }
 
     // writeSuccessorList(s);
     if (options.use_lalr && options.show_originators) {
-        s.parents_list->write();
+        os << *s.parents_list;
     }
 
-    write_parsing_tbl_row(s.state_no);
+    write_parsing_tbl_row(os, s.state_no);
 
     // writeCoreConfiguration(s);
-    *fp_v << std::endl << "\n";
+    os << std::endl << "\n";
 }
 
 static void
-write_state_collection_info(const Grammar& grammar, StateCollection* c)
+write_state_collection_info(std::ostream& os,
+                            const Grammar& grammar,
+                            StateCollection* c)
 {
-    // *fp_v << std::endl << "==State List: (co" << std::endl << "t=" <<
-    //  c->state_count<< ")==" << std::endl << "\n" ;
-    *fp_v << std::endl << "\n";
+    os << std::endl << "\n";
     State* s = c->states_head;
     while (s != nullptr) {
-        write_state_info(grammar, *s);
+        write_state_info(os, grammar, *s);
         s = s->next;
     }
 
     if (c->state_count == 0)
-        *fp_v << "(empty)" << std::endl;
-    *fp_v << std::endl;
+        os << "(empty)" << std::endl;
+    os << std::endl;
 }
 
 static void
-write_state_info_from_parsing_tbl()
+write_state_info_from_parsing_tbl(std::ostream& os)
 {
-    // *fp_v << std::endl << "==States (co" << std::endl << "t = " <<
-    //  actual_state_no_ct / 2<< ")==" << std::endl ;
     for (int row = 0; row < ParsingTblRows; row++) {
         if (is_reachable_state(row)) {
-            *fp_v << std::endl
-                  << "\nstate " << get_actual_state(row) << std::endl;
-            write_parsing_tbl_row(row);
-            // writeStateConflictList(get_actual_state(row));
-            // writeStateConflictList(row);
+            os << std::endl << "\nstate " << get_actual_state(row) << std::endl;
+            write_parsing_tbl_row(os, row);
         }
     }
-    *fp_v << std::endl << "\n";
+    os << std::endl << "\n";
 }
 
 /*
@@ -3105,19 +3045,19 @@ write_state_info_from_parsing_tbl()
  * file.
  */
 void
-write_state_transition_list(const Grammar& grammar)
+write_state_transition_list(std::ostream& os, const Grammar& grammar)
 {
     if (!Options::get().show_state_transition_list)
         return;
 
     if (Options::get().use_remove_unit_production) {
         // write from the parsing table.
-        write_state_info_from_parsing_tbl();
-        write_grammar_conflict_list2();
+        write_state_info_from_parsing_tbl(os);
+        write_grammar_conflict_list2(os);
     } else {
         // write from the state objects.
-        write_state_collection_info(grammar, states_new);
-        write_grammar_conflict_list();
+        write_state_collection_info(os, grammar, states_new);
+        write_grammar_conflict_list(os);
     }
 }
 
@@ -3128,33 +3068,36 @@ static auto
 lr1(const FileNames& files) -> int
 {
     const auto& options = Options::get();
+    std::optional<LRkPTArray> lrk_pt_array = std::nullopt;
     hash_tbl_init();
 
+    std::ofstream fp_v;
     if (options.use_verbose) {
-        fp_v->open(files.y_output); // for y.output
-        if (!fp_v->is_open()) {
+        fp_v.open(files.y_output); // for y.output
+        if (!fp_v.is_open()) {
             throw std::runtime_error(std::string("cannot open file ") +
                                      files.y_output);
         }
-        *fp_v << "/* y.output. Generated by HYACC. */" << std::endl;
-        *fp_v << "/* Input file: " << hyacc_filename << " */" << std::endl;
+        fp_v << "/* y.output. Generated by HYACC. */" << std::endl;
+        fp_v << "/* Input file: " << hyacc_filename << " */" << std::endl;
     }
 
-    GetYaccGrammarOutput yacc_grammar_output = get_yacc_grammar(hyacc_filename);
+    GetYaccGrammarOutput yacc_grammar_output =
+      get_yacc_grammar(hyacc_filename, fp_v);
 
     if (options.debug_hash_tbl) {
-        hash_tbl_dump();
+        hash_tbl_dump(fp_v);
     }
 
     init(yacc_grammar_output.grammar);
     if (options.show_grammar) {
-        yacc_grammar_output.grammar.write(true);
+        yacc_grammar_output.grammar.write(fp_v, true);
     }
 
     generate_parsing_machine(yacc_grammar_output.grammar);
 
     if (options.show_parsing_tbl)
-        print_parsing_table(yacc_grammar_output.grammar);
+        print_parsing_table(fp_v, yacc_grammar_output.grammar);
 
     if (options.use_graphviz && !options.use_remove_unit_production) {
         gen_graphviz_input(yacc_grammar_output.grammar, files.y_gviz);
@@ -3163,14 +3106,14 @@ lr1(const FileNames& files) -> int
     if (options.use_remove_unit_production) {
         remove_unit_production(yacc_grammar_output.grammar);
         if (options.show_parsing_tbl)
-            *fp_v << std::endl << "AFTER REMOVING UNIT PRODUCTION:\n";
+            fp_v << std::endl << "AFTER REMOVING UNIT PRODUCTION:\n";
         if (options.show_total_parsing_tbl_after_rm_up) {
-            *fp_v << std::endl
-                  << "--" << std::endl
-                  << "tire pars" << std::endl
-                  << "g table ";
-            *fp_v << "after removing unit productions--" << std::endl;
-            print_parsing_table(yacc_grammar_output.grammar);
+            fp_v << std::endl
+                 << "--" << std::endl
+                 << "tire pars" << std::endl
+                 << "g table ";
+            fp_v << "after removing unit productions--" << std::endl;
+            print_parsing_table(fp_v, yacc_grammar_output.grammar);
         }
 
         if (options.show_parsing_tbl)
@@ -3178,7 +3121,7 @@ lr1(const FileNames& files) -> int
         if (options.use_remove_repeated_states) {
             further_optimization(yacc_grammar_output.grammar);
             if (options.show_parsing_tbl) {
-                *fp_v << std::endl << "AFTER REMOVING REPEATED STATES:\n";
+                fp_v << std::endl << "AFTER REMOVING REPEATED STATES:\n";
                 print_final_parsing_table(yacc_grammar_output.grammar);
             }
         }
@@ -3187,11 +3130,11 @@ lr1(const FileNames& files) -> int
         if (options.show_parsing_tbl)
             print_condensed_final_parsing_table(yacc_grammar_output.grammar);
         if (options.show_grammar) {
-            *fp_v << std::endl
-                  << "--Grammar after remov" << std::endl
-                  << "g " << std::endl
-                  << "it ";
-            yacc_grammar_output.grammar.write(false);
+            fp_v << std::endl
+                 << "--Grammar after remov" << std::endl
+                 << "g " << std::endl
+                 << "it ";
+            yacc_grammar_output.grammar.write(fp_v, false);
         }
         if (options.use_graphviz) {
             gen_graphviz_input2(yacc_grammar_output.grammar, files.y_gviz);
@@ -3200,14 +3143,14 @@ lr1(const FileNames& files) -> int
     get_final_state_list(yacc_grammar_output.grammar);
 
     if (options.use_generate_compiler)
-        generate_compiler(yacc_grammar_output, hyacc_filename, files);
+        generate_compiler(
+          yacc_grammar_output, lrk_pt_array, hyacc_filename, files);
 
-    show_stat(yacc_grammar_output.grammar);
+    show_stat(fp_v, yacc_grammar_output.grammar);
     show_conflict_count();
 
     if (options.use_verbose)
-        fp_v->close();
-    // free_vars(); // let system take care of it.
+        fp_v.close();
     return 0;
 }
 
@@ -3218,36 +3161,39 @@ lr0(const FileNames& files) -> int
     /// USE_COMBINE_COMPATIBLE_STATES = false; ///
     hash_tbl_init();
 
+    std::ofstream fp_v;
     if (options.use_verbose) {
-        fp_v->open(files.y_output);
-        if (!fp_v->is_open()) { // for y.output
+        fp_v.open(files.y_output);
+        if (!fp_v.is_open()) { // for y.output
             throw std::runtime_error(std::string("cannot open file ") +
                                      files.y_output);
         }
-        *fp_v << "/* y.output. Generated by HYACC. */" << std::endl;
-        *fp_v << "/* Input file: " << hyacc_filename << " */" << std::endl;
+        fp_v << "/* y.output. Generated by HYACC. */" << std::endl;
+        fp_v << "/* Input file: " << hyacc_filename << " */" << std::endl;
     }
 
-    GetYaccGrammarOutput yacc_grammar_output = get_yacc_grammar(hyacc_filename);
+    GetYaccGrammarOutput yacc_grammar_output =
+      get_yacc_grammar(hyacc_filename, fp_v);
 
     if (options.debug_hash_tbl) {
-        hash_tbl_dump();
+        hash_tbl_dump(fp_v);
     }
 
     init(yacc_grammar_output.grammar);
     if (options.show_grammar) {
-        yacc_grammar_output.grammar.write(true);
+        yacc_grammar_output.grammar.write(fp_v, true);
     }
 
     generate_lr0_parsing_machine(yacc_grammar_output.grammar); //
 
+    std::optional<LRkPTArray> lrk_pt_array = std::nullopt;
     if (options.use_lalr) {
-        lane_tracing(yacc_grammar_output.grammar);
+        lrk_pt_array = lane_tracing(yacc_grammar_output.grammar);
         // outputParsingTable_LALR();
     }
 
     if (options.show_parsing_tbl)
-        print_parsing_table(yacc_grammar_output.grammar);
+        print_parsing_table(fp_v, yacc_grammar_output.grammar);
 
     if (options.use_graphviz && !options.use_remove_unit_production) {
         gen_graphviz_input(yacc_grammar_output.grammar, files.y_gviz);
@@ -3256,14 +3202,14 @@ lr0(const FileNames& files) -> int
     if (options.use_remove_unit_production) {
         remove_unit_production(yacc_grammar_output.grammar);
         if (options.show_parsing_tbl)
-            *fp_v << std::endl << "AFTER REMOVING UNIT PRODUCTION:\n";
+            fp_v << std::endl << "AFTER REMOVING UNIT PRODUCTION:\n";
         if (options.show_total_parsing_tbl_after_rm_up) {
-            *fp_v << std::endl
-                  << "--" << std::endl
-                  << "tire pars" << std::endl
-                  << "g table ";
-            *fp_v << "after removing unit productions--" << std::endl;
-            print_parsing_table(yacc_grammar_output.grammar);
+            fp_v << std::endl
+                 << "--" << std::endl
+                 << "tire pars" << std::endl
+                 << "g table ";
+            fp_v << "after removing unit productions--" << std::endl;
+            print_parsing_table(fp_v, yacc_grammar_output.grammar);
         }
 
         if (options.show_parsing_tbl)
@@ -3271,7 +3217,7 @@ lr0(const FileNames& files) -> int
         if (options.use_remove_repeated_states) {
             further_optimization(yacc_grammar_output.grammar);
             if (options.show_parsing_tbl) {
-                *fp_v << std::endl << "AFTER REMOVING REPEATED STATES:\n";
+                fp_v << std::endl << "AFTER REMOVING REPEATED STATES:\n";
                 print_final_parsing_table(yacc_grammar_output.grammar);
             }
         }
@@ -3280,11 +3226,11 @@ lr0(const FileNames& files) -> int
         if (options.show_parsing_tbl)
             print_condensed_final_parsing_table(yacc_grammar_output.grammar);
         if (options.show_grammar) {
-            *fp_v << std::endl
-                  << "--Grammar after remov" << std::endl
-                  << "g " << std::endl
-                  << "it ";
-            yacc_grammar_output.grammar.write(false);
+            fp_v << std::endl
+                 << "--Grammar after remov" << std::endl
+                 << "g " << std::endl
+                 << "it ";
+            yacc_grammar_output.grammar.write(fp_v, false);
         }
         if (options.use_graphviz) {
             gen_graphviz_input2(yacc_grammar_output.grammar, files.y_gviz);
@@ -3293,9 +3239,10 @@ lr0(const FileNames& files) -> int
     get_final_state_list(yacc_grammar_output.grammar);
 
     if (options.use_generate_compiler)
-        generate_compiler(yacc_grammar_output, hyacc_filename, files);
+        generate_compiler(
+          yacc_grammar_output, lrk_pt_array, hyacc_filename, files);
 
-    show_stat(yacc_grammar_output.grammar);
+    show_stat(fp_v, yacc_grammar_output.grammar);
     show_conflict_count();
 
     if (options.use_lr_k) {
@@ -3303,9 +3250,7 @@ lr0(const FileNames& files) -> int
     }
 
     if (options.use_verbose)
-        fp_v->close();
-    // free_vars(); // let system take care of it.
-
+        fp_v.close();
     return 0;
 }
 

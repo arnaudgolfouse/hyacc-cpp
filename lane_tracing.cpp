@@ -31,6 +31,8 @@
 #include <cstddef>
 #include <fstream>
 #include <iostream>
+#include <optional>
+#include <ostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -1152,8 +1154,6 @@ inherit_propagate(const Grammar& grammar,
         s->get_closure(grammar); /* needed only if context changed.*/
         lt_phase2_propagate_context_change(grammar, state_no, container, e);
     }
-    /*else {std::cout << "::no propagation for state " <<  state_no <<
-     * std::endl; }*/
 }
 
 inline void
@@ -1822,8 +1822,8 @@ my_write_production(const Production* p, int marker)
         std::cout << std::endl;
 }
 
-void
-my_write_config_originators(const Configuration* c);
+static void
+my_write_config_originators(const Configuration& c);
 
 void
 stdout_write_config(const Grammar& grammar, const Configuration* c)
@@ -1854,41 +1854,41 @@ my_write_state(const Grammar& grammar, const State& s)
  * For debug use.
  */
 void
-write_config_originators(const Configuration& c)
+Configuration::write_originators(std::ostream& os) const noexcept
+{
+    const size_t ct = this->originators->list.size();
+    if (ct == 0)
+        return;
+
+    os << "      " << ct << " originator" << ((ct > 1) ? "s" : "") << ": "
+       << std::endl;
+    for (const Configuration* o : this->originators->list) {
+        os << "      originator (" << o->owner->state_no << "." << o->ruleID
+           << "." << o->marker << ") " << std::endl;
+    }
+}
+
+void
+Configuration::write_transitors(std::ostream& os) const noexcept
+{
+    const size_t ct = this->transitors->list.size();
+    if (ct == 0)
+        return;
+
+    os << "      " << ct << " transitor" << ((ct > 1) ? "s" : "") << ": "
+       << std::endl;
+    for (const Configuration* o : this->transitors->list) {
+        os << "      transitor (" << o->owner->state_no << "." << o->ruleID
+           << "." << o->marker << ") " << std::endl;
+    }
+}
+
+void
+my_write_config_originators(const Configuration& c)
 {
     const size_t ct = c.originators->list.size();
-    if (ct == 0)
-        return;
-
-    *fp_v << "      " << ct << " originator" << ((ct > 1) ? "s" : "") << ": "
-          << std::endl;
-    for (const Configuration* o : c.originators->list) {
-        *fp_v << "      originator (" << o->owner->state_no << "." << o->ruleID
-              << "." << o->marker << ") " << std::endl;
-    }
-}
-
-void
-write_config_transitors(const Configuration& c)
-{
-    const size_t ct = c.transitors->list.size();
-    if (ct == 0)
-        return;
-
-    *fp_v << "      " << ct << " transitor" << ((ct > 1) ? "s" : "") << ": "
-          << std::endl;
-    for (const Configuration* o : c.transitors->list) {
-        *fp_v << "      transitor (" << o->owner->state_no << "." << o->ruleID
-              << "." << o->marker << ") " << std::endl;
-    }
-}
-
-void
-my_write_config_originators(const Configuration* c)
-{
-    const size_t ct = c->originators->list.size();
     std::cout << "config has " << ct << " originators: " << std::endl;
-    for (const Configuration* o : c->originators->list) {
+    for (const Configuration* o : c.originators->list) {
         std::cout << "      originator (" << o->owner->state_no << "."
                   << o->ruleID << ") " << std::endl;
     }
@@ -1993,7 +1993,7 @@ static void
 resolve_lalr1_conflicts(const Grammar& grammar)
 {
     if constexpr (DEBUG_RESOLVE_CONFLICT) {
-        print_parsing_table(grammar);
+        print_parsing_table(grammar.fp_v, grammar);
     }
 
     states_inadequate->count_unresolved = states_inadequate->states.size();
@@ -2049,7 +2049,7 @@ resolve_lalr1_conflicts(const Grammar& grammar)
     }
 
     if constexpr (DEBUG_RESOLVE_CONFLICT) {
-        print_parsing_table(grammar);
+        print_parsing_table(grammar.fp_v, grammar);
     }
 }
 
@@ -2113,8 +2113,9 @@ gpm(const Grammar& grammar, State* new_state)
 
     while (new_state != nullptr) {
         if (Options::get().debug_gen_parsing_machine) {
-            *fp_v << states_new->state_count << " states, current state is "
-                  << new_state->state_no << std::endl;
+            grammar.fp_v << states_new->state_count
+                         << " states, current state is " << new_state->state_no
+                         << std::endl;
         }
 
         new_state->get_closure(grammar); // get closure of this state.
@@ -2318,19 +2319,16 @@ combine_state_context(State* s_dest, State* s_src) -> bool
 static void
 update_state_reduce_action(const Grammar& grammar, State* s)
 {
-    int state_dest = 0;
-    char action = 0;
-
     for (const auto& c : s->config) {
         // update reduce action for final/empty production.
         if (is_final_configuration(grammar, c) ||
             get_scanned_symbol(c)->symbol->empty()) {
             const SymbolNode* lookahead = c->context->nContext;
             for (; lookahead != nullptr; lookahead = lookahead->next) {
-                action = get_action(lookahead->snode->type,
-                                    get_col(*lookahead->snode),
-                                    s->state_no,
-                                    &state_dest);
+                auto [action, state_dest] =
+                  get_action(lookahead->snode->type,
+                             get_col(*lookahead->snode),
+                             s->state_no);
                 if (state_dest != c->ruleID) {
                     if (action == 0 || action == 'r') {
                         update_action(get_col(*lookahead->snode),
@@ -2792,10 +2790,11 @@ lane_tracing_phase2(const Grammar& grammar)
     }
 }
 
-void
-lane_tracing(const Grammar& grammar)
+auto
+lane_tracing(const Grammar& grammar) -> std::optional<LRkPTArray>
 {
     auto& options = Options::get();
+    std::optional<LRkPTArray> lrk_pt_array = std::nullopt;
     IN_EDGE_PUSHING_LANE_TRACING = false;
     MAX_K = 1; // max K used in LR(k).
 
@@ -2808,9 +2807,8 @@ lane_tracing(const Grammar& grammar)
         output_parsing_table_lalr(grammar); ///
 
         if (options.use_lr_k && rr_count > 0) {
-            lrk_pt_array = nullptr; // initialize for use in gen_compiler.
             // do LR(k) if there are still r/r conflicts.
-            lane_tracing_lrk(grammar);
+            lrk_pt_array = lane_tracing_lrk(grammar);
         }
     } else {
         output_parsing_table_lalr(grammar); // is this needed?
@@ -2819,6 +2817,7 @@ lane_tracing(const Grammar& grammar)
     if (GRAMMAR_AMBIGUOUS) {
         std::cout << "Grammar is ambiguous" << std::endl;
     }
+    return lrk_pt_array;
 }
 
 /////////////////////////////////////////////////////////////

@@ -29,8 +29,6 @@
 
 #include "lane_tracing.hpp"
 #include "y.hpp"
-#include <cstddef>
-#include <cstdint>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -70,11 +68,12 @@ prepare_outfile(std::ofstream& fp, std::ofstream& fp_h, const FileNames& files)
 }
 
 static void
-my_perror(const char* msg, char c, int n_line, int n_col)
+my_perror(const char* msg, char c, const Position position)
 {
     using std::to_string;
-    throw std::runtime_error(std::string("\nerror [line ") + to_string(n_line) +
-                             ", col " + to_string(n_col) + "]: invalid char '" +
+    throw std::runtime_error(std::string("\nerror [line ") +
+                             to_string(position.line) + ", col " +
+                             to_string(position.col) + "]: invalid char '" +
                              to_string(c) + "'. " + msg);
 }
 
@@ -134,19 +133,14 @@ write_tokens_to_compiler_file(std::ofstream& fp, std::ofstream& fp_h)
     }
 }
 
-/*
- *  Get code declarations from section 1, write to
- *  y.tab.c, and write token declarations too.
- */
-void
+/// Get code declarations from section 1, write to `fp`, and write token
+/// declarations too.
+[[nodiscard]] static auto
 process_yacc_file_section1(std::ifstream& fp_yacc,
                            std::ofstream& fp,
-                           std::ofstream& fp_h,
-                           int& n_line,
-                           int& n_col)
+                           std::ofstream& fp_h) -> Position
 {
-    n_line = 1;
-    n_col = 1;
+    Position position{ 1, 1 };
 
     bool is_code = false;
     char c = 0, last_c = '\n', last_last_c = 0;
@@ -169,22 +163,22 @@ process_yacc_file_section1(std::ifstream& fp_yacc,
         last_last_c = last_c;
         last_c = c;
 
-        n_col += 1;
+        position.col += 1;
         if (c == '\n') {
-            n_line += 1;
-            n_col = 1;
+            position.line += 1;
+            position.col = 1;
         }
     }
 
-    // writeTokens();
     write_tokens_to_compiler_file(fp, fp_h);
+    return position;
 }
 
 /*
  * rewind to section 2.
  */
 static void
-goto_section2(std::ifstream& fp_yacc, int& n_line)
+goto_section2(std::ifstream& fp_yacc, uint32_t& n_line)
 {
     char c = 0, last_c = 0, last_last_c = '\n';
 
@@ -206,7 +200,7 @@ goto_section2(std::ifstream& fp_yacc, int& n_line)
  * Presumption: finished section 1, entering section 2.
  */
 static void
-goto_section3(std::ifstream& fp_yacc, int& n_line)
+goto_section3(std::ifstream& fp_yacc, uint32_t& n_line)
 {
     char c = 0, last_c = 0, last_last_c = '\n';
 
@@ -304,8 +298,7 @@ process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
                            std::ifstream& fp_yacc,
                            std::ofstream& fp,
                            const std::string_view filename,
-                           int n_line,
-                           int n_col)
+                           Position position)
 {
     YACC_STATE state = LHS;
     int code_level = 0;
@@ -361,7 +354,7 @@ process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
                 } else if (last_c == '/' && c == '*') {
                     state = COLON_COMMENT;
                 } else if (!isspace(c)) {
-                    my_perror("error: state COLON. ", c, n_line, n_col);
+                    my_perror("error: state COLON. ", c, position);
                 }
                 break;
             case COLON_COMMENT:
@@ -401,8 +394,8 @@ process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
                            << padding << "  case " << rule_count << ':'
                            << std::endl;
                         if (Options::get().use_lines)
-                            fp << "# line " << n_line << " \"" << filename
-                               << '\"' << std::endl;
+                            fp << "# line " << position.line << " \""
+                               << filename << '\"' << std::endl;
                     }
                     fp << '{';
 
@@ -414,7 +407,7 @@ process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
                     // do nothing
                 } else if (c == ':') {
                     my_perror(
-                      "You may miss a ';' in the last rule.", c, n_line, n_col);
+                      "You may miss a ';' in the last rule.", c, position);
                 } else {
                     // reading a symbol. do nothing
                     if (end_of_code) {
@@ -560,10 +553,10 @@ process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
         last_last_c = last_c;
         last_c = c;
 
-        n_col++;
+        position.col++;
         if (c == '\n') {
-            n_line++;
-            n_col = 1;
+            position.line++;
+            position.col = 1;
         }
     }
 }
@@ -686,7 +679,7 @@ print_yyr1(std::ofstream& fp, const Grammar& grammar)
             fp << std::setw(INTEGER_PADDING) << index;
             if (i < grammar.rules.size() - 1)
                 fp << ',';
-            if ((i - 9) % ITEM_PER_LINE == 0)
+            if ((i - (ITEM_PER_LINE - 1)) % ITEM_PER_LINE == 0)
                 fp << std::endl;
         }
         fp << "};" << std::endl;
@@ -725,7 +718,7 @@ print_yyr2(std::ofstream& fp, const Grammar& grammar)
                 static_cast<int>(grammar.rules[i]->hasCode);
         if (i < grammar.rules.size() - 1)
             fp << ',';
-        if ((i - 9) % ITEM_PER_LINE == 0)
+        if ((i - (ITEM_PER_LINE - 1)) % ITEM_PER_LINE == 0)
             fp << std::endl;
     }
     fp << "};" << std::endl;
@@ -818,11 +811,11 @@ print_yytoken(std::ofstream& fp)
     fp << "};" << std::endl;
 }
 
-void
+static void
 print_parsing_tbl_entry(std::ofstream& fp,
                         char action,
                         int state_no,
-                        int* count)
+                        int& count)
 {
     bool is_entry = false;
     if (action == 's' || action == 'g') {
@@ -837,8 +830,8 @@ print_parsing_tbl_entry(std::ofstream& fp,
     }
 
     if (is_entry) {
-        (*count)++;
-        if ((*count) % ITEM_PER_LINE == 0 && (*count) != 0)
+        count++;
+        if (count % ITEM_PER_LINE == 0 && count != 0)
             fp << std::endl;
     }
 }
@@ -866,7 +859,7 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
                 if constexpr (USE_REM_FINAL_STATE) {
                     if (final_state_list[row] < 0) {
                         print_parsing_tbl_entry(
-                          fp, 's', final_state_list[row], &count);
+                          fp, 's', final_state_list[row], count);
                         rowoffset.push_back(count);
                         continue;
                     }
@@ -875,13 +868,11 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
                     const SymbolTblNode* n = ParsingTblColHdr[col];
                     if (is_goal_symbol(grammar, n) == false &&
                         is_parent_symbol(n) == false) {
-                        int state_no = 0;
-                        char action = get_action(n->type, col, row, &state_no);
-
+                        auto [action, state_no] = get_action(n->type, col, row);
                         if (action == 's' || action == 'g')
                             state_no = get_actual_state(state_no);
                         // std::cout  <<  action <<  state_no<< "\t";
-                        print_parsing_tbl_entry(fp, action, state_no, &count);
+                        print_parsing_tbl_entry(fp, action, state_no, count);
                     } // end of if.
                 }
 
@@ -895,18 +886,17 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
             if constexpr (USE_REM_FINAL_STATE) {
                 if (final_state_list[i] < 0) {
                     print_parsing_tbl_entry(
-                      fp, 's', final_state_list[i], &count);
+                      fp, 's', final_state_list[i], count);
                     rowoffset.push_back(count);
                     continue;
                 }
             }
 
             for (int j = 0; j < ParsingTblCols; j++) {
-                int state_no = 0;
-                char action =
-                  get_action(ParsingTblColHdr[j]->type, j, i, &state_no);
+                auto [action, state_no] =
+                  get_action(ParsingTblColHdr[j]->type, j, i);
                 // std::cout  <<  action <<  state_no<< ", ";
-                print_parsing_tbl_entry(fp, action, state_no, &count);
+                print_parsing_tbl_entry(fp, action, state_no, count);
             }
 
             rowoffset.push_back(count);
@@ -928,11 +918,11 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
        << std::endl; // NOTE: the last entry is (yyptbl.size - 1).
 }
 
-void
+static void
 print_parsing_tbl_col_entry(std::ofstream& fp,
                             char action,
                             int token_value,
-                            int* count)
+                            int& count)
 {
     bool is_entry = false;
     if (action == 's' || action == 'g' || action == 'r' || action == 'a') {
@@ -941,8 +931,8 @@ print_parsing_tbl_col_entry(std::ofstream& fp,
     }
 
     if (is_entry) {
-        (*count)++;
-        if ((*count) % ITEM_PER_LINE == 0 && (*count) != 0)
+        count++;
+        if (count % ITEM_PER_LINE == 0 && count != 0)
             fp << std::endl;
     }
 }
@@ -957,6 +947,9 @@ print_parsing_tbl_col_entry(std::ofstream& fp,
 static void
 print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
 {
+    // labels a final state's col entry
+    constexpr int FINAL_STATE_COL_ENTRY = -10000001;
+
     int count = 0;
     int col_size = ParsingTblCols;
 
@@ -969,7 +962,8 @@ print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
 
                 if constexpr (USE_REM_FINAL_STATE) {
                     if (final_state_list[row] < 0) {
-                        print_parsing_tbl_col_entry(fp, 'r', -10000001, &count);
+                        print_parsing_tbl_col_entry(
+                          fp, 'r', FINAL_STATE_COL_ENTRY, count);
                         continue;
                     }
                 }
@@ -977,10 +971,9 @@ print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
                     SymbolTblNode* n = ParsingTblColHdr[col];
                     if (is_goal_symbol(grammar, n) == false &&
                         is_parent_symbol(n) == false) {
-                        int state = 0;
-                        char action = get_action(n->type, col, row, &state);
+                        auto [action, state] = get_action(n->type, col, row);
                         print_parsing_tbl_col_entry(
-                          fp, action, n->value, &count);
+                          fp, action, n->value, count);
                     } // end of if.
                 }     // end of for.
             }         // end of if.
@@ -990,16 +983,15 @@ print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
 
             if constexpr (USE_REM_FINAL_STATE) {
                 if (final_state_list[i] < 0) { // is a final state.
-                    // -10000001 labels a final state's col entry
-                    print_parsing_tbl_col_entry(fp, 'r', -10000001, &count);
+                    print_parsing_tbl_col_entry(
+                      fp, 'r', FINAL_STATE_COL_ENTRY, count);
                     continue;
                 }
             }
             for (int j = 0; j < ParsingTblCols; j++) {
                 SymbolTblNode* n = ParsingTblColHdr[j];
-                int state = 0;
-                char action = get_action(n->type, j, i, &state);
-                print_parsing_tbl_col_entry(fp, action, n->value, &count);
+                auto [action, state] = get_action(n->type, j, i);
+                print_parsing_tbl_col_entry(fp, action, n->value, count);
             }
         } // end of for.
     }
@@ -1031,15 +1023,16 @@ get_final_states(std::ofstream& fp)
     fp << "};" << std::endl << std::endl;
 }
 
-auto
-use_lrk() -> bool
+static auto
+use_lrk(const std::optional<LRkPTArray>& lrk_pt_array) -> bool
 {
     return Options::get().use_lr_k &&
-           (lrk_pt_array != nullptr && lrk_pt_array->max_k() >= 2);
+           (lrk_pt_array.has_value() && lrk_pt_array->max_k() >= 2);
 }
 
-void
-write_lrk_table_arrays(std::ofstream& fp)
+static void
+write_lrk_table_arrays(std::ofstream& fp,
+                       const std::optional<LRkPTArray>& lrk_pt_array)
 {
     fp << std::endl
        << "/* * For LR(k) parsing tables." << std::endl
@@ -1130,7 +1123,9 @@ write_lrk_table_arrays(std::ofstream& fp)
  * used by the driver code.
  */
 static void
-write_parsing_table_arrays(std::ofstream& fp, const Grammar& grammar)
+write_parsing_table_arrays(std::ofstream& fp,
+                           const std::optional<LRkPTArray>& lrk_pt_array,
+                           const Grammar& grammar)
 {
     get_final_states(fp);
 
@@ -1140,7 +1135,7 @@ write_parsing_table_arrays(std::ofstream& fp, const Grammar& grammar)
     print_yyr1(fp, grammar); // yyr1[]
     print_yyr2(fp, grammar); // yyr2[]
 
-    if (use_lrk() == false) {
+    if (!use_lrk(lrk_pt_array)) {
         fp << std::endl << "#ifdef YYDEBUG" << std::endl << std::endl;
         fp << "typedef struct {char *t_name; int t_val;} yytoktype;"
            << std::endl
@@ -1162,7 +1157,7 @@ write_parsing_table_arrays(std::ofstream& fp, const Grammar& grammar)
         print_yyreds(fp, grammar); // yyreds[]. Productions of grammar.
         fp << "#endif /* YYDEBUG */" << std::endl << std::endl;
 
-        write_lrk_table_arrays(fp);
+        write_lrk_table_arrays(fp, lrk_pt_array);
     }
 }
 
@@ -1170,7 +1165,7 @@ write_parsing_table_arrays(std::ofstream& fp, const Grammar& grammar)
 // Functions to print parsing table arrays. END.
 ///////////////////////////////////////////////////////
 
-void
+static void
 write_special_info(std::ofstream& fp)
 {
     fp << std::endl << "YYSTYPE yylval;" << std::endl;
@@ -1182,10 +1177,10 @@ write_special_info(std::ofstream& fp)
 /*
  * Do this is use LR(k).
  */
-void
-get_lrk_hyacc_path()
+static void
+get_lrk_hyacc_path(const std::optional<LRkPTArray>& lrk_pt_array)
 {
-    if (use_lrk()) {
+    if (use_lrk(lrk_pt_array)) {
         std::cout << "lrk used" << std::endl;
         HYACC_PATH += 'k';
         std::cout << "LR(k) HYACC_PATH: " << HYACC_PATH << std::endl;
@@ -1194,12 +1189,11 @@ get_lrk_hyacc_path()
 
 void
 generate_compiler(GetYaccGrammarOutput& yacc_grammar_output,
+                  const std::optional<LRkPTArray>& lrk_pt_array,
                   const std::string& infile,
                   const FileNames& files)
 {
     // count number of lines in yacc input file.
-    int n_line = 0;
-    int n_col = 0;
     auto& options = Options::get();
     std::ifstream fp_yacc{};
     std::ofstream fp{};
@@ -1215,33 +1209,33 @@ generate_compiler(GetYaccGrammarOutput& yacc_grammar_output,
 
     if (options.use_lines)
         fp << std::endl << "# line 1 \"" << infile << '\"' << std::endl;
-    process_yacc_file_section1(
-      fp_yacc, fp, fp_h, n_line, n_col); // declaration section.
+    Position position =
+      process_yacc_file_section1(fp_yacc, fp, fp_h); // declaration section.
 
     write_special_info(fp);
 
-    goto_section3(fp_yacc, n_line);
+    goto_section3(fp_yacc, position.line);
 
     if (options.use_lines)
         fp << std::endl
-           << "# line " << n_line << " \"" << infile << '\"' << std::endl;
+           << "# line " << position.line << " \"" << infile << '\"'
+           << std::endl;
 
     process_yacc_file_section3(fp_yacc, fp); // code section.
 
     fp << std::endl << "#define YYCONST const" << std::endl;
     fp << "typedef int yytabelem;" << std::endl << std::endl;
-    write_parsing_table_arrays(fp, yacc_grammar_output.grammar);
+    write_parsing_table_arrays(fp, lrk_pt_array, yacc_grammar_output.grammar);
 
-    get_lrk_hyacc_path(); /* do this if LR(k) is used */
+    get_lrk_hyacc_path(lrk_pt_array); /* do this if LR(k) is used */
 
     copy_yaccpar_file_1(fp, HYACC_PATH);
-    goto_section2(fp_yacc, n_line);
+    goto_section2(fp_yacc, position.line);
     process_yacc_file_section2(yacc_grammar_output,
                                fp_yacc,
                                fp,
                                infile,
-                               n_line,
-                               n_col); // get reduction code.
+                               position); // get reduction code.
     copy_yaccpar_file_2(fp, HYACC_PATH);
 
     free_symbol_node_list(tokens);

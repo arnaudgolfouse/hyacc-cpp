@@ -19,6 +19,7 @@
 
 #include "y.hpp"
 #include <memory>
+#include <ostream>
 #include <vector>
 
 #pragma once
@@ -48,7 +49,9 @@ struct MRTreeNode
     static auto create(SymbolTblNode* symbol) -> std::shared_ptr<MRTreeNode>;
     // Prints out all node sequences starting from
     // the given node to its ancestors.
-    void write_leaf_branch(SymbolList branch, SymbolNode* branch_tail);
+    void write_leaf_branch(std::ostream& os,
+                           SymbolList branch,
+                           SymbolNode* branch_tail);
     //  Insert a child node of treeNode.
     // The child node contains the given symbol.
     static void insert_child(std::shared_ptr<MRTreeNode> self,

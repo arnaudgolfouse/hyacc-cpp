@@ -34,6 +34,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <ostream>
 #include <stdexcept>
 #include <vector>
 
@@ -48,7 +49,7 @@ bool leaf_index_for_parent_done;
 static void
 get_all_mr_parents(const MRLeaves& mr_leaves);
 static void
-write_all_mr_parents(const MRLeaves& mr_leaves);
+write_all_mr_parents(std::ostream& os, const MRLeaves& mr_leaves);
 
 ////////////////////////////////////////////
 // Functions for multi-rooted tree. START.
@@ -92,17 +93,6 @@ check_array_size_mr_parents(const MRParents* p)
     // if all_parents array is expanded, expand leafIndexForParent too.
     if (p == all_parents.get())
         expand_array_leaf_index_for_parent();
-}
-
-void
-write_leaf_index_for_parent()
-{
-    for (int i = 0; i < all_parents->size(); i++) {
-        if (i > 0)
-            *fp_v << ", ";
-        *fp_v << leaf_index_for_parent[i];
-    }
-    *fp_v << std::endl;
 }
 
 /*
@@ -211,28 +201,30 @@ MRTreeNode::is_mr_leaf(const MRLeaves& mr_leaves) noexcept -> int const
     return -1;
 }
 
-void
-write_branch(SymbolList branch)
+static void
+write_branch(std::ostream& os, SymbolList branch)
 {
     SymbolNode* a = nullptr;
     for (a = branch; a != nullptr; a = a->next) {
         if (a != branch)
-            *fp_v << ", ";
-        *fp_v << a->snode->symbol;
+            os << ", ";
+        os << a->snode->symbol;
     }
     if (a != branch)
-        *fp_v << ", ";
+        os << ", ";
 }
 
 void
-MRTreeNode::write_leaf_branch(SymbolList branch, SymbolNode* branch_tail)
+MRTreeNode::write_leaf_branch(std::ostream& os,
+                              SymbolList branch,
+                              SymbolNode* branch_tail)
 {
-    *fp_v << this->symbol->snode->symbol;
+    os << this->symbol->snode->symbol;
     if (this->parent.empty()) {
-        *fp_v << std::endl;
+        os << std::endl;
         return;
     }
-    *fp_v << ", ";
+    os << ", ";
 
     if (branch->next == nullptr) {
         branch_tail->next = branch->next =
@@ -244,22 +236,22 @@ MRTreeNode::write_leaf_branch(SymbolList branch, SymbolNode* branch_tail)
 
     for (int i = 0; i < this->parent.size(); i++) {
         if (i > 0)
-            write_branch(branch->next);
-        this->parent[i]->write_leaf_branch(branch, branch_tail);
+            write_branch(os, branch->next);
+        this->parent[i]->write_leaf_branch(os, branch, branch_tail);
     }
 }
 
-void
-write_mr_forest(const MRLeaves& mr_leaves)
+static void
+write_mr_forest(std::ostream& os, const MRLeaves& mr_leaves)
 {
     SymbolList branch = SymbolNode::create(hash_tbl_find(""));
     SymbolNode* branch_tail = SymbolNode::create(hash_tbl_find(""));
 
-    *fp_v << std::endl
-          << "==writeMRForest (mr_leaves_co" << std::endl
-          << "t: " << mr_leaves.size() << ")==" << std::endl;
+    os << std::endl
+       << "==writeMRForest (mr_leaves_co" << std::endl
+       << "t: " << mr_leaves.size() << ")==" << std::endl;
     for (const auto& mr_leave : mr_leaves) {
-        mr_leave->write_leaf_branch(branch, branch_tail);
+        mr_leave->write_leaf_branch(os, branch, branch_tail);
     }
 
     free_symbol_node_list(branch);
@@ -336,8 +328,8 @@ build_multirooted_tree(const Grammar& grammar) -> MRLeaves
     get_all_mr_parents(mr_leaves);
 
     if (Options::get().debug_build_multirooted_tree) {
-        write_mr_forest(mr_leaves);
-        write_all_mr_parents(mr_leaves);
+        write_mr_forest(grammar.fp_v, mr_leaves);
+        write_all_mr_parents(grammar.fp_v, mr_leaves);
     }
     return mr_leaves;
 }
@@ -407,19 +399,18 @@ get_all_mr_parents(const MRLeaves& mr_leaves)
  * of each parent in parenthesis.
  */
 void
-write_all_mr_parents(const MRLeaves& mr_leaves)
+write_all_mr_parents(std::ostream& os, const MRLeaves& mr_leaves)
 {
-    *fp_v << std::endl
-          << "==all MR Par" << std::endl
-          << "ts (" << std::endl
-          << "side '()' is a corresp" << std::endl
-          << "d" << std::endl
-          << "g leaf):\n";
+    os << std::endl
+       << "==all MR Par" << std::endl
+       << "ts (" << std::endl
+       << "side '()' is a corresp" << std::endl
+       << "d" << std::endl
+       << "g leaf):\n";
     for (int i = 0; i < all_parents->size(); i++) {
-        *fp_v << (*all_parents)[i]->snode->symbol << " (=>"
-              << mr_leaves[leaf_index_for_parent[i]]->symbol->snode->symbol
-              << ")" << std::endl;
+        os << (*all_parents)[i]->snode->symbol << " (=>"
+           << mr_leaves[leaf_index_for_parent[i]]->symbol->snode->symbol << ")"
+           << std::endl;
     }
-    *fp_v << std::endl;
-    // writeLeafIndexForParent();
+    os << std::endl;
 }

@@ -35,6 +35,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <ostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -75,17 +76,17 @@ constexpr size_t UPS_MAX_SIZE = 65536;
 // }
 
 void
-print_int_array(const std::vector<int>& a)
+print_int_array(std::ostream& os, const std::vector<int>& a)
 {
-    *fp_v << "count = " << a.size() << std::endl;
+    os << "count = " << a.size() << std::endl;
     bool first = true;
     for (int elem : a) {
         if (!first)
-            *fp_v << ", ";
+            os << ", ";
         first = false;
-        *fp_v << elem;
+        os << elem;
     }
-    *fp_v << std::endl;
+    os << std::endl;
 }
 
 /*
@@ -115,7 +116,7 @@ print_int_array(const std::vector<int>& a)
  *
  * These target states are to be combined in the next step.
  */
-void
+static void
 get_unit_prod_shift(int state,
                     SymbolTblNode* leaf,
                     const MRParents& parents,
@@ -126,8 +127,7 @@ get_unit_prod_shift(int state,
 
     for (const auto& parent : parents) {
         SymbolTblNode* n = parent->snode;
-        int state_dest = 0;
-        char action = get_action(n->type, get_col(*n), state, &state_dest);
+        auto [action, state_dest] = get_action(n->type, get_col(*n), state);
         // std::cout << action << ", " << state_dest << std::endl;
         if (action == 'g') {
             unit_prod_dest_states.push_back(state_dest);
@@ -137,9 +137,8 @@ get_unit_prod_shift(int state,
     // Note: leaf itself can be a non-terminal.
     // so action can be g too.
     if (!unit_prod_dest_states.empty()) {
-        int state_dest = 0;
-        char action =
-          get_action(leaf->type, get_col(*leaf), state, &state_dest);
+        auto [action, state_dest] =
+          get_action(leaf->type, get_col(*leaf), state);
         if (action == 's' || action == 'g') {
             unit_prod_dest_states.push_back(state_dest);
         }
@@ -148,42 +147,43 @@ get_unit_prod_shift(int state,
     std::sort(unit_prod_dest_states.begin(), unit_prod_dest_states.end());
 }
 
-void
-write_unit_prod_shift(int state,
+static void
+write_unit_prod_shift(std::ostream& os,
+                      int state,
                       SymbolTblNode* leaf,
                       const std::vector<int>& unit_prod_dest_states,
                       int new_ups_state)
 {
-    *fp_v << "state " << state << ", leaf '" << leaf->symbol << "' -";
-    *fp_v << " combine these states to new state " << new_ups_state << ":"
-          << std::endl;
+    os << "state " << state << ", leaf '" << leaf->symbol << "' -";
+    os << " combine these states to new state " << new_ups_state << ":"
+       << std::endl;
     for (int i = 0; i < unit_prod_dest_states.size(); i++) {
         if (i > 0)
-            *fp_v << ", ";
-        *fp_v << unit_prod_dest_states[i];
+            os << ", ";
+        os << unit_prod_dest_states[i];
     }
-    *fp_v << std::endl;
-}
-
-void
-write_ups_state(const UnitProdState& ups)
-{
-    *fp_v << "State no: " << ups.state_no
-          << ". Is combination of these states:" << std::endl;
-    print_int_array(ups.combined_states);
+    os << std::endl;
 }
 
 static void
-write_ups_states(const std::vector<UnitProdState>& ups)
+write_ups_state(std::ostream& os, const UnitProdState& ups)
 {
-    *fp_v << "==New states for unit production removal";
-    *fp_v << " (total " << ups.size() << "):" << std::endl;
+    os << "State no: " << ups.state_no
+       << ". Is combination of these states:" << std::endl;
+    print_int_array(os, ups.combined_states);
+}
+
+static void
+write_ups_states(std::ostream& os, const std::vector<UnitProdState>& ups)
+{
+    os << "==New states for unit production removal";
+    os << " (total " << ups.size() << "):" << std::endl;
     for (const auto& up : ups) {
-        write_ups_state(up);
+        write_ups_state(os, up);
     }
 }
 
-void
+static void
 create_new_ups_state(std::vector<UnitProdState>& ups,
                      int new_state,
                      const std::vector<int>& old_states)
@@ -242,10 +242,8 @@ insert_action_of_symbol(const Grammar& grammar,
                         int old_state_index,
                         std::vector<int>& old_states)
 {
-    int state_dest = 0;
-
-    char action = get_action(
-      symbol->type, get_col(*symbol), old_states[old_state_index], &state_dest);
+    auto [action, state_dest] =
+      get_action(symbol->type, get_col(*symbol), old_states[old_state_index]);
 
     if (action == 0)
         return;
@@ -358,11 +356,9 @@ get_reachable_states_for_symbol(const Grammar& grammar,
                                 int cur_state,
                                 std::vector<int>& states_reachable)
 {
-    int state_dest = 0;
-
     const SymbolTblNode* n = hash_tbl_find(symbol);
 
-    char action = get_action(n->type, get_col(*n), cur_state, &state_dest);
+    auto [action, state_dest] = get_action(n->type, get_col(*n), cur_state);
     if ((action == 's' || action == 'g') &&
         !in_int_array(state_dest, states_reachable)) {
         states_reachable.push_back(state_dest);
@@ -397,14 +393,14 @@ get_reachable_states(const Grammar& grammar,
 }
 
 void
-write_parsing_table_col_header(const Grammar& grammar)
+write_parsing_table_col_header(std::ostream& os, const Grammar& grammar)
 {
     for (int i = 0; i < ParsingTblCols; i++) {
         if (is_goal_symbol(grammar, ParsingTblColHdr[i]) == false) {
-            *fp_v << ParsingTblColHdr[i]->symbol << "\t";
+            os << ParsingTblColHdr[i]->symbol << "\t";
         }
     }
-    *fp_v << std::endl;
+    os << std::endl;
 }
 
 /*
@@ -435,12 +431,12 @@ get_f_parsing_tbl_col_hdr(const Grammar& grammar)
 }
 
 static void
-write_final_parsing_table_col_header()
+write_final_parsing_table_col_header(std::ostream& os)
 {
     for (SymbolNode* a = F_ParsingTblColHdr; a != nullptr; a = a->next) {
-        *fp_v << a->snode->symbol << "\t";
+        os << a->snode->symbol << "\t";
     }
-    *fp_v << std::endl;
+    os << std::endl;
 }
 
 /*
@@ -461,12 +457,12 @@ remove_unit_production_step4(const Grammar& grammar)
     std::sort(states_reachable.begin(), states_reachable.end());
 
     if (Options::get().debug_remove_up_step_4) {
-        *fp_v << std::endl
-              << "--remove_" << std::endl
-              << "it_producti" << std::endl
-              << "_step4--\n";
-        *fp_v << "states reachable from state 0:" << std::endl;
-        print_int_array(states_reachable);
+        grammar.fp_v << std::endl
+                     << "--remove_" << std::endl
+                     << "it_producti" << std::endl
+                     << "_step4--\n";
+        grammar.fp_v << "states reachable from state 0:" << std::endl;
+        print_int_array(grammar.fp_v, states_reachable);
     }
 
     get_f_parsing_tbl_col_hdr(grammar);
@@ -490,30 +486,27 @@ print_final_parsing_table(const Grammar& grammar)
 {
     int col_size = ParsingTblCols;
     int row_size = ParsingTblRows;
-    int state = 0;
 
-    *fp_v << std::endl << "--Pars" << std::endl << "g Table--\n";
-    *fp_v << "State\t";
-    write_final_parsing_table_col_header();
+    grammar.fp_v << std::endl << "--Pars" << std::endl << "g Table--\n";
+    grammar.fp_v << "State\t";
+    write_final_parsing_table_col_header(grammar.fp_v);
 
     for (int row = 0; row < row_size; row++) {
         if (is_reachable_state(row)) {
-            *fp_v << row << "\t";
+            grammar.fp_v << row << "\t";
             for (int col = 0; col < ParsingTblCols; col++) {
                 SymbolTblNode* n = ParsingTblColHdr[col];
                 if (is_goal_symbol(grammar, n) == false &&
                     is_parent_symbol(n) == false) {
-                    char action = get_action(n->type, col, row, &state);
-                    *fp_v << action << state << "\t";
+                    auto [action, state] = get_action(n->type, col, row);
+                    grammar.fp_v << action << state << "\t";
                 }
             }
 
-            *fp_v << std::endl;
-        } // end if
-          // else {std::cout << "state " <<  row<< ": not reachable." <<
-          // std::endl; }
-    }     // end for
-    print_parsing_table_note();
+            grammar.fp_v << std::endl;
+        }
+    }
+    print_parsing_table_note(grammar.fp_v);
 }
 
 /*
@@ -563,21 +556,20 @@ get_actual_state(int virtual_state) -> int
 }
 
 void
-write_actual_state_array()
+write_actual_state_array(std::ostream& os)
 {
     constexpr int LINE_LENGTH = 5;
     if (!Options::get().use_remove_unit_production)
         return;
 
-    *fp_v << std::endl
-          << "\n--actual state array [actual, pseudo]--" << std::endl;
+    os << std::endl << "\n--actual state array [actual, pseudo]--" << std::endl;
     for (int i = 0; i < actual_state_no.size(); i += 2) {
         if (i > 0 && i % LINE_LENGTH == 0)
-            *fp_v << std::endl;
-        *fp_v << "[" << actual_state_no[i] << ", " << actual_state_no[i + 1]
-              << "] ";
+            os << std::endl;
+        os << "[" << actual_state_no[i] << ", " << actual_state_no[i + 1]
+           << "] ";
     }
-    *fp_v << std::endl << "\n";
+    os << std::endl << "\n";
 }
 
 /*
@@ -587,39 +579,38 @@ write_actual_state_array()
 void
 print_condensed_final_parsing_table(const Grammar& grammar)
 {
-    int state_no = 0;
     int col_size = ParsingTblCols;
     // value assigned at the end of generate_parsing_table().
     int row_size = ParsingTblRows;
 
-    *fp_v << std::endl
-          << "--F" << std::endl
-          << "al Pars" << std::endl
-          << "g Table--\n";
-    *fp_v << "State\t";
-    write_final_parsing_table_col_header();
+    grammar.fp_v << std::endl
+                 << "--F" << std::endl
+                 << "al Pars" << std::endl
+                 << "g Table--\n";
+    grammar.fp_v << "State\t";
+    write_final_parsing_table_col_header(grammar.fp_v);
 
     int i = 0;
     for (int row = 0; row < row_size; row++) {
         if (is_reachable_state(row)) {
-            *fp_v << i << "\t";
+            grammar.fp_v << i << "\t";
             for (int col = 0; col < ParsingTblCols; col++) {
                 SymbolTblNode* n = ParsingTblColHdr[col];
                 if (is_goal_symbol(grammar, n) == false &&
                     is_parent_symbol(n) == false) {
-                    char action = get_action(n->type, col, row, &state_no);
+                    auto [action, state_no] = get_action(n->type, col, row);
                     if (action == 's' || action == 'g')
                         state_no = get_actual_state(state_no);
-                    *fp_v << action << state_no << "\t";
+                    grammar.fp_v << action << state_no << "\t";
                 }
             }
 
             i++;
-            *fp_v << std::endl;
-        } // end if
-    }     // end for
+            grammar.fp_v << std::endl;
+        }
+    }
 
-    print_parsing_table_note();
+    print_parsing_table_note(grammar.fp_v);
 }
 
 /*
@@ -656,24 +647,21 @@ remove_unit_production_step1and2(const Grammar& grammar,
     for (size_t i = 0; i < mr_leaves.size(); i++) {
         leaf_parents.push_back(create_mr_parents());
         get_parents_for_mr_leaf(mr_leaves, i, leaf_parents[i].get());
-        // writeMRParents(MRLeaves[i], leaf_parents[i]);
     }
 
     if (debug_remove_up_step_1_2) {
-        *fp_v << std::endl
-              << "--remove_" << std::endl
-              << "it_producti" << std::endl
-              << "_step1" << std::endl
-              << "d2--\n";
-        *fp_v << "--writeUnitProdShift--" << std::endl;
+        grammar.fp_v << std::endl
+                     << "--remove_" << std::endl
+                     << "it_producti" << std::endl
+                     << "_step1" << std::endl
+                     << "d2--\n";
+        grammar.fp_v << "--writeUnitProdShift--" << std::endl;
     }
 
     // now, steps 1 and 2.
     for (int state = 0; state < ParsingTblRows; state++) {
         for (int i = 0; i < mr_leaves.size(); i++) {
             SymbolTblNode* leaf = mr_leaves[i]->symbol->snode;
-            // std::cout << "state " <<  state<< ", checking leaf " <<
-            // leaf->symbol << std::endl;
             const auto& parents = leaf_parents[i];
 
             get_unit_prod_shift(state, leaf, *parents, unit_prod_dest_states);
@@ -684,8 +672,6 @@ remove_unit_production_step1and2(const Grammar& grammar,
                     ups_state = ParsingTblRows;
                     ParsingTblRows++;
                     if (ParsingTblRows >= PARSING_TABLE_SIZE) {
-                        // *fp_v <<"remove_unit_production message: " ;
-                        // *fp_v <<"Parsing Table size reached" << std::endl ;
                         expand_parsing_table();
                     }
                     create_new_ups_state(ups, ups_state, unit_prod_dest_states);
@@ -694,23 +680,24 @@ remove_unit_production_step1and2(const Grammar& grammar,
                     // Do this only if this combined state does not exist yet.
                     insert_actions_of_combined_states(
                       grammar, ups_state, state, unit_prod_dest_states);
-
-                } // end if (ups_state != -1)
+                }
 
                 // Update the link from src_state to leaf transition state
                 update_action(get_col(*leaf), state, ups_state); // shift.
 
                 if (debug_remove_up_step_1_2) {
-                    write_unit_prod_shift(
-                      state, leaf, unit_prod_dest_states, ups_state);
-                    // *fp_v <<" => new ups_state: " <<  ups_state<< std::endl ;
+                    write_unit_prod_shift(grammar.fp_v,
+                                          state,
+                                          leaf,
+                                          unit_prod_dest_states,
+                                          ups_state);
                 }
-            } // end if (unitProdCount > 0)
+            }
         }
     }
     if (debug_remove_up_step_1_2) {
-        *fp_v << "--after remove_unit_production_step1and2(), ";
-        *fp_v << "total states: " << ParsingTblRows << "--" << std::endl;
+        grammar.fp_v << "--after remove_unit_production_step1and2(), ";
+        grammar.fp_v << "total states: " << ParsingTblRows << "--" << std::endl;
     }
 }
 
@@ -746,9 +733,8 @@ is_equal_row(int i, int j) -> bool
 {
     for (int col = 0; col < ParsingTblCols; col++) {
         SymbolTblNode* n = ParsingTblColHdr[col];
-        int state_dest_i = 0, state_dest_j = 0;
-        char action_i = get_action(n->type, get_col(*n), i, &state_dest_i);
-        char action_j = get_action(n->type, get_col(*n), j, &state_dest_j);
+        auto [action_i, state_dest_i] = get_action(n->type, get_col(*n), i);
+        auto [action_j, state_dest_j] = get_action(n->type, get_col(*n), j);
         if (action_i != action_j || state_dest_i != state_dest_j)
             return false;
     }
@@ -766,20 +752,19 @@ update_repeated_row(const Grammar& grammar,
                     int old_state,
                     int row)
 {
-    int state_dest = 0;
     // std::cout << "In row " <<  row<< ", replace " <<  old_state<< " by " <<
     // new_state << std::endl;
 
     // for end marker column STR_END
     SymbolTblNode* n = hash_tbl_find(STR_END);
-    get_action(n->type, get_col(*n), row, &state_dest);
+    auto [action, state_dest] = get_action(n->type, get_col(*n), row);
     if (state_dest == old_state)
         update_action(get_col(*hash_tbl_find(STR_END)), row, new_state);
 
     // for terminal columns
     for (SymbolNode* a = grammar.terminal_list; a != nullptr; a = a->next) {
         n = a->snode;
-        get_action(n->type, get_col(*n), row, &state_dest);
+        auto [action, state_dest] = get_action(n->type, get_col(*n), row);
         if (state_dest == old_state)
             update_action(get_col(*a->snode), row, new_state);
     }
@@ -787,7 +772,7 @@ update_repeated_row(const Grammar& grammar,
     // for non-terminal columns
     for (SymbolNode* a = grammar.non_terminal_list; a != nullptr; a = a->next) {
         n = a->snode;
-        get_action(n->type, get_col(*n), row, &state_dest);
+        auto [action, state_dest] = get_action(n->type, get_col(*n), row);
         if (state_dest == old_state)
             update_action(get_col(*a->snode), row, new_state);
     }
@@ -861,9 +846,9 @@ further_optimization(const Grammar& grammar)
     n_state_opt123 = states_reachable.size() + 1;
 
     if (Options::get().show_parsing_tbl && (n_state_opt12 > n_state_opt123)) {
-        *fp_v << "After further optimization, ";
-        *fp_v << "total states reduced from " << n_state_opt12 << " to "
-              << n_state_opt123 << std::endl;
+        grammar.fp_v << "After further optimization, ";
+        grammar.fp_v << "total states reduced from " << n_state_opt12 << " to "
+                     << n_state_opt123 << std::endl;
     }
 }
 

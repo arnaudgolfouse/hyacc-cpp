@@ -32,11 +32,14 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <memory>
+#include <ostream>
 #include <queue>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 constexpr size_t SYMBOL_INIT_SIZE = 128; /* Init size of a symbol string. */
@@ -56,9 +59,6 @@ constexpr size_t LINE_INIT_SIZE = 128;
  * This should generally always be set to 1.
  */
 constexpr bool ADD_GOAL_RULE = true;
-
-/* store output of y.output. */
-extern std::unique_ptr<std::ofstream> fp_v;
 
 //////////////////////////////////////////////////////////////////
 // Options that can be turned on/off in get_options.c
@@ -301,6 +301,8 @@ struct Context
      * Empty a context.
      */
     void clear();
+    friend auto operator<<(std::ostream& os, const Context& dt)
+      -> std::ostream&;
 };
 
 /* Production of a configuration, or rule of a grammar. */
@@ -323,7 +325,7 @@ struct Production
      * In general, marker == -1 only when print grammar rules.
      * marker >= 0 when print configuration production.
      */
-    void write(int marker) const;
+    void write(std::ostream& os, int marker) const noexcept;
 };
 
 /*
@@ -365,6 +367,9 @@ struct ConfigurationNode
     OriginatorList* transitors;  /* for phase 2 of LANE_TRACING */
 
     int z; // used by LR(k) edge_pushing only...11/26/2008
+
+    void write_originators(std::ostream& os) const noexcept;
+    void write_transitors(std::ostream& os) const noexcept;
 };
 // typedef struct ConfigurationNode Configuration;
 
@@ -408,7 +413,8 @@ struct StateList
      * @Return: true is added, false if not added.
      */
     auto add(State* s) -> bool;
-    void write() const;
+    friend auto operator<<(std::ostream& os, const StateList& dt)
+      -> std::ostream&;
 };
 
 struct StateNode
@@ -455,26 +461,31 @@ struct StateCollection
  */
 struct Grammar
 {
-    std::vector<Production*> rules;
-    SymbolNode* goal_symbol;
-    SymbolList terminal_list;
-    int terminal_count;
-    SymbolList non_terminal_list;
-    int non_terminal_count;
-    SymbolList vanish_symbol_list;
-    int vanish_symbol_count;
+    explicit Grammar(std::ofstream& fp_v)
+      : fp_v(fp_v)
+    {}
+
+    std::vector<Production*> rules{};
+    SymbolNode* goal_symbol{};
+    SymbolList terminal_list{};
+    int terminal_count{};
+    SymbolList non_terminal_list{};
+    int non_terminal_count{};
+    SymbolList vanish_symbol_list{};
+    int vanish_symbol_count{};
+    std::ofstream& fp_v;
 
     /*
      * Write rules of the given grammar.
      */
-    void write_rules() const;
+    void write_rules(std::ostream& os) const;
     /*
      * Write rules of the given grammar which are not
      * unit productions.
      * The goal production is always printed no matter
      * it is a unit production or not.
      */
-    void write_rules_no_unit_prod() const;
+    void write_rules_no_unit_prod(std::ostream& os) const;
     /*
      * Returns number of rules excluding unit productions.
      */
@@ -483,7 +494,7 @@ struct Grammar
     /*
      * Write terminals of the given grammar.
      */
-    void write_terminals() const;
+    void write_terminals(std::ostream& os) const;
     /*
      * Write non-terminals of the given grammar.
      *
@@ -491,13 +502,13 @@ struct Grammar
      * is just to keep consistent with yacc.
      * Leave this out for now.
      */
-    void write_non_terminals() const;
-    void write_vanish_symbols() const;
+    void write_non_terminals(std::ostream& os) const;
+    void write_vanish_symbols(std::ostream& os) const;
     /*
      * Write the given grammar, including its terminals,
      * non-terminals, goal symbol and rules.
      */
-    void write(bool before_rm_unit_prod) const;
+    void write(std::ostream& os, bool before_rm_unit_prod) const;
     [[nodiscard]] auto is_unit_production(size_t rule_no) const -> bool;
 };
 
@@ -518,11 +529,11 @@ struct GetYaccGrammarOutput
     /// Final position.
     Position position{};
     /// Parsed grammar.
-    Grammar grammar{};
+    Grammar grammar;
 
     constexpr static size_t SYMBOL_MAX_SIZE = 512;
 
-    explicit GetYaccGrammarOutput();
+    explicit GetYaccGrammarOutput(std::ofstream& fp_v);
     /// @brief Push `c` into `ysymbol`.
     ///
     /// This will write `c` at position `ysymbol_pt` in `ysymbol`, expanding
@@ -633,9 +644,14 @@ get_actual_state(int virtual_state) -> int;
 ///
 /// Results are stored in variable state_dest.
 ///
-/// @return The found action.
+/// @return The found action, and the destination state.
+///
+/// @example
+/// ```cpp
+/// auto [action, state_dest] = get_action(SymbolType::TERMINAL, 1, 1);
+/// ```
 extern auto
-get_action(symbol_type symbol_type, int col, int row, int* state_dest) -> char;
+get_action(symbol_type symbol_type, int col, int row) -> std::pair<char, int>;
 // extern bool isVanishSymbol(SymbolTblNode * n);
 extern auto
 is_parent_symbol(const SymbolTblNode* s) -> bool;
@@ -684,7 +700,7 @@ add_successor(State* s, State* n);
 extern void
 expand_parsing_table();
 extern auto
-get_theads(const Grammar& grammar, SymbolNode* str) -> SymbolNode*;
+get_theads(const Grammar& grammar, SymbolNode*) -> SymbolNode*;
 extern void
 show_theads(SymbolList alpha, SymbolList theads);
 extern auto
@@ -702,13 +718,13 @@ get_reachable_states(const Grammar& grammar,
                      int cur_state,
                      std::vector<int>& states_reachable);
 extern void
-print_parsing_table_note();
+print_parsing_table_note(std::ostream& os);
 extern auto
 insert_symbol_list_unique_inc(SymbolList list,
                               SymbolTblNode* snode,
                               bool* exist) -> SymbolNode*;
 extern void
-print_parsing_table(const Grammar& grammar); // for DEBUG use.
+print_parsing_table(std::ostream& os, const Grammar& grammar); // for DEBUG use.
 
 extern auto
 has_common_core(State* s1, State* s2) -> bool;
@@ -721,7 +737,7 @@ update_state_parsing_tbl_entry(const Grammar& grammar, const State* s);
 extern void
 propagate_context_change(const Grammar& grammar, const State* s);
 extern void
-write_parsing_table_col_header(const Grammar& grammar);
+write_parsing_table_col_header(std::ostream& os, const Grammar& grammar);
 
 extern void
 insert_state_to_pm(State* s);
@@ -767,7 +783,7 @@ update_action(size_t col, size_t row, int state_dest)
 
 /* Defined in upe.c */
 extern void
-write_actual_state_array();
+write_actual_state_array(std::ostream& os);
 extern void
 remove_unit_production(const Grammar& grammar);
 extern void
@@ -781,7 +797,8 @@ print_condensed_final_parsing_table(const Grammar& grammar);
 
 /* Defined in get_yacc_grammar.c */
 extern auto
-get_yacc_grammar(const std::string& infile) -> GetYaccGrammarOutput;
+get_yacc_grammar(const std::string& infile, std::ofstream& fp_v)
+  -> GetYaccGrammarOutput;
 
 /* Defined in version.c */
 extern void
@@ -802,6 +819,7 @@ get_options(std::span<const std::string_view> args,
 extern std::vector<int> final_state_list; // for final states.
 extern void
 generate_compiler(GetYaccGrammarOutput& yacc_grammar_output,
+                  const std::optional<struct LRkPTArray>& lrk_pt_array,
                   const std::string& infile,
                   const FileNames& files);
 
@@ -813,7 +831,7 @@ hash_tbl_insert(std::string_view symbol) -> SymbolTblNode*;
 extern auto
 hash_tbl_find(std::string_view symbol) -> SymbolTblNode*;
 extern void
-hash_tbl_dump();
+hash_tbl_dump(std::ostream& os);
 extern void
 hash_tbl_destroy();
 extern auto
@@ -849,7 +867,7 @@ search_state_hash_tbl(const Grammar& grammar, State* s, int* is_compatible)
 extern auto
 search_same_state_hash_tbl(State* s) -> State*;
 extern void
-state_hash_tbl_dump();
+state_hash_tbl_dump(std::ostream& os);
 
 /*
  * For use by get_yacc_grammar.c and gen_compiler.c
@@ -931,12 +949,8 @@ extern auto
 create_state_no_array() -> StateNoArray*;
 extern void
 add_state_no_array(StateNoArray* sa, int state_no);
-extern void
-write_config_originators(const Configuration& c);
-extern void
-write_config_transitors(const Configuration& c);
-extern void
-lane_tracing(const Grammar& grammar);
+[[nodiscard]] extern auto
+lane_tracing(const Grammar& grammar) -> std::optional<LRkPTArray>;
 extern void
 stdout_write_config(const Grammar& grammar, const Configuration* c);
 extern auto

@@ -345,15 +345,16 @@ generate_lr0_parsing_machine(const Grammar& grammar)
     State* new_state = states_new->states_head;
 
     if (debug_gen_parsing_machine) {
-        *fp_v << std::endl
-              << std::endl
-              << "--generate parsing machine--" << std::endl;
+        grammar.fp_v << std::endl
+                     << std::endl
+                     << "--generate parsing machine--" << std::endl;
     }
 
     while (new_state != nullptr) {
         if (debug_gen_parsing_machine) {
-            *fp_v << states_new->state_count << " states, current state is "
-                  << new_state->state_no << std::endl;
+            grammar.fp_v << states_new->state_count
+                         << " states, current state is " << new_state->state_no
+                         << std::endl;
         }
 
         get_closure_lr0(grammar, new_state); // get closure of this state.

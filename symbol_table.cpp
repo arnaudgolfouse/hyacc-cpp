@@ -33,6 +33,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <ostream>
 #include <string>
 #include <string_view>
 
@@ -383,24 +384,6 @@ get_assoc_name(associativity a) -> const std::string_view
  *******************************************/
 
 void
-test_hash_tbl()
-{
-    hash_tbl_insert("xin");
-    hash_tbl_insert("abe");
-    hash_tbl_insert("xin");
-    hash_tbl_insert("");
-    hash_tbl_insert("");
-
-    hash_tbl_find("");
-    hash_tbl_find("abe");
-    hash_tbl_find("ooo");
-
-    hash_tbl_dump();
-    hash_tbl_destroy();
-    std::cout << "---------------" << std::endl;
-}
-
-void
 hash_tbl_init()
 {
     for (int i = 0; i < HT_SIZE; i++) {
@@ -520,49 +503,48 @@ hash_tbl_destroy()
     }
 }
 
-void
-symbol_tbl_node_dump(SymbolTblNode* n)
+static void
+symbol_tbl_node_dump(std::ostream& os, SymbolTblNode* n)
 {
-    *fp_v << *n->symbol << " [type=" << get_symbol_type(n)
-          << ",vanish=" << (n->vanishable ? "T" : "F") << ",seq=" << n->seq
-          << ",val=" << n->value;
+    os << *n->symbol << " [type=" << get_symbol_type(n)
+       << ",vanish=" << (n->vanishable ? "T" : "F") << ",seq=" << n->seq
+       << ",val=" << n->value;
     if (n->type == symbol_type::TERMINAL && n->TP != nullptr) {
-        *fp_v << ",prec=" << n->TP->precedence
-              << ",assoc=" << get_assoc_name(n->TP->assoc);
+        os << ",prec=" << n->TP->precedence
+           << ",assoc=" << get_assoc_name(n->TP->assoc);
     }
-    *fp_v << "]";
+    os << "]";
 }
 
 void
-hash_tbl_dump()
+hash_tbl_dump(std::ostream& os)
 {
     int count = 0, list_count = 0;
     SymbolTblNode* n = nullptr;
 
-    *fp_v << std::endl << "\n--Hash table--" << std::endl;
+    os << std::endl << "\n--Hash table--" << std::endl;
     for (int i = 0; i < HT_SIZE; i++) {
         if (HashTbl[i].count > 0) {
             list_count++;
-            *fp_v << "HashTbl[" << i << "] (count=" << HashTbl[i].count
-                  << "): ";
+            os << "HashTbl[" << i << "] (count=" << HashTbl[i].count << "): ";
             for (n = HashTbl[i].next; n->next != nullptr; n = n->next) {
-                symbol_tbl_node_dump(n);
-                *fp_v << ", ";
+                symbol_tbl_node_dump(os, n);
+                os << ", ";
                 count++;
             }
-            symbol_tbl_node_dump(n);
-            *fp_v << std::endl;
+            symbol_tbl_node_dump(os, n);
+            os << std::endl;
             count++;
         }
     }
-    *fp_v << "--hash table size: " << HT_SIZE << "--" << std::endl;
-    *fp_v << "--symbol count: " << count << ", load factor lamda (" << count
-          << '/' << HT_SIZE << ") = " << std::setprecision(3)
-          << ((double)count) / HT_SIZE << "--" << std::endl;
-    *fp_v << "--list count: " << list_count << ". Hash Table cell usage ("
-          << list_count << '/' << HT_SIZE << ") = " << std::setprecision(3)
-          << ((double)list_count) / HT_SIZE << "--" << std::endl;
-    *fp_v << "--symbols per list: " << std::setprecision(3)
-          << ((double)count) / list_count << "--" << std::endl;
+    os << "--hash table size: " << HT_SIZE << "--" << std::endl;
+    os << "--symbol count: " << count << ", load factor lamda (" << count << '/'
+       << HT_SIZE << ") = " << std::setprecision(3) << ((double)count) / HT_SIZE
+       << "--" << std::endl;
+    os << "--list count: " << list_count << ". Hash Table cell usage ("
+       << list_count << '/' << HT_SIZE << ") = " << std::setprecision(3)
+       << ((double)list_count) / HT_SIZE << "--" << std::endl;
+    os << "--symbols per list: " << std::setprecision(3)
+       << ((double)count) / list_count << "--" << std::endl;
     // hash_tbl_destroy();
 }

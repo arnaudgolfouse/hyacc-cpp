@@ -213,8 +213,8 @@ trace_back_lrk_clear(const Configuration* c0, Configuration* c);
 /*
  * Functions in lrk.cpp
  */
-extern void
-lane_tracing_lrk(const Grammar& grammar);
+[[nodiscard]] extern auto
+lane_tracing_lrk(const Grammar& grammar) -> std::optional<LRkPTArray>;
 
 // Set - a linked list of objects.
 struct ObjectItem
@@ -303,19 +303,18 @@ struct LRkPTArray
 {
     std::vector<LRkPT*> array;
 
+    explicit LRkPTArray() noexcept;
+
     /// `max_k` is `array.size() + 1`
     [[nodiscard]] constexpr inline auto max_k() const noexcept -> size_t
     {
         return this->array.size() + 1;
     }
-    static auto create() noexcept -> LRkPTArray*;
     void add(LRkPT* t) noexcept;
     [[nodiscard]] auto get(int k) const noexcept -> LRkPT*;
     void dump() const noexcept;
     void dump_file() const noexcept;
 };
-
-extern LRkPTArray* lrk_pt_array; // defined in lrk.c
 
 //
 // for (configuration, conflict context) pair
