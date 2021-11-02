@@ -31,6 +31,7 @@
 #include <fstream>
 #include <iostream>
 #include <ostream>
+#include <string_view>
 
 constexpr bool DEBUG_GEN_GVIZ = false;
 
@@ -223,7 +224,8 @@ static auto
 update_r_list(GvNode* r_list, GvNode* s_list) -> GvNode*
 {
     auto& options = Options::get();
-    const char* str_any = "(any)"; // means: any terminal can cause reduction.
+    const std::string_view str_any =
+      "(any)"; // means: any terminal can cause reduction.
 
     if (options.use_lr0 || options.use_lalr) {
         if (get_gv_node_list_len(r_list) == 1) {
@@ -253,8 +255,7 @@ update_r_list(GvNode* r_list, GvNode* s_list) -> GvNode*
 void
 gen_graphviz_input(const Grammar& grammar, const std::string& y_gviz)
 {
-    char action = 0;
-    int state = 0;
+
     int row_size = ParsingTblRows;
     int col_size = ParsingTblCols;
 
@@ -273,7 +274,8 @@ gen_graphviz_input(const Grammar& grammar, const std::string& y_gviz)
         for (int col = 0; col < ParsingTblCols; col++) {
             SymbolTblNode* n = ParsingTblColHdr[col];
             if (!is_goal_symbol(grammar, n)) {
-                get_action(n->type, col, row, &action, &state);
+                int state = 0;
+                char action = get_action(n->type, col, row, &state);
                 /*std::cout  <<  action <<  state<< "\t"; */
                 if (action == 0) {
                     /* do nothing */
@@ -307,8 +309,6 @@ gen_graphviz_input(const Grammar& grammar, const std::string& y_gviz)
 void
 gen_graphviz_input2(const Grammar& grammar, const std::string& y_gviz)
 {
-    char action = 0;
-    int state = 0;
     int col_size = ParsingTblCols;
     /* value assigned at the end of generate_parsing_table(). */
     int row_size = ParsingTblRows;
@@ -329,7 +329,8 @@ gen_graphviz_input2(const Grammar& grammar, const std::string& y_gviz)
             for (int col = 0; col < ParsingTblCols; col++) {
                 SymbolTblNode* n = ParsingTblColHdr[col];
                 if (!is_goal_symbol(grammar, n) && !is_parent_symbol(n)) {
-                    get_action(n->type, col, row, &action, &state);
+                    int state = 0;
+                    char action = get_action(n->type, col, row, &state);
                     if (action == 's' || action == 'g')
                         state = get_actual_state(state);
                     /* yyprintf("%c%d\t", action, state); */

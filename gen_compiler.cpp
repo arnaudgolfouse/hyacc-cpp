@@ -31,13 +31,13 @@
 #include "y.hpp"
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 constexpr size_t MAX_RULE_LENGTH = 0xfffff;
@@ -45,7 +45,7 @@ constexpr int INTEGER_PADDING = 6;
 constexpr int ITEM_PER_LINE = 10;
 
 std::string yystype_definition = "typedef int YYSTYPE;";
-constexpr const char* YYSTYPE_FORMAT =
+constexpr std::string_view YYSTYPE_FORMAT =
   "#if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED\n"
   "%s\n"
   "#define YYSTYPE_IS_DECLARED 1\n"
@@ -252,15 +252,15 @@ find_mid_prod_index(const Production* rule, const Production* mid_prod_rule)
 {
     const SymbolNode* lnode = mid_prod_rule->nLHS;
     const SymbolTblNode* lsym = lnode->snode;
-    const std::string& l = *lsym->symbol;
+    const std::string_view l = *lsym->symbol;
     const SymbolNode* rnode = rule->nRHS_head;
     const SymbolTblNode* rsym = nullptr;
 
     for (int i = 0; rnode; ++i, rnode = rnode->next) {
-        const std::string& r = *rsym->symbol;
+        const std::string_view r = *rsym->symbol;
         if (!(rsym = rnode->snode)) {
             throw std::runtime_error(
-              std::string("Did not find mid production rule of ") + l);
+              std::string("Did not find mid production rule of ").append(l));
         }
         if (l == r)
             return i;
@@ -303,7 +303,7 @@ static void
 process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
                            std::ifstream& fp_yacc,
                            std::ofstream& fp,
-                           const std::string& filename,
+                           const std::string_view filename,
                            int n_line,
                            int n_col)
 {
@@ -316,8 +316,8 @@ process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
     char c = 0, last_c = 0, last_last_c = 0;
     int rule_count = 0;
     bool end_of_code = false; // for mid-production action.
-    const char* explicit_type = nullptr;
-    static const char* padding = "        ";
+    std::optional<std::string> explicit_type = std::nullopt;
+    static const std::string_view padding = "        ";
 
     while (fp_yacc.get(c)) {
         if (last_c == '%' && c == '%')
@@ -438,12 +438,12 @@ process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
                         reading_type = false;
                         c = '$';
                         yacc_grammar_output.add_char_to_symbol('\0');
-                        explicit_type = yacc_grammar_output.ysymbol.data();
+                        explicit_type = yacc_grammar_output.get_symbol();
                     } else {
                         yacc_grammar_output.add_char_to_symbol(c);
                     }
                 } else if (last_c == '$' && c == '<') {
-                    yacc_grammar_output.ysymbol.clear();
+                    yacc_grammar_output.reset_symbol();
                     reading_type = true;
                 } else if (last_c != '$' && c == '$') {
                     // do nothing, this may be a special character.
@@ -451,7 +451,7 @@ process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
                     std::optional<std::string> token_type = std::nullopt;
                     if (explicit_type) {
                         token_type = explicit_type;
-                        explicit_type = nullptr;
+                        explicit_type = std::nullopt;
                     } else {
                         const Production* rule = find_full_rule(
                           yacc_grammar_output.grammar, rule_count);
@@ -481,7 +481,7 @@ process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
                     std::optional<std::string> token_type = std::nullopt;
                     if (explicit_type) {
                         token_type = explicit_type;
-                        explicit_type = nullptr;
+                        explicit_type = std::nullopt;
                     } else {
                         const SymbolTblNode* sym =
                           find_sym(rule, dollar_number);
@@ -578,25 +578,6 @@ process_yacc_file_section3(std::ifstream& fp_yacc, std::ofstream& fp)
 }
 
 /*
- * Copy code from resource files into output file.
- */
-void
-copy_src_file(std::ofstream& fp, char* filename)
-{
-    std::ifstream fp_src;
-    fp_src.open(filename);
-    if (!fp_src.is_open()) {
-        throw std::runtime_error(std::string("error: can't open file ") +
-                                 filename);
-    }
-    char c = 0;
-    while (fp_src.get(c)) {
-        fp << c;
-    }
-    fp_src.close();
-}
-
-/*
  * This function will return the position of $A
  * to the end of yaccpar.
  * This is for the purpose of inserting code
@@ -650,8 +631,6 @@ copy_yaccpar_file_2(std::ofstream& fp, const std::string& filename)
 ///////////////////////////////////////////////////////
 // Functions to print parsing table arrays. START.
 ///////////////////////////////////////////////////////
-
-static const char* const INDENT = "    "; // indentation.
 
 auto
 get_index_in_tokens_array(SymbolTblNode* s) -> int
@@ -720,7 +699,7 @@ print_yyr1(std::ofstream& fp, const Grammar& grammar)
                 get_non_terminal_index(grammar, grammar.rules[i]->nLHS->snode);
         if (i < grammar.rules.size() - 1)
             fp << ',';
-        if ((i - 9) % ITEM_PER_LINE == 0)
+        if ((i - (ITEM_PER_LINE - 1)) % ITEM_PER_LINE == 0)
             fp << std::endl;
     }
     fp << "};" << std::endl;
@@ -810,7 +789,7 @@ print_yyreds(std::ofstream& fp, const Grammar& grammar)
 
             if (j > 0)
                 a = a->next;
-            const std::string& symbol = *a->snode->symbol;
+            const std::string_view symbol = *a->snode->symbol;
 
             if (symbol.size() == 1 ||
                 (symbol.size() == 2 && symbol[0] == '\\')) {
@@ -896,9 +875,8 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
                     const SymbolTblNode* n = ParsingTblColHdr[col];
                     if (is_goal_symbol(grammar, n) == false &&
                         is_parent_symbol(n) == false) {
-                        char action = 0;
                         int state_no = 0;
-                        get_action(n->type, col, row, &action, &state_no);
+                        char action = get_action(n->type, col, row, &state_no);
 
                         if (action == 's' || action == 'g')
                             state_no = get_actual_state(state_no);
@@ -924,9 +902,9 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
             }
 
             for (int j = 0; j < ParsingTblCols; j++) {
-                char action = 0;
                 int state_no = 0;
-                get_action(ParsingTblColHdr[j]->type, j, i, &action, &state_no);
+                char action =
+                  get_action(ParsingTblColHdr[j]->type, j, i, &state_no);
                 // std::cout  <<  action <<  state_no<< ", ";
                 print_parsing_tbl_entry(fp, action, state_no, &count);
             }
@@ -999,9 +977,8 @@ print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
                     SymbolTblNode* n = ParsingTblColHdr[col];
                     if (is_goal_symbol(grammar, n) == false &&
                         is_parent_symbol(n) == false) {
-                        char action = 0;
                         int state = 0;
-                        get_action(n->type, col, row, &action, &state);
+                        char action = get_action(n->type, col, row, &state);
                         print_parsing_tbl_col_entry(
                           fp, action, n->value, &count);
                     } // end of if.
@@ -1020,9 +997,8 @@ print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
             }
             for (int j = 0; j < ParsingTblCols; j++) {
                 SymbolTblNode* n = ParsingTblColHdr[j];
-                char action = 0;
                 int state = 0;
-                get_action(n->type, j, i, &action, &state);
+                char action = get_action(n->type, j, i, &state);
                 print_parsing_tbl_col_entry(fp, action, n->value, &count);
             }
         } // end of for.

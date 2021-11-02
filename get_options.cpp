@@ -28,9 +28,9 @@
  */
 
 #include "y.hpp"
-#include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 enum class ErrorFlags
@@ -125,12 +125,6 @@ get_filename_prefix(std::string name) -> FileNames
     files.y_output = name + ".output";
     files.y_gviz = name + ".gviz";
     return files;
-}
-
-static void
-write_options(int infile_index, const std::span<const char* const> args)
-{
-    // exit(0);
 }
 
 static auto
@@ -438,7 +432,8 @@ get_mnemonic_long_option(Options& options, const std::string& s)
     } else if (s == "--keep-unit-production-with-action") { // -C
         options.preserve_unit_prod_with_code = false;
     } else if (s.rfind("--file-prefix==", 0) == 0) { // -b
-        get_filename_prefix(s.substr(strlen("--file-prefix==")));
+        get_filename_prefix(
+          s.substr(std::string_view("--file-prefix==").size()));
     } else if (s == "--graphviz") { // -g
         options.use_graphviz = true;
     } else if (s == "--help") { // -h
@@ -462,7 +457,7 @@ get_mnemonic_long_option(Options& options, const std::string& s)
     } else if (s == "--no-lines") { // -l
         options.use_lines = false;
     } else if (s.rfind("--output-file==", 0) == 0) { // -o
-        get_outfile_name(s.substr(strlen("--output-file==")));
+        get_outfile_name(s.substr(std::string_view("--output-file==").size()));
     } else if (s == "--verbose") { // -v
         options.use_verbose = true;
     } else if (s == "--version") { // -V
@@ -480,7 +475,7 @@ get_mnemonic_long_option(Options& options, const std::string& s)
  *   optimization 3: further remove repeated states after 2.
  */
 auto
-get_options(const std::span<const char* const> args,
+get_options(const std::span<const std::string_view> args,
             Options& options,
             FileNames* files) -> int
 {
@@ -493,7 +488,7 @@ get_options(const std::span<const char* const> args,
     int infile_index = -1;
     for (int i = 1; i < args.size(); i++) {
         int argc_pt = i;
-        const std::string& argv_i = args[i];
+        const std::string argv_i = std::string(args[i]);
         // std::cout  <<  i<< ", " <<  argv_i << std::endl;
         size_t len = argv_i.size();
 
@@ -514,7 +509,7 @@ get_options(const std::span<const char* const> args,
         if (len >= 2 && *argv_i_iter == '-') {
             ++argv_i_iter;
             if (*argv_i_iter == '-') {
-                get_mnemonic_long_option(options, argv_i.data());
+                get_mnemonic_long_option(options, argv_i);
             } else {
                 for (; argv_i_iter != argv_i_iter_end; ++argv_i_iter) {
                     get_single_letter_option(options,
@@ -536,6 +531,5 @@ get_options(const std::span<const char* const> args,
         show_helpmsg_exit(ErrorFlags::NO_INPUT_FILE);
     }
 
-    write_options(infile_index, args);
     return infile_index;
 }

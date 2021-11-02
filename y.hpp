@@ -40,7 +40,6 @@
 #include <vector>
 
 constexpr size_t SYMBOL_INIT_SIZE = 128; /* Init size of a symbol string. */
-constexpr size_t SYMBOL_MAX_SIZE = 512;
 constexpr size_t GRAMMAR_RULE_INIT_MAX_COUNT =
   256; /* Number of rules allowed. */
 constexpr size_t PARSING_TABLE_INIT_SIZE = 1024;
@@ -517,19 +516,30 @@ struct Position
 struct GetYaccGrammarOutput
 {
     /// Final position.
-    Position position;
+    Position position{};
     /// Parsed grammar.
-    Grammar grammar;
-    // token symbol.
-    std::string ysymbol;
-    // Invariant : ysymbol_pt <= ysymbol.size()
-    size_t ysymbol_pt;
+    Grammar grammar{};
 
-    /*
-     * Note: At this time, don't worry about whether the first
-     * char of a symbol should be a letter.
-     */
+    constexpr static size_t SYMBOL_MAX_SIZE = 512;
+
+    explicit GetYaccGrammarOutput();
+    /// @brief Push `c` into `ysymbol`.
+    ///
+    /// This will write `c` at position `ysymbol_pt` in `ysymbol`, expanding
+    /// ysymbol` if necessary.
+    ///
+    /// @throw This will throw a `std::runtime_error` if `ysymbol_pt` is greater
+    /// than `SYMBOL_MAX_SIZE`.
+    ///
+    /// @note At this time, don't worry about whether the first char of a
+    /// symbol should be a letter.
     void add_char_to_symbol(char c);
+    [[nodiscard]] auto get_symbol() const noexcept -> std::string_view;
+    void reset_symbol() noexcept;
+
+  private:
+    /// token symbol.
+    std::string ysymbol{};
 };
 
 /* for indexed access of states_new states */
@@ -616,12 +626,16 @@ extern auto
 is_goal_symbol(const Grammar& grammar, const SymbolTblNode* snode) -> bool;
 extern auto
 get_actual_state(int virtual_state) -> int;
-extern void
-get_action(symbol_type symbol_type,
-           int col,
-           int row,
-           char* action,
-           int* state_dest);
+/// Given a state and a transition symbol, find the
+/// action and the destination state.
+///
+/// row - source state.
+///
+/// Results are stored in variable state_dest.
+///
+/// @return The found action.
+extern auto
+get_action(symbol_type symbol_type, int col, int row, int* state_dest) -> char;
 // extern bool isVanishSymbol(SymbolTblNode * n);
 extern auto
 is_parent_symbol(const SymbolTblNode* s) -> bool;
@@ -779,7 +793,7 @@ show_manpage();
 
 /* Defined in get_options.c */
 extern auto
-get_options(std::span<const char* const> args,
+get_options(std::span<const std::string_view> args,
             Options& options,
             FileNames* files) -> int;
 
@@ -815,9 +829,9 @@ free_symbol_node_list(SymbolNode* a);
 extern auto
 create_rule_id_node(int rule_id) -> RuleIDNode*;
 extern void
-write_symbol_list(SymbolList a, const char* name);
+write_symbol_list(SymbolList a, const std::string_view name);
 extern auto
-remove_from_symbol_list(SymbolList a, SymbolTblNode* s, int* exist)
+remove_from_symbol_list(SymbolList a, SymbolTblNode* s, bool* exist)
   -> SymbolList;
 extern auto
 get_symbol_list_len(SymbolList a) -> int;
@@ -866,11 +880,11 @@ enum YACC_STATE
     COMMENT2
 };
 
-extern const char* const STR_ACCEPT;
-extern const char* const STR_PLACE_HOLDER;
-extern const char* const STR_END;
-extern const char* const STR_EMPTY;
-extern const char* const STR_ERROR;
+extern const std::string_view STR_ACCEPT;
+extern const std::string_view STR_PLACE_HOLDER;
+extern const std::string_view STR_END;
+extern const std::string_view STR_EMPTY;
+extern const std::string_view STR_ERROR;
 
 /* function in gen_graphviz.c */
 extern void

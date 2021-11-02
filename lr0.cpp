@@ -27,8 +27,6 @@
  */
 
 #include "y.hpp"
-#include <cstddef>
-#include <cstring>
 #include <fstream>
 
 static void

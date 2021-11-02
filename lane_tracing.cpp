@@ -29,11 +29,11 @@
 #include "stack_config.hpp"
 #include "y.hpp"
 #include <cstddef>
-#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 constexpr bool DEBUG_PHASE_1 = false;
 constexpr bool DEBUG_RESOLVE_CONFLICT = false;
@@ -2132,18 +2132,6 @@ gpm(const Grammar& grammar, State* new_state)
               << std::endl;
 }
 
-static void
-write_state_no_array(const StateNoArray* a, char* name)
-{
-    if (name != nullptr) {
-        std::cout << name << ": ";
-    }
-    for (const int state : a->states) {
-        std::cout << state << " ";
-    }
-    std::cout << std::endl;
-}
-
 /*
  * Adapted from transition() in y.c.
  */
@@ -2339,11 +2327,10 @@ update_state_reduce_action(const Grammar& grammar, State* s)
             get_scanned_symbol(c)->symbol->empty()) {
             const SymbolNode* lookahead = c->context->nContext;
             for (; lookahead != nullptr; lookahead = lookahead->next) {
-                get_action(lookahead->snode->type,
-                           get_col(*lookahead->snode),
-                           s->state_no,
-                           &action,
-                           &state_dest);
+                action = get_action(lookahead->snode->type,
+                                    get_col(*lookahead->snode),
+                                    s->state_no,
+                                    &state_dest);
                 if (state_dest != c->ruleID) {
                     if (action == 0 || action == 'r') {
                         update_action(get_col(*lookahead->snode),
@@ -2507,7 +2494,7 @@ get_the_context(const Grammar& grammar, const Configuration* o) -> SymbolNode*
 
     // note that "" will be the first node in the INC list,
     // so it's not so inefficient.
-    int exist = 0;
+    bool exist = false;
     gamma_theads =
       remove_from_symbol_list(gamma_theads, hash_tbl_find(""), &exist);
 

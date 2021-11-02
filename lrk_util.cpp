@@ -30,7 +30,6 @@
 
 #include "lane_tracing.hpp"
 #include "y.hpp"
-#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <memory>

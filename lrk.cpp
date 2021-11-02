@@ -50,7 +50,7 @@ print_int(void* object)
 static void
 print_string(void* object)
 {
-    std::cout << static_cast<char*>(object) << std::endl;
+    std::cout << static_cast<const char*>(object) << std::endl;
 }
 void
 print_symbol_list(void* object)

@@ -30,7 +30,6 @@
  */
 
 #include "y.hpp"
-#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -56,11 +55,11 @@ create_rule_id_node(int rule_id) -> RuleIDNode*
 }
 
 static void
-write_rule_id_list(const SymbolTblNode* n)
+write_rule_id_list(const SymbolTblNode& n)
 {
-    RuleIDNode* a = nullptr;
-    std::cout << *n->symbol << ": ";
-    if ((a = n->ruleIDList) != nullptr) {
+    RuleIDNode* a = n.ruleIDList;
+    std::cout << *n.symbol << ": ";
+    if (a != nullptr) {
         std::cout << a->ruleID;
 
         for (a = a->next; a != nullptr; a = a->next) {
@@ -77,7 +76,7 @@ write_non_terminal_rule_id_list(const Grammar& grammar)
     std::cout << "--Nonterminal symbol rule index list--" << std::endl;
     for (SymbolNode* a = grammar.non_terminal_list; a != nullptr; a = a->next) {
         std::cout << count++ << ": ";
-        write_rule_id_list(a->snode);
+        write_rule_id_list(*a->snode);
     }
 }
 
@@ -181,11 +180,11 @@ clone_symbol_list(const SymbolList a) -> SymbolList
  * @return: the new list.
  */
 auto
-remove_from_symbol_list(SymbolList a, SymbolTblNode* s, int* exist)
+remove_from_symbol_list(SymbolList a, SymbolTblNode* s, bool* exist)
   -> SymbolList
 {
     SymbolNode* b = nullptr;
-    *exist = 1;
+    *exist = true;
 
     if (a->snode == s) { // is the first node.
         b = a;
@@ -204,7 +203,7 @@ remove_from_symbol_list(SymbolList a, SymbolTblNode* s, int* exist)
     }
 
     // b->next is nullptr. s is NOT in list a.
-    *exist = 0;
+    *exist = false;
     return a;
 }
 
@@ -233,9 +232,9 @@ auto
 insert_inc_symbol_list(SymbolList a, SymbolTblNode* n) -> SymbolNode*
 {
     SymbolNode *b = nullptr, *b_prev = nullptr;
-    if (nullptr == n)
+    if (n == nullptr)
         return a;
-    if (nullptr == a)
+    if (a == nullptr)
         return SymbolNode::create(n);
 
     for (b_prev = nullptr, b = a; b != nullptr; b_prev = b, b = b->next) {
@@ -316,11 +315,10 @@ combine_inc_symbol_list(SymbolList a, SymbolList b) -> SymbolNode*
 }
 
 void
-write_symbol_list(SymbolList a, const char* name)
+write_symbol_list(SymbolList a, const std::string_view name)
 {
     SymbolNode* b = a;
-    if (name != nullptr)
-        std::cout << name << ": ";
+    std::cout << name << ": ";
     if (b != nullptr) {
         std::cout << *b->snode->symbol;
         for (b = b->next; b != nullptr; b = b->next) {
@@ -359,7 +357,7 @@ create_symbol_tbl_node(const std::string_view symbol) -> SymbolTblNode*
  * Empty string and EOF '$' are _NEITHER type.
  */
 static auto
-get_symbol_type(SymbolTblNode* n) -> const char*
+get_symbol_type(SymbolTblNode* n) -> const std::string_view
 {
     if (n->type == symbol_type::TERMINAL)
         return "T";
@@ -369,7 +367,7 @@ get_symbol_type(SymbolTblNode* n) -> const char*
 }
 
 static auto
-get_assoc_name(associativity a) -> const char*
+get_assoc_name(associativity a) -> const std::string_view
 {
     if (a == associativity::LEFT)
         return "left";
@@ -416,10 +414,7 @@ hash_tbl_init()
     // testHashTbl();
 }
 
-/*
- * Assumption: symbol != nullptr.
- * empty string is allowed.
- */
+/// @note Empty string is allowed.
 static auto
 hash_value(const std::string_view symbol) -> int
 {

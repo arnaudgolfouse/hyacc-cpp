@@ -32,13 +32,12 @@
 #include "mrt.hpp"
 #include "y.hpp"
 #include <algorithm>
-#include <cstddef>
-#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 /*
@@ -127,9 +126,8 @@ get_unit_prod_shift(int state,
 
     for (const auto& parent : parents) {
         SymbolTblNode* n = parent->snode;
-        char action = 0;
         int state_dest = 0;
-        get_action(n->type, get_col(*n), state, &action, &state_dest);
+        char action = get_action(n->type, get_col(*n), state, &state_dest);
         // std::cout << action << ", " << state_dest << std::endl;
         if (action == 'g') {
             unit_prod_dest_states.push_back(state_dest);
@@ -139,9 +137,9 @@ get_unit_prod_shift(int state,
     // Note: leaf itself can be a non-terminal.
     // so action can be g too.
     if (!unit_prod_dest_states.empty()) {
-        char action = 0;
         int state_dest = 0;
-        get_action(leaf->type, get_col(*leaf), state, &action, &state_dest);
+        char action =
+          get_action(leaf->type, get_col(*leaf), state, &state_dest);
         if (action == 's' || action == 'g') {
             unit_prod_dest_states.push_back(state_dest);
         }
@@ -244,15 +242,10 @@ insert_action_of_symbol(const Grammar& grammar,
                         int old_state_index,
                         std::vector<int>& old_states)
 {
-
-    char action = 0;
     int state_dest = 0;
 
-    get_action(symbol->type,
-               get_col(*symbol),
-               old_states[old_state_index],
-               &action,
-               &state_dest);
+    char action = get_action(
+      symbol->type, get_col(*symbol), old_states[old_state_index], &state_dest);
 
     if (action == 0)
         return;
@@ -361,16 +354,15 @@ in_int_array(int n, const std::vector<int>& states_reachable) -> bool
  */
 static void
 get_reachable_states_for_symbol(const Grammar& grammar,
-                                const std::string& symbol,
+                                const std::string_view symbol,
                                 int cur_state,
                                 std::vector<int>& states_reachable)
 {
-    char action = 0;
     int state_dest = 0;
 
     const SymbolTblNode* n = hash_tbl_find(symbol);
 
-    get_action(n->type, get_col(*n), cur_state, &action, &state_dest);
+    char action = get_action(n->type, get_col(*n), cur_state, &state_dest);
     if ((action == 's' || action == 'g') &&
         !in_int_array(state_dest, states_reachable)) {
         states_reachable.push_back(state_dest);
@@ -498,7 +490,6 @@ print_final_parsing_table(const Grammar& grammar)
 {
     int col_size = ParsingTblCols;
     int row_size = ParsingTblRows;
-    char action = 0;
     int state = 0;
 
     *fp_v << std::endl << "--Pars" << std::endl << "g Table--\n";
@@ -512,7 +503,7 @@ print_final_parsing_table(const Grammar& grammar)
                 SymbolTblNode* n = ParsingTblColHdr[col];
                 if (is_goal_symbol(grammar, n) == false &&
                     is_parent_symbol(n) == false) {
-                    get_action(n->type, col, row, &action, &state);
+                    char action = get_action(n->type, col, row, &state);
                     *fp_v << action << state << "\t";
                 }
             }
@@ -596,7 +587,6 @@ write_actual_state_array()
 void
 print_condensed_final_parsing_table(const Grammar& grammar)
 {
-    char action = 0;
     int state_no = 0;
     int col_size = ParsingTblCols;
     // value assigned at the end of generate_parsing_table().
@@ -617,7 +607,7 @@ print_condensed_final_parsing_table(const Grammar& grammar)
                 SymbolTblNode* n = ParsingTblColHdr[col];
                 if (is_goal_symbol(grammar, n) == false &&
                     is_parent_symbol(n) == false) {
-                    get_action(n->type, col, row, &action, &state_no);
+                    char action = get_action(n->type, col, row, &state_no);
                     if (action == 's' || action == 'g')
                         state_no = get_actual_state(state_no);
                     *fp_v << action << state_no << "\t";
@@ -754,13 +744,11 @@ remove_unit_production(const Grammar& grammar)
 auto
 is_equal_row(int i, int j) -> bool
 {
-    char action_i = 0, action_j = 0;
-    int state_dest_i = 0, state_dest_j = 0;
-
     for (int col = 0; col < ParsingTblCols; col++) {
         SymbolTblNode* n = ParsingTblColHdr[col];
-        get_action(n->type, get_col(*n), i, &action_i, &state_dest_i);
-        get_action(n->type, get_col(*n), j, &action_j, &state_dest_j);
+        int state_dest_i = 0, state_dest_j = 0;
+        char action_i = get_action(n->type, get_col(*n), i, &state_dest_i);
+        char action_j = get_action(n->type, get_col(*n), j, &state_dest_j);
         if (action_i != action_j || state_dest_i != state_dest_j)
             return false;
     }
@@ -778,21 +766,20 @@ update_repeated_row(const Grammar& grammar,
                     int old_state,
                     int row)
 {
-    char action = 0;
     int state_dest = 0;
     // std::cout << "In row " <<  row<< ", replace " <<  old_state<< " by " <<
     // new_state << std::endl;
 
     // for end marker column STR_END
     SymbolTblNode* n = hash_tbl_find(STR_END);
-    get_action(n->type, get_col(*n), row, &action, &state_dest);
+    get_action(n->type, get_col(*n), row, &state_dest);
     if (state_dest == old_state)
         update_action(get_col(*hash_tbl_find(STR_END)), row, new_state);
 
     // for terminal columns
     for (SymbolNode* a = grammar.terminal_list; a != nullptr; a = a->next) {
         n = a->snode;
-        get_action(n->type, get_col(*n), row, &action, &state_dest);
+        get_action(n->type, get_col(*n), row, &state_dest);
         if (state_dest == old_state)
             update_action(get_col(*a->snode), row, new_state);
     }
@@ -800,7 +787,7 @@ update_repeated_row(const Grammar& grammar,
     // for non-terminal columns
     for (SymbolNode* a = grammar.non_terminal_list; a != nullptr; a = a->next) {
         n = a->snode;
-        get_action(n->type, get_col(*n), row, &action, &state_dest);
+        get_action(n->type, get_col(*n), row, &state_dest);
         if (state_dest == old_state)
             update_action(get_col(*a->snode), row, new_state);
     }

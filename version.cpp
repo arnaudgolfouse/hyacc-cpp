@@ -29,8 +29,9 @@
 
 #include "y.hpp"
 #include <iostream>
+#include <string_view>
 
-const char* const HYACC_VERSION = "HYACC version 0.98 (2017)\n\
+const std::string_view HYACC_VERSION = "HYACC version 0.98 (2017)\n\
 Copyright (C) 2007-2017 Xin Chen\n\n\
 Hyacc uses GNU GPL license. \n\
 The parser engines hyaccpar and hyaccpark use BSD license. \n\
