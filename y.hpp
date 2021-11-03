@@ -377,22 +377,28 @@ struct ConflictNode
 {
     int state;
     SymbolTblNode* lookahead;
-    int r;        // reduce, neg, and is always the smaller one.
-    int s;        // reduce or shift, neg or pos.
-    int decision; // final decision.
+    int r;          // reduce, neg, and is always the smaller one.
+    int s;          // reduce or shift, neg or pos.
+    int decision{}; // final decision.
     std::shared_ptr<ConflictNode> next;
 
-    static auto create_node(int state, SymbolTblNode* lookahead, int r, int s)
-      -> std::shared_ptr<ConflictNode>;
-    // static void destroy_node(Conflict* c);
-    // static void destroy_list(Conflict* a);
+    explicit ConflictNode(int state,
+                          SymbolTblNode* lookahead,
+                          int r,
+                          int s) noexcept;
 };
 
-extern int ss_count; // total count of shift/shift conflicts.
-extern int rr_count; // total count of reduce/reduce conflicts.
-extern int rs_count; // total count of shift/shift conflicts.
-
-extern int expected_sr_conflict; // expected shift/reduce conflicts.
+struct ConflictsCount
+{
+    /// total count of shift/shift conflicts.
+    uint32_t ss{};
+    /// total count of reduce/reduce conflicts.
+    uint32_t rr{};
+    /// total count of shift/shift conflicts.
+    uint32_t rs{};
+    /// expected shift/reduce conflicts.
+    uint32_t expected_sr_conflict{};
+};
 
 using State = struct StateNode;
 struct StateList
@@ -440,7 +446,6 @@ struct StateNode
     static void destroy_state(State* s);
     void get_closure(const struct Grammar& grammar,
                      std::optional<Queue>& config_queue);
-    void transition(const Grammar& grammar, std::optional<Queue>& config_queue);
 };
 
 /*
@@ -514,8 +519,6 @@ struct Grammar
 
 // extern Grammar grammar; /* Used by the entire program. */
 
-extern StateCollection* states_new;
-
 /// Position in an input file.
 struct Position
 {
@@ -575,7 +578,108 @@ struct StateArray
     inline void add_state(State* s) noexcept { this->state_list.push_back(s); }
 };
 
-extern std::shared_ptr<StateArray> states_new_array;
+struct NewStates
+{
+    std::shared_ptr<StateArray> states_new_array{ nullptr };
+    StateCollection* states_new{ nullptr };
+    ConflictsCount conflicts_count{};
+
+    void inc_conflict_count(int s, int state) noexcept;
+    /// insert in increasing order by conflict's state no.
+    ///
+    /// @note no need to check size of conflict arrays,
+    /// which is handled in expand_parsing_table().
+    auto add_to_conflict_array(int state,
+                               SymbolTblNode* lookahead,
+                               int action1,
+                               int action2) noexcept
+      -> std::shared_ptr<ConflictNode>;
+    void write_grammar_conflict_list(std::ostream& os) const noexcept;
+    /// Used when USE_REMOVE_UNIT_PROD is used.
+    void write_grammar_conflict_list2(std::ostream& os) const noexcept;
+    void insert_state_to_pm(State* s) noexcept;
+};
+
+/// Runs the LR(0) algorithm.
+class LR0
+{
+  public:
+    explicit LR0(const Grammar& grammar,
+                 const Options& options,
+                 NewStates& new_states) noexcept
+      : grammar(grammar)
+      , options(options)
+      , new_states(new_states)
+    {}
+    void update_parsing_table() noexcept;
+    void output_parsing_table_lalr();
+    void generate_lr0_parsing_machine(Queue& config_queue);
+    void insert_action(SymbolTblNode* lookahead, int row, int state_dest);
+
+    const Grammar&
+      grammar; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+    const Options&
+      options; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+    NewStates&
+      new_states; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+  private:
+    void transition_lr0(State* s) noexcept;
+    void output_parsing_table() noexcept;
+    void insert_reduction_to_parsing_table_lr0(const Configuration* c,
+                                               int state_no);
+    void output_parsing_table_row(const State* s);
+    void insert_reduction_to_parsing_table_lalr(const Configuration* c,
+                                                int state_no);
+    void output_parsing_table_row_lalr(const State* s);
+};
+
+class YAlgorithm : public LR0
+{
+  public:
+    YAlgorithm(const Grammar& grammar,
+               const Options& options,
+               NewStates& new_states,
+               std::optional<Queue>& config_queue) noexcept
+      : LR0(grammar, options, new_states)
+      , config_queue(config_queue)
+    {}
+    /// In `upe.cpp`
+    void remove_unit_production();
+    void init();
+
+  protected:
+    std::optional<Queue>&
+      config_queue; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+
+    void state_transition(State& state);
+    auto search_state_hash_tbl(State& s, bool* is_compatible) -> State*;
+
+  private:
+    void init_start_state();
+    void update_state_parsing_tbl_entry(const State& s);
+    void insert_reduction_to_parsing_table(const Configuration* c,
+                                           int state_no);
+    void propagate_context_change(const State& s);
+    auto combine_compatible_states(State& s_dest, const State& s_src) -> bool;
+    auto add_transition_states2_new(StateCollection* coll, State* src_state)
+      -> bool;
+    void generate_parsing_machine();
+
+    /// In `upe.cpp`
+    void remove_unit_production_step1and2(
+      const std::vector<std::shared_ptr<struct MRTreeNode>>& mr_leaves);
+    void insert_action_of_symbol(SymbolTblNode* symbol,
+                                 int new_state,
+                                 size_t old_state_index,
+                                 std::vector<int>& old_states);
+    void insert_actions_of_combined_states(int new_state,
+                                           int src_state,
+                                           std::vector<int>& old_states);
+
+    friend auto lr1(const FileNames& files,
+                    const Options& options,
+                    NewStates& new_states) -> int;
+};
 
 /* Variables for parsing table. */
 
@@ -659,14 +763,9 @@ is_parent_symbol(const SymbolTblNode* s) -> bool;
 extern auto
 is_reachable_state(int state) -> bool;
 extern auto
-is_same_state(const State* s1, const State* s2) -> bool;
+is_same_state(const State& s1, const State& s2) -> bool;
 extern auto
 is_compatible_states(const State* s1, const State* s2) -> bool;
-extern auto
-combine_compatible_states(const Grammar& grammar,
-                          std::optional<Queue>& config_queue,
-                          State* s_dest,
-                          const State* s_src) -> bool;
 
 extern auto
 is_final_configuration(const Grammar& grammar, const Configuration* c) -> bool;
@@ -677,29 +776,15 @@ add_symbol2_context(SymbolTblNode* snode, Context* c) -> bool;
 extern auto
 is_compatible_successor_config(const State* s, int rule_id) -> int;
 extern void
-insert_action(const Grammar& grammar,
-              SymbolTblNode* lookahead,
-              int row,
-              int state_dest);
-extern void
-insert_reduction_to_parsing_table(const Grammar& grammar,
-                                  const Configuration* c,
-                                  int state_no);
-extern void
 copy_config(Configuration* c_dest, const Configuration* c_src);
 extern void
 add_core_config2_state(const Grammar& grammar,
                        State* s,
                        Configuration* new_config);
-extern auto
-add_transition_states2_new(const Grammar& grammar,
-                           std::optional<Queue>& config_queue,
-                           StateCollection* coll,
-                           State* src_state) -> bool;
 extern void
 add_successor(State* s, State* n);
 extern void
-expand_parsing_table();
+expand_parsing_table(StateArray& states_new_array);
 extern auto
 get_theads(const Grammar& grammar, SymbolNode*) -> SymbolNode*;
 extern void
@@ -725,25 +810,17 @@ insert_symbol_list_unique_inc(SymbolList list,
                               SymbolTblNode* snode,
                               bool* exist) -> SymbolNode*;
 extern void
-print_parsing_table(std::ostream& os, const Grammar& grammar); // for DEBUG use.
+print_parsing_table(std::ostream& os,
+                    const Grammar& grammar); // for DEBUG use.
 
 extern auto
 has_common_core(State* s1, State* s2) -> bool;
 extern auto
-combine_context(Context* c_dest, Context* c_src) -> bool;
+combine_context(Context* c_dest, const Context* c_src) -> bool;
 extern void
 get_context(const Grammar& grammar, const Configuration* cfg, Context* context);
 extern void
-update_state_parsing_tbl_entry(const Grammar& grammar, const State* s);
-extern void
-propagate_context_change(const Grammar& grammar,
-                         std::optional<Queue>& config_queue,
-                         const State* s);
-extern void
 write_parsing_table_col_header(std::ostream& os, const Grammar& grammar);
-
-extern void
-insert_state_to_pm(State* s);
 
 /*
  * Given a symbol, returns which column it locates in
@@ -788,8 +865,6 @@ update_action(size_t col, size_t row, int state_dest)
 extern void
 write_actual_state_array(std::ostream& os);
 extern void
-remove_unit_production(const Grammar& grammar);
-extern void
 print_final_parsing_table(const Grammar& grammar);
 extern void
 further_optimization(const Grammar& grammar);
@@ -800,8 +875,9 @@ print_condensed_final_parsing_table(const Grammar& grammar);
 
 /* Defined in get_yacc_grammar.c */
 extern auto
-get_yacc_grammar(const std::string& infile, std::ofstream& fp_v)
-  -> GetYaccGrammarOutput;
+get_yacc_grammar(const std::string& infile,
+                 std::ofstream& fp_v,
+                 uint32_t& expected_sr_conflict) -> GetYaccGrammarOutput;
 
 /* Defined in version.c */
 extern void
@@ -867,10 +943,10 @@ init_state_hash_tbl();
 extern auto
 search_state_hash_tbl(const Grammar& grammar,
                       std::optional<Queue>& config_queue,
-                      State* s,
-                      int* is_compatible) -> State*;
+                      State& s,
+                      bool* is_compatible) -> State*;
 extern auto
-search_same_state_hash_tbl(State* s) -> State*;
+search_same_state_hash_tbl(State& s) -> State*;
 extern void
 state_hash_tbl_dump(std::ostream& os);
 
@@ -918,8 +994,6 @@ gen_graphviz_input2(const Grammar& grammar,
                     const std::string& y_gviz); /* For O2, O3 */
 
 /* functions in lr0.c */
-extern void
-generate_lr0_parsing_machine(const Grammar& grammar, Queue& config_queue);
 extern auto
 get_scanned_symbol(const Configuration* c) -> SymbolTblNode*; // in y.c
 extern auto
@@ -927,10 +1001,6 @@ create_state_collection() -> StateCollection*;
 extern auto
 find_state_for_scanned_symbol(const StateCollection* c,
                               const SymbolTblNode* symbol) -> State*;
-extern void
-update_parsing_table_lr0(const Grammar& grammar);
-extern void
-output_parsing_table_lalr(const Grammar& grammar);
 
 /* list of inadequate states for lane-tracing. */
 
@@ -954,9 +1024,6 @@ extern auto
 create_state_no_array() -> StateNoArray*;
 extern void
 add_state_no_array(StateNoArray* sa, int state_no);
-[[nodiscard]] extern auto
-lane_tracing(const Grammar& grammar, std::optional<Queue>& config_queue)
-  -> std::optional<LRkPTArray>;
 extern void
 stdout_write_config(const Grammar& grammar, const Configuration* c);
 extern auto
@@ -976,8 +1043,6 @@ extern auto
 get_contexts_generated(SymbolList list, bool* null_possible) -> SymbolList;
 extern auto
 combine_context_list(SymbolList list, SymbolList new_list) -> SymbolNode*;
-extern void
-write_conflicting_context(int state_no); // for debug.
 
 /*
  * When this is true, transition occurs only on conflicting contexts.

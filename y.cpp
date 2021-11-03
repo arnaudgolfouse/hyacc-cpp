@@ -31,6 +31,7 @@
 #include "lane_tracing.hpp"
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -52,13 +53,7 @@ Options Options::
 std::atomic_int MAX_K;
 
 std::array<HashTblNode, HT_SIZE> HashTbl;
-int ss_count;
-int rr_count;
-int rs_count;
-int expected_sr_conflict;
 // Grammar grammar;
-StateCollection* states_new;
-std::shared_ptr<StateArray> states_new_array;
 std::atomic_size_t PARSING_TABLE_SIZE;
 std::vector<int> ParsingTable;
 int ParsingTblCols;
@@ -83,8 +78,6 @@ StateNoArray* states_inadequate;
 static void
 init_parsing_table();
 static void
-init_start_state(const Grammar& grammar, std::optional<Queue>& config_queue);
-static void
 combine_compatible_config(State* s, bool debug_comb_comp_config);
 static void
 destroy_state_collection(StateCollection* c);
@@ -95,14 +88,11 @@ clear_production(Production* p);
 static void
 free_config(Configuration* c);
 static auto
-is_compatible_config(Configuration* c1, Configuration* c2) -> bool;
-static auto
-add_to_conflict_array(int state,
-                      SymbolTblNode* lookahead,
-                      int action1,
-                      int action2) -> std::shared_ptr<ConflictNode>;
+is_compatible_config(const Configuration* c1, const Configuration* c2) -> bool;
 static void
-write_state_transition_list(std::ostream& os, const Grammar& grammar);
+write_state_transition_list(std::ostream& os,
+                            const Grammar& grammar,
+                            const NewStates& new_states);
 
 std::string hyacc_filename;
 
@@ -297,18 +287,16 @@ Grammar::write(std::ostream& os, bool before_rm_unit_prod) const
     os << std::endl;
 }
 
-auto
-ConflictNode::create_node(int state, SymbolTblNode* lookahead, int r, int s)
-  -> std::shared_ptr<ConflictNode>
-{
-    auto c = std::make_shared<ConflictNode>();
-    c->state = state;
-    c->lookahead = lookahead;
-    c->r = r;
-    c->s = s;
-    c->next = nullptr;
-    return c;
-}
+ConflictNode::ConflictNode(int state,
+                           SymbolTblNode* lookahead,
+                           int r,
+                           int s) noexcept
+  : state(state)
+  , r(r)
+  , s(s)
+  , next(nullptr)
+  , lookahead(lookahead)
+{}
 
 auto
 StateArray::create() -> std::shared_ptr<StateArray>
@@ -326,29 +314,24 @@ StateArray::expand(StateArray* a, size_t new_size)
     }
 }
 
-static void
-inc_conflict_count(const int s, const int state)
+void
+NewStates::inc_conflict_count(const int s, const int state) noexcept
 {
     if (s > 0) {
-        rs_count++;
-        states_new_array->rs_count[state]++;
+        this->conflicts_count.rs++;
+        this->states_new_array->rs_count[state]++;
     } else {
-        rr_count++;
-        states_new_array->rr_count[state]++;
+        this->conflicts_count.rr++;
+        this->states_new_array->rr_count[state]++;
     }
 }
 
-/*
- * insert in incresing order by conflict's state no.
- *
- * Note: no need to check size of conflict arrays,
- * which is handled in expand_parsing_table().
- */
 auto
-add_to_conflict_array(int state,
-                      SymbolTblNode* lookahead,
-                      int action1,
-                      int action2) -> std::shared_ptr<ConflictNode>
+NewStates::add_to_conflict_array(int state,
+                                 SymbolTblNode* lookahead,
+                                 int action1,
+                                 int action2) noexcept
+  -> std::shared_ptr<ConflictNode>
 {
     int r = 0, s = 0; // r < s
     Conflict* b_prev = nullptr;
@@ -361,42 +344,42 @@ add_to_conflict_array(int state,
         s = action1;
     }
 
-    if (states_new_array->rr_count.at(state) == 0 &&
-        states_new_array->rs_count.at(state) == 0) {
+    if (this->states_new_array->rr_count.at(state) == 0 &&
+        this->states_new_array->rs_count.at(state) == 0) {
         std::shared_ptr<ConflictNode> c =
-          ConflictNode::create_node(state, lookahead, r, s);
-        states_new_array->conflict_list.at(state) = c;
-        inc_conflict_count(s, state);
+          std::make_shared<ConflictNode>(state, lookahead, r, s);
+        this->states_new_array->conflict_list.at(state) = c;
+        this->inc_conflict_count(s, state);
         return c;
     }
 
-    for (std::shared_ptr<Conflict> b = states_new_array->conflict_list[state];
+    for (std::shared_ptr<Conflict> b =
+           this->states_new_array->conflict_list[state];
          b != nullptr;
          b_prev = b.get(), b = b->next) {
         if (state == b->state && lookahead == b->lookahead && r == b->r &&
             s == b->s)
             return nullptr; // exits already.
-
         if (state < b->state) {
             std::shared_ptr<ConflictNode> c =
-              ConflictNode::create_node(state, lookahead, r, s);
+              std::make_shared<ConflictNode>(state, lookahead, r, s);
 
             if (b_prev == nullptr) { // insert at the head.
-                c->next = states_new_array->conflict_list[state];
-                states_new_array->conflict_list[state] = c;
+                c->next = this->states_new_array->conflict_list[state];
+                this->states_new_array->conflict_list[state] = c;
             } else { // insert in the middle.
                 c->next = b;
                 b_prev->next = c;
             }
-            inc_conflict_count(s, state);
+            this->inc_conflict_count(s, state);
             return c;
         }
     } // end of for.
 
     std::shared_ptr<ConflictNode> c =
-      ConflictNode::create_node(state, lookahead, r, s);
+      std::make_shared<ConflictNode>(state, lookahead, r, s);
     b_prev->next = c; // insert at the tail.
-    inc_conflict_count(s, state);
+    this->inc_conflict_count(s, state);
 
     return c;
 }
@@ -405,26 +388,25 @@ add_to_conflict_array(int state,
  * Initialize variables when the program starts.
  * Called by function main().
  */
-static void
-init(const Grammar& grammar, std::optional<Queue>& config_queue)
+void
+YAlgorithm::init()
 {
-    states_new = create_state_collection();
-    states_new_array = StateArray::create(); // size == PARSING_TABLE_SIZE
+    this->new_states.states_new = create_state_collection();
+    this->new_states.states_new_array =
+      StateArray::create(); // size == PARSING_TABLE_SIZE
 
-    if (Options::get().use_lalr) {
+    if (this->options.use_lalr) {
         states_inadequate = create_state_no_array();
     }
 
     if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
-        config_queue = Queue(); // for getClosure().
+        this->config_queue = Queue(); // for getClosure().
     }
 
     // for finding same/compatible states fast.
     init_state_hash_tbl();
-    init_start_state(grammar, config_queue);
+    this->init_start_state();
     init_parsing_table();
-
-    ss_count = rr_count = rs_count = 0;
 }
 
 auto
@@ -511,7 +493,9 @@ write_successor_list(std::ostream& os, State& s)
 }
 
 static void
-write_state_conflict_list(std::ostream& os, int state)
+write_state_conflict_list(std::ostream& os,
+                          int state,
+                          const StateArray& states_array)
 {
     if (Options::get().use_remove_unit_production) {
         state = get_actual_state(state);
@@ -521,12 +505,11 @@ write_state_conflict_list(std::ostream& os, int state)
     if (state < 0)
         return;
 
-    if (states_new_array->rr_count[state] == 0 &&
-        states_new_array->rs_count[state] == 0)
+    if (states_array.rr_count[state] == 0 && states_array.rs_count[state] == 0)
         return;
 
-    for (auto& c = states_new_array->conflict_list[state]; c != nullptr;
-         c = c->next) {
+    auto c = states_array.conflict_list[state];
+    for (; c != nullptr; c = c->next) {
         os << c->state << ": ";
         if (c->s > 0) {
             os << "shift/reduce conflict ";
@@ -539,60 +522,56 @@ write_state_conflict_list(std::ostream& os, int state)
     } // end for
 }
 
-static void
-write_grammar_conflict_list(std::ostream& os)
+void
+NewStates::write_grammar_conflict_list(std::ostream& os) const noexcept
 {
-    if (rs_count == 0 && rr_count == 0)
+    if (this->conflicts_count.rs == 0 && this->conflicts_count.rr == 0)
         return;
     os << "Conflicts:";
-    os << "  " << rs_count << " shift/reduce, " << rr_count << " reduce/reduce"
-       << std::endl
+    os << "  " << this->conflicts_count.rs << " shift/reduce, "
+       << this->conflicts_count.rr << " reduce/reduce" << std::endl
        << "\n";
 
     for (int i = 0; i < ParsingTblRows; i++) {
-        if (states_new_array->rs_count[i] > 0) {
-            os << "  state " << i << ": " << states_new_array->rs_count[i]
+        if (this->states_new_array->rs_count[i] > 0) {
+            os << "  state " << i << ": " << this->states_new_array->rs_count[i]
                << " shift/reduce conflict"
-               << ((states_new_array->rs_count[i] == 1) ? "" : "s");
-            if (states_new_array->rr_count[i] > 0) {
-                os << ", " << states_new_array->rr_count[i]
+               << ((this->states_new_array->rs_count[i] == 1) ? "" : "s");
+            if (this->states_new_array->rr_count[i] > 0) {
+                os << ", " << this->states_new_array->rr_count[i]
                    << " reduce/reduce conflict"
-                   << ((states_new_array->rr_count[i] == 1) ? "" : "s");
+                   << ((this->states_new_array->rr_count[i] == 1) ? "" : "s");
             }
             os << std::endl;
-        } else if (states_new_array->rr_count[i] > 0) {
-            os << "  state " << i << ": " << states_new_array->rr_count[i]
+        } else if (this->states_new_array->rr_count[i] > 0) {
+            os << "  state " << i << ": " << this->states_new_array->rr_count[i]
                << " reduce/reduce conflict"
-               << ((states_new_array->rr_count[i] == 1) ? "" : "s")
+               << ((this->states_new_array->rr_count[i] == 1) ? "" : "s")
                << std::endl;
         }
     }
     os << std::endl;
 }
 
-/*
- *  Used when USE_REMOVE_UNIT_PROD is used.
- */
-static void
-write_grammar_conflict_list2(std::ostream& os)
+void
+NewStates::write_grammar_conflict_list2(std::ostream& os) const noexcept
 {
-    int state = 0, diff = 0;
-    int final_rs_count = 0;
-    int final_rr_count = 0;
+    uint32_t final_rs_count = 0;
+    uint32_t final_rr_count = 0;
     const auto& a = states_new_array;
 
-    if (rs_count == 0 && rr_count == 0)
+    if (this->conflicts_count.rs == 0 && this->conflicts_count.rr == 0)
         return;
     os << "Conflicts:";
-    os << "  " << rs_count << " shift/reduce, " << rr_count << " reduce/reduce]"
-       << std::endl
+    os << "  " << this->conflicts_count.rs << " shift/reduce, "
+       << this->conflicts_count.rr << " reduce/reduce]" << std::endl
        << "\n";
 
     for (int i = 0; i < ParsingTblRows; i++) {
         if (!is_reachable_state(i))
             continue;
 
-        state = get_actual_state(i);
+        int state = get_actual_state(i);
 
         if (a->rs_count[i] > 0) {
             os << "  state " << state << ": " << a->rs_count[i]
@@ -613,10 +592,12 @@ write_grammar_conflict_list2(std::ostream& os)
         }
     }
 
-    if ((diff = rs_count - final_rs_count) > 0)
+    int diff = this->conflicts_count.rs - final_rs_count;
+    if (diff > 0)
         os << "  [" << diff << " shift/reduce conflict"
            << ((diff > 1) ? "s" : "") << " in removed states]" << std::endl;
-    if ((diff = rr_count - final_rr_count) > 0)
+    diff = this->conflicts_count.rr - final_rr_count;
+    if (diff > 0)
         os << "  [" << diff << " reduce/reduce conflict"
            << ((diff > 1) ? "s" : "") << " in removed states]" << std::endl;
 
@@ -624,10 +605,13 @@ write_grammar_conflict_list2(std::ostream& os)
 }
 
 static void
-write_state(std::ostream& os, const Grammar& grammar, State& s)
+write_state(std::ostream& os,
+            const Grammar& grammar,
+            const StateArray& states_array,
+            State& s)
 {
     auto& options = Options::get();
-    write_state_conflict_list(os, s.state_no);
+    write_state_conflict_list(os, s.state_no, states_array);
 
     os << "--state " << s.state_no << "-- config count:" << s.config.size()
        << ", core_config count:" << s.core_config_count << std::endl;
@@ -646,18 +630,19 @@ write_state(std::ostream& os, const Grammar& grammar, State& s)
 static void
 write_state_collection(std::ostream& os,
                        const Grammar& grammar,
-                       StateCollection* c)
+                       const NewStates& new_states)
 {
-    os << "==State Collection: (count=" << c->state_count << ")" << std::endl;
+    os << "==State Collection: (count=" << new_states.states_new->state_count
+       << ")" << std::endl;
 
-    State* s = c->states_head;
+    State* s = new_states.states_new->states_head;
     while (s != nullptr) {
-        write_state(os, grammar, *s);
+        write_state(os, grammar, *new_states.states_new_array, *s);
         s = s->next;
         os << std::endl;
     }
 
-    if (c->state_count == 0)
+    if (new_states.states_new->state_count == 0)
         os << "(empty)" << std::endl;
     os << std::endl;
 }
@@ -1785,12 +1770,10 @@ is_compatible_state_bc(const State* s) -> bool
 auto
 is_compatible_states(const State* s1, const State* s2) -> bool
 {
-
     if (!has_common_core(s1, s2))
         return false;
 
-    const int count = s1->core_config_count;
-    if (count == 1)
+    if (s1->core_config_count == 1)
         return true;
 
     // now check context to see if s1 and s2 are compatible.
@@ -1808,15 +1791,15 @@ is_compatible_states(const State* s1, const State* s2) -> bool
  * Used by combineCompatibleStates() and propagateContextChange().
  */
 void
-update_state_parsing_tbl_entry(const Grammar& grammar, const State* s)
+YAlgorithm::update_state_parsing_tbl_entry(const State& s)
 {
-    for (const auto& config : s->config) {
+    for (const auto& config : s.config) {
         const SymbolTblNode* scanned_symbol = get_scanned_symbol(config);
 
         // for final config and empty reduction.
         if (is_final_configuration(grammar, config) ||
             scanned_symbol->symbol->empty()) {
-            insert_reduction_to_parsing_table(grammar, config, s->state_no);
+            this->insert_reduction_to_parsing_table(config, s.state_no);
         }
     }
 }
@@ -1868,22 +1851,19 @@ find_similar_core_config(const State* t,
  *     }
  */
 void
-propagate_context_change(const Grammar& grammar,
-                         std::optional<Queue>& config_queue,
-                         const State* s)
+YAlgorithm::propagate_context_change(const State& s)
 {
-    int config_index = 0;
-
-    if (s->successor_list.empty())
+    if (s.successor_list.empty())
         return;
 
-    for (State* t : s->successor_list) {
+    int config_index = 0;
+    for (State* t : s.successor_list) {
         const SymbolTblNode* trans_symbol = t->trans_symbol->snode;
         bool is_changed = false;
 
-        for (const auto& config : s->config) {
+        for (const auto& config : s.config) {
             Configuration* c = config; // bug removed: i -> j. 3-4-2008.
-            if (is_final_configuration(grammar, c))
+            if (is_final_configuration(this->grammar, c))
                 continue;
             // if not a successor on symbol, next.
             if (trans_symbol != get_scanned_symbol(c))
@@ -1904,9 +1884,9 @@ propagate_context_change(const Grammar& grammar,
                 if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
                     // config_queue->clear();
                     config_queue->push(config_index);
-                    get_config_successors(grammar, *config_queue, t);
+                    get_config_successors(this->grammar, *config_queue, t);
                 } else {
-                    get_successor_for_config(grammar, t, d);
+                    get_successor_for_config(this->grammar, t, d);
                 }
             }
         } // end of for
@@ -1914,11 +1894,11 @@ propagate_context_change(const Grammar& grammar,
         if (is_changed) {
             if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
             } else {
-                combine_compatible_config(
-                  t, Options::get().debug_comb_comp_config);
+                combine_compatible_config(t,
+                                          this->options.debug_comb_comp_config);
             }
-            update_state_parsing_tbl_entry(grammar, t);
-            propagate_context_change(grammar, config_queue, t);
+            this->update_state_parsing_tbl_entry(*t);
+            this->propagate_context_change(*t);
         }
     }
 }
@@ -1929,24 +1909,22 @@ propagate_context_change(const Grammar& grammar,
  * NOTE: s_dest is from states_new.
  */
 auto
-combine_compatible_states(const Grammar& grammar,
-                          std::optional<Queue>& config_queue,
-                          State* s_dest,
-                          const State* s_src) -> bool
+YAlgorithm::combine_compatible_states(State& s_dest, const State& s_src) -> bool
 {
     bool is_changed = false;
-    for (int i = 0; i < s_dest->core_config_count; i++) {
-        if (combine_context(s_dest->config[i]->context,
-                            s_src->config[i]->context)) {
+    for (int i = 0; i < s_dest.core_config_count; i++) {
+        if (combine_context(s_dest.config[i]->context,
+                            s_src.config[i]->context)) {
             is_changed = true;
 
             if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
-                // config_queue->clear();
-                config_queue->push(i);
-                get_config_successors(grammar, *config_queue, s_dest);
+                // this->config_queue->clear();
+                this->config_queue->push(i);
+                get_config_successors(this->grammar, *config_queue, &s_dest);
             } else {
 
-                get_successor_for_config(grammar, s_dest, s_dest->config[i]);
+                get_successor_for_config(
+                  this->grammar, &s_dest, s_dest.config[i]);
             }
         }
     }
@@ -1955,11 +1933,11 @@ combine_compatible_states(const Grammar& grammar,
     if (is_changed) {
         if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
         } else {
-            combine_compatible_config(s_dest,
+            combine_compatible_config(&s_dest,
                                       Options::get().debug_comb_comp_config);
         }
-        update_state_parsing_tbl_entry(grammar, s_dest);
-        propagate_context_change(grammar, config_queue, s_dest);
+        this->update_state_parsing_tbl_entry(s_dest);
+        this->propagate_context_change(s_dest);
     }
     return is_changed;
 }
@@ -1976,14 +1954,14 @@ combine_compatible_states(const Grammar& grammar,
  * just compare them by pairs.
  */
 auto
-is_same_state(const State* s1, const State* s2) -> bool
+is_same_state(const State& s1, const State& s2) -> bool
 {
-    if (s1->core_config_count != s2->core_config_count) {
+    if (s1.core_config_count != s2.core_config_count) {
         return false;
     }
 
-    for (int i = 0; i < s1->core_config_count; i++) {
-        if (!is_same_config(s1->config[i], s2->config[i]))
+    for (int i = 0; i < s1.core_config_count; i++) {
+        if (!is_same_config(s1.config[i], s2.config[i]))
             return false;
     }
 
@@ -2015,20 +1993,19 @@ create_state() -> State*
 }
 
 void
-insert_reduction_to_parsing_table(const Grammar& grammar,
-                                  const Configuration* c,
-                                  int state_no)
+YAlgorithm::insert_reduction_to_parsing_table(const Configuration* c,
+                                              const int state_no)
 {
-    if (grammar.rules[c->ruleID]->nLHS->snode ==
-        grammar.goal_symbol->snode) { // accept, action = "a";
+    if (this->grammar.rules[c->ruleID]->nLHS->snode ==
+        this->grammar.goal_symbol->snode) { // accept, action = "a";
         for (const SymbolNode* a = c->context->nContext; a != nullptr;
              a = a->next) {
-            insert_action(grammar, a->snode, state_no, CONST_ACC);
+            this->insert_action(a->snode, state_no, CONST_ACC);
         }
     } else { // reduct, action = "r";
         for (const SymbolNode* a = c->context->nContext; a != nullptr;
              a = a->next) {
-            insert_action(grammar, a->snode, state_no, (-1) * c->ruleID);
+            this->insert_action(a->snode, state_no, (-1) * c->ruleID);
         }
     }
 }
@@ -2060,16 +2037,16 @@ add_successor(State* s, State* n)
  * This can be changed to macro later.
  */
 void
-insert_state_to_pm(State* s)
+NewStates::insert_state_to_pm(State* s) noexcept
 {
-    s->state_no = states_new->state_count;
+    s->state_no = this->states_new->state_count;
 
-    states_new->add_state2(s);
-    states_new_array->add_state(s);
+    this->states_new->add_state2(s);
+    this->states_new_array->add_state(s);
 
     // expand size of parsing table array if needed.
-    while (states_new->state_count >= PARSING_TABLE_SIZE) {
-        expand_parsing_table();
+    while (this->states_new->state_count >= PARSING_TABLE_SIZE) {
+        expand_parsing_table(*this->states_new_array);
     }
 }
 
@@ -2095,10 +2072,8 @@ insert_state_to_pm(State* s)
  *
  */
 auto
-add_transition_states2_new(const Grammar& grammar,
-                           std::optional<Queue>& config_queue,
-                           StateCollection* coll,
-                           State* src_state) -> bool
+YAlgorithm::add_transition_states2_new(StateCollection* coll, State* src_state)
+  -> bool
 {
     bool src_state_changed = false;
     State* s = coll->states_head;
@@ -2110,27 +2085,22 @@ add_transition_states2_new(const Grammar& grammar,
         // Two alternatives. search_state_hash_tbl is slightly
         // faster. if ((os = isExistingState(states_new, s, &
         // is_compatible)) == nullptr) {
-        int is_compatible = 0;
-        State* os =
-          search_state_hash_tbl(grammar, config_queue, s, &is_compatible);
+        bool is_compatible = false;
+        State* os = this->search_state_hash_tbl(*s, &is_compatible);
         if (os == nullptr) {
-            insert_state_to_pm(s);
+            this->new_states.insert_state_to_pm(s);
 
             // Add this new state as successor to src_state.
             add_successor(src_state, s);
 
             // insert shift.
-            insert_action(grammar,
-                          s->trans_symbol->snode,
-                          src_state->state_no,
-                          s->state_no);
+            this->insert_action(
+              s->trans_symbol->snode, src_state->state_no, s->state_no);
 
         } else { // same or compatible with an existing state.
-            // insert shift.
-            insert_action(grammar,
-                          os->trans_symbol->snode,
-                          src_state->state_no,
-                          os->state_no);
+                 // insert shift.
+            this->insert_action(
+              os->trans_symbol->snode, src_state->state_no, os->state_no);
 
             add_successor(src_state, os);
 
@@ -2163,18 +2133,18 @@ add_transition_states2_new(const Grammar& grammar,
  * and add transition to parsing table as well.
  */
 void
-State::transition(const Grammar& grammar, std::optional<Queue>& config_queue)
+YAlgorithm::state_transition(State& state)
 {
     StateCollection* coll = create_state_collection();
 
-    for (const auto& config : this->config) {
+    for (const auto& config : state.config) {
         Configuration* c = config;
-        if (is_final_configuration(grammar, c)) {
-            insert_reduction_to_parsing_table(grammar, c, this->state_no);
+        if (is_final_configuration(this->grammar, c)) {
+            this->insert_reduction_to_parsing_table(c, state.state_no);
         } else { // do transit operation.
             SymbolTblNode* scanned_symbol = get_scanned_symbol(c);
             if (scanned_symbol->symbol->empty()) { // insert empty reduction.
-                insert_reduction_to_parsing_table(grammar, c, this->state_no);
+                this->insert_reduction_to_parsing_table(c, state.state_no);
                 continue;
             }
             State* new_state =
@@ -2187,7 +2157,7 @@ State::transition(const Grammar& grammar, std::optional<Queue>& config_queue)
                 coll->add_state2(new_state);
             }
             // create a new core config for new_state.
-            Configuration* new_config = create_config(grammar, -1, 0, 1);
+            Configuration* new_config = create_config(this->grammar, -1, 0, 1);
 
             new_config->owner = new_state;
             copy_config(new_config, c);
@@ -2196,21 +2166,20 @@ State::transition(const Grammar& grammar, std::optional<Queue>& config_queue)
             if (new_config->nMarker != nullptr)
                 new_config->nMarker = new_config->nMarker->next;
 
-            add_core_config2_state(grammar, new_state, new_config);
+            add_core_config2_state(this->grammar, new_state, new_config);
         }
-    } // end for
+    }
 
     if (coll->state_count > 0) {
-        bool src_state_changed =
-          add_transition_states2_new(grammar, config_queue, coll, this);
+        bool src_state_changed = this->add_transition_states2_new(coll, &state);
         if (src_state_changed) {
-            propagate_context_change(grammar, config_queue, this);
+            this->propagate_context_change(state);
         }
     }
 }
 
 auto
-is_compatible_config(Configuration* c1, Configuration* c2) -> bool
+is_compatible_config(const Configuration* c1, const Configuration* c2) -> bool
 {
     if (c1 == nullptr || c2 == nullptr)
         return false;
@@ -2228,7 +2197,7 @@ is_compatible_config(Configuration* c1, Configuration* c2) -> bool
  * Returns true if any change is made.
  */
 auto
-combine_context(Context* c_dest, Context* c_src) -> bool
+combine_context(Context* c_dest, const Context* c_src) -> bool
 {
     bool is_changed = false;
     if (c_dest == nullptr || c_src == nullptr)
@@ -2246,11 +2215,10 @@ combine_context(Context* c_dest, Context* c_src) -> bool
 /*
  * The main function to generate parsing machine.
  */
-static void
-generate_parsing_machine(const Grammar& grammar,
-                         std::optional<Queue>& config_queue)
+void
+YAlgorithm::generate_parsing_machine()
 {
-    State* new_state = states_new->states_head;
+    State* new_state = this->new_states.states_new->states_head;
 
     if (Options::get().debug_gen_parsing_machine) {
         grammar.fp_v << std::endl
@@ -2259,7 +2227,7 @@ generate_parsing_machine(const Grammar& grammar,
 
     while (new_state != nullptr) {
         if (Options::get().debug_gen_parsing_machine) {
-            grammar.fp_v << states_new->state_count
+            grammar.fp_v << this->new_states.states_new->state_count
                          << " states, current state is " << new_state->state_no
                          << std::endl;
         }
@@ -2268,19 +2236,19 @@ generate_parsing_machine(const Grammar& grammar,
                                config_queue); // get closure of this state.
 
         // get successor states and add them to states_new.
-        new_state->transition(grammar, config_queue);
+        this->state_transition(*new_state);
 
         new_state = new_state->next; // point to next unprocessed state.
     }
 
-    ParsingTblRows = states_new->state_count;
-    n_state_opt1 = states_new->state_count;
+    ParsingTblRows = this->new_states.states_new->state_count;
+    n_state_opt1 = this->new_states.states_new->state_count;
 }
 
 static void
-dump_state_collections(const Grammar& grammar)
+dump_state_collections(const Grammar& grammar, const NewStates& new_states)
 {
-    write_state_collection(grammar.fp_v, grammar, states_new);
+    write_state_collection(grammar.fp_v, grammar, new_states);
 }
 
 /////////////////////////////////////////////////////////////////
@@ -2310,18 +2278,14 @@ init_parsing_table()
 }
 
 void
-expand_parsing_table()
+expand_parsing_table(StateArray& states_new_array)
 {
     size_t total_cells = PARSING_TABLE_SIZE * ParsingTblCols;
     ParsingTable = std::vector<int>(2 * total_cells, 0);
     PARSING_TABLE_SIZE = PARSING_TABLE_SIZE *
                          2; // TODO: who cares about thread safety anyways ? :p
 
-    StateArray::expand(states_new_array.get(), PARSING_TABLE_SIZE);
-
-    // *fp_v << "expand_parsing_table message: " ;
-    // *fp_v << "expand parsing table size to " <<
-    //  PARSING_TABLE_SIZE<< std::endl ;
+    StateArray::expand(&states_new_array, PARSING_TABLE_SIZE);
 }
 
 auto
@@ -2381,12 +2345,8 @@ get_action(symbol_type symbol_type, int col, int row) -> std::pair<char, int>
  * in lane_tracing.c.
  */
 void
-insert_action(const Grammar& grammar,
-              SymbolTblNode* lookahead,
-              int row,
-              int state_dest)
+LR0::insert_action(SymbolTblNode* lookahead, int row, int state_dest)
 {
-    const auto& options = Options::get();
     int reduce = 0, shift = 0; // for shift/reduce conflict.
     struct TerminalProperty *tp_s = nullptr, *tp_r = nullptr;
 
@@ -2427,7 +2387,7 @@ insert_action(const Grammar& grammar,
         // std::cout << "r/r conflict: [" <<
         //         row << ", " << *lookahead->symbol << "] - " <<
         //         ParsingTable.at(cell)<< " v.s. " << state_dest << std::endl;
-        std::shared_ptr<Conflict> c = add_to_conflict_array(
+        std::shared_ptr<Conflict> c = this->new_states.add_to_conflict_array(
           row, lookahead, ParsingTable.at(cell), state_dest);
 
         if (state_dest > ParsingTable.at(cell))
@@ -2438,7 +2398,7 @@ insert_action(const Grammar& grammar,
         }
 
         // include r/r conflict for inadequate states.
-        if (options.use_lalr) {
+        if (this->options.use_lalr) {
             add_state_no_array(states_inadequate, row);
         }
 
@@ -2447,7 +2407,7 @@ insert_action(const Grammar& grammar,
 
     // shift/shift conflict.
     if (ParsingTable.at(cell) > 0 && state_dest > 0) {
-        if (Options::get().show_ss_conflicts) {
+        if (this->options.show_ss_conflicts) {
             std::cerr << "warning: shift/shift conflict: " << state_dest
                       << " v.s. " << ParsingTable.at(cell) << " @ (" << row
                       << ", " << *lookahead->symbol << ")" << std::endl;
@@ -2455,7 +2415,7 @@ insert_action(const Grammar& grammar,
         // exit(1);
         // ParsingTable.at(cell) = state_dest; // change causes
         // infinite loop.
-        ss_count++;
+        this->new_states.conflicts_count.ss++;
         return;
     }
 
@@ -2468,15 +2428,15 @@ insert_action(const Grammar& grammar,
     }
 
     tp_s = lookahead->TP;
-    if (grammar.rules.at((-1) * reduce)->lastTerminal != nullptr)
-        tp_r = grammar.rules.at((-1) * reduce)->lastTerminal->TP;
+    if (this->grammar.rules.at((-1) * reduce)->lastTerminal != nullptr)
+        tp_r = this->grammar.rules.at((-1) * reduce)->lastTerminal->TP;
 
     if (tp_s == nullptr || tp_r == nullptr || tp_s->precedence == 0 ||
         tp_r->precedence == 0) {
         // std::cout << "s/r conflict: [" <<
         //         row << ", " << *lookahead->symbol << "] - " <<
         //         ParsingTable.at(cell) << " v.s. " << state_dest << std::endl;
-        std::shared_ptr<Conflict> c = add_to_conflict_array(
+        std::shared_ptr<Conflict> c = new_states.add_to_conflict_array(
           row, lookahead, ParsingTable.at(cell), state_dest);
 
         ParsingTable.at(cell) = shift; // use shift over reduce by default.
@@ -2488,7 +2448,7 @@ insert_action(const Grammar& grammar,
 
         // include s/r conflicts not handled by
         // precedence/associativity.
-        if (options.use_lalr) {
+        if (this->options.use_lalr) {
             add_state_no_array(states_inadequate, row);
         }
 
@@ -2506,7 +2466,7 @@ insert_action(const Grammar& grammar,
 
     // include s/r conflicts not handled by
     // precedence/associativity.
-    if (options.use_lalr) {
+    if (this->options.use_lalr) {
         add_state_no_array(states_inadequate, row);
     }
 
@@ -2576,29 +2536,29 @@ print_parsing_table(std::ostream& os, const Grammar& grammar)
  * Assumption: grammar.rules[0] is the goal production.
  */
 void
-init_start_state(const Grammar& grammar, std::optional<Queue>& config_queue)
+YAlgorithm::init_start_state()
 {
-    int is_compatible = 0;
-    State* state0 = create_state();
-    state0->state_no = 0;
+    State& state0 = *create_state();
+    state0.state_no = 0;
 
     // ruleID = 0, marker = 0, isCoreConfig = 1.
-    state0->config.push_back(create_config(grammar, 0, 0, 1));
-    state0->core_config_count = 1;
+    state0.config.push_back(create_config(this->grammar, 0, 0, 1));
+    state0.core_config_count = 1;
 
-    state0->config[0]->owner = state0;
-    state0->config[0]->context->context_count = 1;
+    state0.config[0]->owner = &state0;
+    state0.config[0]->context->context_count = 1;
     hash_tbl_insert(STR_END);
-    state0->config[0]->context->nContext =
+    state0.config[0]->context->nContext =
       SymbolNode::create(hash_tbl_find(STR_END));
 
     // writeState(state0);
 
-    states_new->add_state2(state0);
-    states_new_array->add_state(state0);
+    this->new_states.states_new->add_state2(&state0);
+    this->new_states.states_new_array->add_state(&state0);
 
     // insert to state hash table as the side effect of search.
-    search_state_hash_tbl(grammar, config_queue, state0, &is_compatible);
+    bool is_compatible = false;
+    this->search_state_hash_tbl(state0, &is_compatible);
 }
 
 /*
@@ -2678,11 +2638,11 @@ get_final_state_list(const Grammar& grammar)
 }
 
 static void
-get_avg_config_count(std::ostream& os)
+get_avg_config_count(std::ostream& os, const StateCollection& states_new)
 {
     constexpr size_t LINE_LENGTH = 20;
     size_t i = 0, sum = 0;
-    const State* a = states_new->states_head;
+    const State* a = states_new.states_head;
     size_t max = a->config.size();
     size_t min = a->config.size();
     os << std::endl
@@ -2701,12 +2661,13 @@ get_avg_config_count(std::ostream& os)
     }
     os << std::endl;
     os << "Average configurations per state: " << std::setprecision(2)
-       << ((double)sum / states_new->state_count) << " (min: " << min
+       << ((double)sum / states_new.state_count) << " (min: " << min
        << ", max: " << max << ')' << std::endl;
 }
 
 static void
 show_state_config_info(std::ostream& os,
+                       const StateCollection& states_new,
                        const std::optional<Queue>& config_queue)
 {
     if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
@@ -2714,14 +2675,15 @@ show_state_config_info(std::ostream& os,
     } else {
         os << xx << " states in total." << std::endl;
         os << "before combine: total cfg: " << yy << ", max cfg: " << zz
-           << ", cfg/state: " << std::setprecision(2) << ((double)yy) / xx
+           << ", cfg/state: " << std::setprecision(2)
+           << static_cast<double>(yy) / static_cast<double>(xx)
            << std::endl; // before combineCompatibleConfig.
         os << "after combine: total cfg: " << yyy << ", max cfg: " << zzz
-           << ", cfg/state: " << std::setprecision(2) << ((double)yyy) / xx
-           << std::endl;
+           << ", cfg/state: " << std::setprecision(2)
+           << static_cast<double>(yyy) / static_cast<double>(xx) << std::endl;
     }
 
-    get_avg_config_count(os);
+    get_avg_config_count(os, states_new);
     state_hash_tbl_dump(os);
 }
 
@@ -2747,30 +2709,32 @@ print_size()
 }
 
 static void
-show_conflict_count()
+show_conflict_count(const ConflictsCount& conflicts_count)
 {
     // no conflicts.
-    if (rs_count == 0 && rr_count == 0 && ss_count == 0)
+    if (conflicts_count.rs == 0 && conflicts_count.rr == 0 &&
+        conflicts_count.ss == 0)
         return;
 
     // no r/r conflicts, and s/r conflicts number is
     // expected.
-    if (rs_count == expected_sr_conflict && rr_count == 0 && ss_count == 0)
+    if (conflicts_count.rs == conflicts_count.expected_sr_conflict &&
+        conflicts_count.rr == 0 && conflicts_count.ss == 0)
         return;
 
     // otherwise, report conflicts.
     std::cout << hyacc_filename << ": conflicts: ";
-    if (rs_count > 0) {
-        std::cout << rs_count << " shift/reduce";
-        if (rr_count > 0)
-            std::cout << ", " << rr_count << " reduce/reduce";
-    } else if (rr_count > 0) {
-        std::cout << rr_count << " reduce/reduce";
+    if (conflicts_count.rs > 0) {
+        std::cout << conflicts_count.rs << " shift/reduce";
+        if (conflicts_count.rr > 0)
+            std::cout << ", " << conflicts_count.rr << " reduce/reduce";
+    } else if (conflicts_count.rr > 0) {
+        std::cout << conflicts_count.rr << " reduce/reduce";
     }
     std::cout << std::endl;
-    if (ss_count > 0)
-        std::cout << "warning: " << ss_count << " shift/shift conflicts"
-                  << std::endl;
+    if (conflicts_count.ss > 0)
+        std::cout << "warning: " << conflicts_count.ss
+                  << " shift/shift conflicts" << std::endl;
 }
 
 /* Show statistics of the grammar and it's parsing machine.
@@ -2778,15 +2742,16 @@ show_conflict_count()
 static void
 show_stat(std::ostream& os,
           const Grammar& grammar,
+          const NewStates& new_states,
           const std::optional<Queue>& config_queue)
 {
     auto& options = Options::get();
     if (!options.use_verbose)
         return;
 
-    write_state_transition_list(os, grammar);
+    write_state_transition_list(os, grammar, new_states);
     if (options.show_state_config_count)
-        show_state_config_info(os, config_queue);
+        show_state_config_info(os, *new_states.states_new, config_queue);
     if (options.show_actual_state_array)
         write_actual_state_array(grammar.fp_v);
 
@@ -2819,12 +2784,14 @@ show_stat(std::ostream& os,
     }
 
     // conflicts summary.
-    os << rs_count << " shift/reduce conflict" << ((rs_count > 1) ? "s" : "")
-       << ", " << rr_count << " reduce/reduce conflict"
-       << ((rr_count > 1) ? "s" : "") << std::endl;
-    if (options.use_remove_unit_production && ss_count > 0) {
-        os << ss_count << " shift/shift conflict" << ((ss_count > 1) ? "s" : "")
-           << std::endl
+    os << new_states.conflicts_count.rs << " shift/reduce conflict"
+       << ((new_states.conflicts_count.rs > 1) ? "s" : "") << ", "
+       << new_states.conflicts_count.rr << " reduce/reduce conflict"
+       << ((new_states.conflicts_count.rr > 1) ? "s" : "") << std::endl;
+    if (options.use_remove_unit_production &&
+        new_states.conflicts_count.ss > 0) {
+        os << new_states.conflicts_count.ss << " shift/shift conflict"
+           << ((new_states.conflicts_count.ss > 1) ? "s" : "") << std::endl
            << "\n";
     }
 
@@ -2956,10 +2923,13 @@ write_parsing_tbl_row(std::ostream& os, int state)
 }
 
 static void
-write_state_info(std::ostream& os, const Grammar& grammar, const State& s)
+write_state_info(std::ostream& os,
+                 const Grammar& grammar,
+                 const StateArray& states_array,
+                 const State& s)
 {
     const auto& options = Options::get();
-    write_state_conflict_list(os, s.state_no);
+    write_state_conflict_list(os, s.state_no, states_array);
 
     if (s.PASS_THRU == 1u) {
         os << "[PASS_THRU]" << std::endl;
@@ -2989,16 +2959,16 @@ write_state_info(std::ostream& os, const Grammar& grammar, const State& s)
 static void
 write_state_collection_info(std::ostream& os,
                             const Grammar& grammar,
-                            StateCollection* c)
+                            const NewStates& new_states)
 {
     os << std::endl << "\n";
-    State* s = c->states_head;
+    State* s = new_states.states_new->states_head;
     while (s != nullptr) {
-        write_state_info(os, grammar, *s);
+        write_state_info(os, grammar, *new_states.states_new_array, *s);
         s = s->next;
     }
 
-    if (c->state_count == 0)
+    if (new_states.states_new->state_count == 0)
         os << "(empty)" << std::endl;
     os << std::endl;
 }
@@ -3020,7 +2990,9 @@ write_state_info_from_parsing_tbl(std::ostream& os)
  * file.
  */
 void
-write_state_transition_list(std::ostream& os, const Grammar& grammar)
+write_state_transition_list(std::ostream& os,
+                            const Grammar& grammar,
+                            const NewStates& new_states)
 {
     if (!Options::get().show_state_transition_list)
         return;
@@ -3028,21 +3000,21 @@ write_state_transition_list(std::ostream& os, const Grammar& grammar)
     if (Options::get().use_remove_unit_production) {
         // write from the parsing table.
         write_state_info_from_parsing_tbl(os);
-        write_grammar_conflict_list2(os);
+        new_states.write_grammar_conflict_list2(os);
     } else {
         // write from the state objects.
-        write_state_collection_info(os, grammar, states_new);
-        write_grammar_conflict_list(os);
+        write_state_collection_info(os, grammar, new_states);
+        new_states.write_grammar_conflict_list(os);
     }
 }
 
 /*
  * LR1 function.
  */
-static auto
-lr1(const FileNames& files) -> int
+auto
+lr1(const FileNames& files, const Options& options, NewStates& new_states)
+  -> int
 {
-    const auto& options = Options::get();
     std::optional<LRkPTArray> lrk_pt_array = std::nullopt;
     std::optional<Queue> config_queue = std::nullopt;
     hash_tbl_init();
@@ -3058,29 +3030,32 @@ lr1(const FileNames& files) -> int
         fp_v << "/* Input file: " << hyacc_filename << " */" << std::endl;
     }
 
-    GetYaccGrammarOutput yacc_grammar_output =
-      get_yacc_grammar(hyacc_filename, fp_v);
+    GetYaccGrammarOutput yacc_grammar_output = get_yacc_grammar(
+      hyacc_filename, fp_v, new_states.conflicts_count.expected_sr_conflict);
+
+    YAlgorithm y_algorithm(
+      yacc_grammar_output.grammar, options, new_states, config_queue);
 
     if (options.debug_hash_tbl) {
         hash_tbl_dump(fp_v);
     }
 
-    init(yacc_grammar_output.grammar, config_queue);
+    y_algorithm.init();
     if (options.show_grammar) {
-        yacc_grammar_output.grammar.write(fp_v, true);
+        y_algorithm.grammar.write(fp_v, true);
     }
 
-    generate_parsing_machine(yacc_grammar_output.grammar, config_queue);
+    y_algorithm.generate_parsing_machine();
 
     if (options.show_parsing_tbl)
-        print_parsing_table(fp_v, yacc_grammar_output.grammar);
+        print_parsing_table(fp_v, y_algorithm.grammar);
 
     if (options.use_graphviz && !options.use_remove_unit_production) {
-        gen_graphviz_input(yacc_grammar_output.grammar, files.y_gviz);
+        gen_graphviz_input(y_algorithm.grammar, files.y_gviz);
     } /*O0,O1*/
 
     if (options.use_remove_unit_production) {
-        remove_unit_production(yacc_grammar_output.grammar);
+        y_algorithm.remove_unit_production();
         if (options.show_parsing_tbl)
             fp_v << std::endl << "AFTER REMOVING UNIT PRODUCTION:\n";
         if (options.show_total_parsing_tbl_after_rm_up) {
@@ -3089,41 +3064,41 @@ lr1(const FileNames& files) -> int
                  << "tire pars" << std::endl
                  << "g table ";
             fp_v << "after removing unit productions--" << std::endl;
-            print_parsing_table(fp_v, yacc_grammar_output.grammar);
+            print_parsing_table(fp_v, y_algorithm.grammar);
         }
 
         if (options.show_parsing_tbl)
-            print_final_parsing_table(yacc_grammar_output.grammar);
+            print_final_parsing_table(y_algorithm.grammar);
         if (options.use_remove_repeated_states) {
-            further_optimization(yacc_grammar_output.grammar);
+            further_optimization(y_algorithm.grammar);
             if (options.show_parsing_tbl) {
                 fp_v << std::endl << "AFTER REMOVING REPEATED STATES:\n";
-                print_final_parsing_table(yacc_grammar_output.grammar);
+                print_final_parsing_table(y_algorithm.grammar);
             }
         }
         get_actual_state_no(); /* update actual_state_no[].
                                 */
         if (options.show_parsing_tbl)
-            print_condensed_final_parsing_table(yacc_grammar_output.grammar);
+            print_condensed_final_parsing_table(y_algorithm.grammar);
         if (options.show_grammar) {
             fp_v << std::endl
                  << "--Grammar after remov" << std::endl
                  << "g " << std::endl
                  << "it ";
-            yacc_grammar_output.grammar.write(fp_v, false);
+            y_algorithm.grammar.write(fp_v, false);
         }
         if (options.use_graphviz) {
-            gen_graphviz_input2(yacc_grammar_output.grammar, files.y_gviz);
+            gen_graphviz_input2(y_algorithm.grammar, files.y_gviz);
         } /*O2,O3*/
     }
-    get_final_state_list(yacc_grammar_output.grammar);
+    get_final_state_list(y_algorithm.grammar);
 
     if (options.use_generate_compiler)
         generate_compiler(
           yacc_grammar_output, lrk_pt_array, hyacc_filename, files);
 
-    show_stat(fp_v, yacc_grammar_output.grammar, config_queue);
-    show_conflict_count();
+    show_stat(fp_v, y_algorithm.grammar, new_states, config_queue);
+    show_conflict_count(new_states.conflicts_count);
 
     if (options.use_verbose)
         fp_v.close();
@@ -3131,7 +3106,7 @@ lr1(const FileNames& files) -> int
 }
 
 static auto
-lr0(const FileNames& files) -> int
+lr0(const FileNames& files, NewStates& new_states) -> int
 {
     const auto& options = Options::get();
     std::optional<Queue> config_queue = std::nullopt;
@@ -3149,35 +3124,37 @@ lr0(const FileNames& files) -> int
         fp_v << "/* Input file: " << hyacc_filename << " */" << std::endl;
     }
 
-    GetYaccGrammarOutput yacc_grammar_output =
-      get_yacc_grammar(hyacc_filename, fp_v);
+    GetYaccGrammarOutput yacc_grammar_output = get_yacc_grammar(
+      hyacc_filename, fp_v, new_states.conflicts_count.expected_sr_conflict);
 
     if (options.debug_hash_tbl) {
         hash_tbl_dump(fp_v);
     }
 
-    init(yacc_grammar_output.grammar, config_queue);
+    LaneTracing lane_tracing_algorithm(
+      yacc_grammar_output.grammar, options, new_states, config_queue);
+    lane_tracing_algorithm.init();
     if (options.show_grammar) {
-        yacc_grammar_output.grammar.write(fp_v, true);
+        lane_tracing_algorithm.grammar.write(fp_v, true);
     }
 
-    generate_lr0_parsing_machine(yacc_grammar_output.grammar, *config_queue); //
+    lane_tracing_algorithm.generate_lr0_parsing_machine(*config_queue);
 
     std::optional<LRkPTArray> lrk_pt_array = std::nullopt;
     if (options.use_lalr) {
-        lrk_pt_array = lane_tracing(yacc_grammar_output.grammar, config_queue);
+        lrk_pt_array = lane_tracing_algorithm.lane_tracing();
         // outputParsingTable_LALR();
     }
 
     if (options.show_parsing_tbl)
-        print_parsing_table(fp_v, yacc_grammar_output.grammar);
+        print_parsing_table(fp_v, lane_tracing_algorithm.grammar);
 
     if (options.use_graphviz && !options.use_remove_unit_production) {
-        gen_graphviz_input(yacc_grammar_output.grammar, files.y_gviz);
+        gen_graphviz_input(lane_tracing_algorithm.grammar, files.y_gviz);
     } /*O0,O1*/
 
     if (options.use_remove_unit_production) {
-        remove_unit_production(yacc_grammar_output.grammar);
+        lane_tracing_algorithm.remove_unit_production();
         if (options.show_parsing_tbl)
             fp_v << std::endl << "AFTER REMOVING UNIT PRODUCTION:\n";
         if (options.show_total_parsing_tbl_after_rm_up) {
@@ -3186,41 +3163,41 @@ lr0(const FileNames& files) -> int
                  << "tire pars" << std::endl
                  << "g table ";
             fp_v << "after removing unit productions--" << std::endl;
-            print_parsing_table(fp_v, yacc_grammar_output.grammar);
+            print_parsing_table(fp_v, lane_tracing_algorithm.grammar);
         }
 
         if (options.show_parsing_tbl)
-            print_final_parsing_table(yacc_grammar_output.grammar);
+            print_final_parsing_table(lane_tracing_algorithm.grammar);
         if (options.use_remove_repeated_states) {
-            further_optimization(yacc_grammar_output.grammar);
+            further_optimization(lane_tracing_algorithm.grammar);
             if (options.show_parsing_tbl) {
                 fp_v << std::endl << "AFTER REMOVING REPEATED STATES:\n";
-                print_final_parsing_table(yacc_grammar_output.grammar);
+                print_final_parsing_table(lane_tracing_algorithm.grammar);
             }
         }
         get_actual_state_no(); /* update actual_state_no[].
                                 */
         if (options.show_parsing_tbl)
-            print_condensed_final_parsing_table(yacc_grammar_output.grammar);
+            print_condensed_final_parsing_table(lane_tracing_algorithm.grammar);
         if (options.show_grammar) {
             fp_v << std::endl
                  << "--Grammar after remov" << std::endl
                  << "g " << std::endl
                  << "it ";
-            yacc_grammar_output.grammar.write(fp_v, false);
+            lane_tracing_algorithm.grammar.write(fp_v, false);
         }
         if (options.use_graphviz) {
-            gen_graphviz_input2(yacc_grammar_output.grammar, files.y_gviz);
+            gen_graphviz_input2(lane_tracing_algorithm.grammar, files.y_gviz);
         } /*O2,O3*/
     }
-    get_final_state_list(yacc_grammar_output.grammar);
+    get_final_state_list(lane_tracing_algorithm.grammar);
 
     if (options.use_generate_compiler)
         generate_compiler(
           yacc_grammar_output, lrk_pt_array, hyacc_filename, files);
 
-    show_stat(fp_v, yacc_grammar_output.grammar, config_queue);
-    show_conflict_count();
+    show_stat(fp_v, lane_tracing_algorithm.grammar, new_states, config_queue);
+    show_conflict_count(new_states.conflicts_count);
 
     if (options.use_lr_k) {
         std::cout << "Max K in LR(k): " << MAX_K << std::endl;
@@ -3253,10 +3230,11 @@ main(int argc, const char* argv[]) -> int
         infile_index = get_options(args, options, &files);
         hyacc_filename = args[infile_index];
 
+        NewStates new_states{};
         if (options.use_lr0) {
-            lr0(files);
+            lr0(files, new_states);
         } else {
-            lr1(files);
+            lr1(files, options, new_states);
         }
 
         if (false) { // for reading memory.

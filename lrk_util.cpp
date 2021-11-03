@@ -861,7 +861,7 @@ lrk_thead_in_list(List* t, SymbolList new_list) -> bool
     }
 
     for (ObjectItem* o = t->head; o != nullptr; o = o->next) {
-        if (true ==
+        if (
             is_same_symbol_list(new_list, static_cast<SymbolList>(o->object))) {
             return true;
         }
@@ -968,7 +968,7 @@ List::lrk_theads_rm_nt(int j)
     ObjectItem* o_prev = nullptr;
     ObjectItem* o = this->head;
     while (o != nullptr) {
-        if (true == j_th_symbol_is_nt(static_cast<SymbolList>(o->object), j)) {
+        if ( j_th_symbol_is_nt(static_cast<SymbolList>(o->object), j)) {
             this->count--;
             // remove o.
             if (o_prev == nullptr) {
@@ -1035,7 +1035,7 @@ List::lrk_theads_rm_theads(int k, List* t_heads)
     ObjectItem* o_prev = nullptr;
     ObjectItem* o = this->head;
     while (o != nullptr) {
-        if (true ==
+        if (
               k_heads_are_t(static_cast<SymbolList>(o->object), k, &len) ||
             (len > 0 && len < k)) {
             this->count--;

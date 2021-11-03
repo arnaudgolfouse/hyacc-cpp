@@ -118,40 +118,37 @@ extern bool in_lanetracing;
  * else, return the found state.
  */
 auto
-search_state_hash_tbl(const Grammar& grammar,
-                      std::optional<Queue>& config_queue,
-                      State* s,
-                      int* is_compatible) -> State*
+YAlgorithm::search_state_hash_tbl(State& s, bool* is_compatible) -> State*
 {
-    const size_t v = get_state_hash_val(*s);
+    const size_t v = get_state_hash_val(s);
     auto& cell = StateHashTbl.at(v);
     StateTblNode* n = cell.next;
     StateTblNode* n_prev = nullptr;
 
-    (*is_compatible) = 0; // default to 0 - false.
+    *is_compatible = false; // default to 0 - false.
 
     if (n == nullptr) {
-        cell.next = create_state_node(s);
+        cell.next = create_state_node(&s);
         cell.count = 1;
         return nullptr;
     }
 
     while (n != nullptr) {
         n_prev = n;
-        if (is_same_state(n->state, s)) {
+        if (is_same_state(*n->state, s)) {
             return n->state;
         }
-        if (Options::get().use_combine_compatible_states) {
-            if (is_compatible_states(n->state, s)) {
-                combine_compatible_states(grammar, config_queue, n->state, s);
-                (*is_compatible) = 1;
+        if (this->options.use_combine_compatible_states) {
+            if (is_compatible_states(n->state, &s)) {
+                this->combine_compatible_states(*n->state, s);
+                *is_compatible = true;
                 return n->state;
             }
         }
         n = n->next;
     }
     // n == nullptr, s does not exist. insert at end.
-    n_prev->next = create_state_node(s);
+    n_prev->next = create_state_node(&s);
     cell.count++;
 
     return nullptr;
@@ -166,28 +163,28 @@ search_state_hash_tbl(const Grammar& grammar,
  * weak compatibility.
  */
 auto
-search_same_state_hash_tbl(State* s) -> State*
+search_same_state_hash_tbl(State& s) -> State*
 {
-    const size_t v = get_state_hash_val(*s);
+    const size_t v = get_state_hash_val(s);
     auto& cell = StateHashTbl.at(v);
     StateTblNode* n = cell.next;
     StateTblNode* n_prev = nullptr;
 
     if (n == nullptr) {
-        cell.next = create_state_node(s);
+        cell.next = create_state_node(&s);
         cell.count = 1;
         return nullptr;
     }
 
     while (n != nullptr) {
         n_prev = n;
-        if (is_same_state(n->state, s)) {
+        if (is_same_state(*n->state, s)) {
             return n->state;
         }
         n = n->next;
     }
     // n == nullptr, s does not exist. insert at end.
-    n_prev->next = create_state_node(s);
+    n_prev->next = create_state_node(&s);
     cell.count++;
 
     return nullptr;

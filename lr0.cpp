@@ -91,50 +91,58 @@ get_closure_lr0(const Grammar& grammar, Queue& config_queue, State* s)
 /*
  * For LR(0). Insert a/r actions to the ENTIRE row.
  */
-static void
-insert_reduction_to_parsing_table_lr0(const Grammar& grammar,
-                                      Configuration* c,
-                                      int state_no)
+void
+LR0::insert_reduction_to_parsing_table_lr0(const Configuration* c, int state_no)
 {
-    int max_col = grammar.terminal_count + 1;
+    int max_col = this->grammar.terminal_count + 1;
 
     if (grammar.rules[c->ruleID]->nLHS->snode ==
         grammar.goal_symbol->snode) { // accept, action = "a";
         // note this should happen only if the end is $end.
-        insert_action(grammar, hash_tbl_find(STR_END), state_no, CONST_ACC);
+        this->insert_action(hash_tbl_find(STR_END), state_no, CONST_ACC);
     } else { // reduct, action = "r";
         for (int col = 0; col < max_col; col++) {
             SymbolTblNode* n = ParsingTblColHdr[col];
-            insert_action(grammar, n, state_no, (-1) * c->ruleID);
+            this->insert_action(n, state_no, (-1) * c->ruleID);
         }
     }
 }
+
+// for (const auto& config : s->config) {
+//     const SymbolTblNode* scanned_symbol = get_scanned_symbol(config);
+
+//     // for final config and empty reduction.
+//     if (is_final_configuration(grammar, config) ||
+//         scanned_symbol->symbol->empty()) {
+//         this->insert_reduction_to_parsing_table(
+//           grammar, new_states, config, s->state_no);
+//     }
+// }
 
 /*
  * if context set is empty, fill all cells in the ENTIRE row;
  * otherwise, fill cells with lookaheads in the context set.
  */
-static void
-insert_reduction_to_parsing_table_lalr(const Grammar& grammar,
-                                       Configuration* c,
-                                       int state_no)
+void
+LR0::insert_reduction_to_parsing_table_lalr(const Configuration* c,
+                                            int state_no)
 {
-    int max_col = grammar.terminal_count + 1;
+    int max_col = this->grammar.terminal_count + 1;
 
-    if (grammar.rules[c->ruleID]->nLHS->snode ==
-        grammar.goal_symbol->snode) { // accept, action = "a";
+    if (this->grammar.rules[c->ruleID]->nLHS->snode ==
+        this->grammar.goal_symbol->snode) { // accept, action = "a";
         // note this should happen only if the end is $end.
-        insert_action(grammar, hash_tbl_find(STR_END), state_no, CONST_ACC);
+        this->insert_action(hash_tbl_find(STR_END), state_no, CONST_ACC);
     } else { // reduct, action = "r";
         SymbolNode* a = c->context->nContext;
         if (a != nullptr) {
             for (a = c->context->nContext; a != nullptr; a = a->next) {
-                insert_action(grammar, a->snode, state_no, (-1) * c->ruleID);
+                this->insert_action(a->snode, state_no, (-1) * c->ruleID);
             }
         } else {
             for (int col = 0; col < max_col; col++) {
                 SymbolTblNode* n = ParsingTblColHdr[col];
-                insert_action(grammar, n, state_no, (-1) * c->ruleID);
+                this->insert_action(n, state_no, (-1) * c->ruleID);
             }
         }
     }
@@ -151,18 +159,19 @@ insert_reduction_to_parsing_table_lalr(const Grammar& grammar,
  * since configurations don't have contexts. So such
  * states are always the "same", but not compatible.
  */
-void
-add_transition_states2_new_lr0(StateCollection* coll, State* src_state)
+static void
+add_transition_states2_new_lr0(NewStates& new_states,
+                               StateCollection* coll,
+                               State* src_state)
 {
     State *os = nullptr, *next = nullptr, *s = nullptr;
     s = coll->states_head;
 
     while (s != nullptr) {
         next = s->next;
-
-        // searchSameStateHashTbl() checks for SAME (not compatible) states.
-        if ((os = search_same_state_hash_tbl(s)) == nullptr) {
-            insert_state_to_pm(s);
+        // search_same_state_hash_tbl() checks for SAME (not compatible) states.
+        if ((os = search_same_state_hash_tbl(*s)) == nullptr) {
+            new_states.insert_state_to_pm(s);
 
             // Add this new state as successor to src_state.
             add_successor(src_state, s);
@@ -188,13 +197,13 @@ add_transition_states2_new_lr0(StateCollection* coll, State* src_state)
  * Add these new temp states to states_new if not existed,
  * and add transition to parsing table as well.
  */
-static void
-transition_lr0(const Grammar& grammar, State* s)
+void
+LR0::transition_lr0(State* s) noexcept
 {
     StateCollection* coll = create_state_collection();
 
     for (const auto& c : s->config) {
-        if (is_final_configuration(grammar, c)) {
+        if (is_final_configuration(this->grammar, c)) {
             // do nothing.
         } else { // do transit operation.
             SymbolTblNode* scanned_symbol = get_scanned_symbol(c);
@@ -210,7 +219,7 @@ transition_lr0(const Grammar& grammar, State* s)
                 coll->add_state2(new_state);
             }
             // create a new core config for new_state.
-            Configuration* new_config = create_config(grammar, -1, 0, 1);
+            Configuration* new_config = create_config(this->grammar, -1, 0, 1);
 
             new_config->owner = new_state;
             copy_config(new_config, c);
@@ -219,12 +228,12 @@ transition_lr0(const Grammar& grammar, State* s)
             if (new_config->nMarker != nullptr)
                 new_config->nMarker = new_config->nMarker->next;
 
-            add_core_config2_state(grammar, new_state, new_config);
+            add_core_config2_state(this->grammar, new_state, new_config);
         }
     } // end for
 
     if (coll->state_count > 0) {
-        add_transition_states2_new_lr0(coll, s);
+        add_transition_states2_new_lr0(this->new_states, coll, s);
     }
 }
 
@@ -233,46 +242,39 @@ transition_lr0(const Grammar& grammar, State* s)
  * Then fill r. r is filled to terminal symbols only. And if
  * a cell is already a/s/g, don't fill this r.
  */
-static void
-output_parsing_table_row_lr0(const Grammar& grammar, State* s)
+void
+LR0::output_parsing_table_row(const State* s)
 {
-    // std::cout  << std::endl<< "state " <<  s->state_no<< ". config count: "
-    // <<  ct << std::endl;
-
     // insert a/r actions.
     for (const auto& c : s->config) {
-        // std::cout  <<  s->state_no<< "." <<  c->ruleID << std::endl;
-
-        if (is_final_configuration(grammar, c) ||
-            is_empty_production(grammar, c)) {
-            insert_reduction_to_parsing_table_lr0(grammar, c, s->state_no);
+        if (is_final_configuration(this->grammar, c) ||
+            is_empty_production(this->grammar, c)) {
+            this->insert_reduction_to_parsing_table_lr0(c, s->state_no);
         }
     }
 
     // insert s/g actions.
     for (State* t : s->successor_list) {
-        insert_action(
-          grammar, t->trans_symbol->snode, s->state_no, t->state_no);
+        this->insert_action(t->trans_symbol->snode, s->state_no, t->state_no);
     }
 }
 
-static void
-output_parsing_table_row_lalr(const Grammar& grammar, State* s)
+void
+LR0::output_parsing_table_row_lalr(const State* s)
 {
     // insert a/r actions.
     for (const auto& c : s->config) {
         // std::cout  <<  s->state_no<< "." <<  c->ruleID << std::endl;
 
-        if (is_final_configuration(grammar, c) ||
-            is_empty_production(grammar, c)) {
-            insert_reduction_to_parsing_table_lalr(grammar, c, s->state_no);
+        if (is_final_configuration(this->grammar, c) ||
+            is_empty_production(this->grammar, c)) {
+            this->insert_reduction_to_parsing_table_lalr(c, s->state_no);
         }
     }
 
     // insert s/g actions.
     for (State* t : s->successor_list) {
-        insert_action(
-          grammar, t->trans_symbol->snode, s->state_no, t->state_no);
+        this->insert_action(t->trans_symbol->snode, s->state_no, t->state_no);
     }
 }
 
@@ -283,15 +285,15 @@ output_parsing_table_row_lalr(const Grammar& grammar, State* s)
  * LR(0) since all default actions are reduce, the previous
  * method does not work very well.
  */
-static void
-output_parsing_table_lr0(const Grammar& grammar)
+void
+LR0::output_parsing_table() noexcept
 {
-    size_t rows = states_new_array->state_list.size();
+    size_t rows = this->new_states.states_new_array->state_list.size();
     int cols = n_symbol + 1;
 
     // expand size of parsing table array if needed.
     if (rows * ParsingTblCols >= PARSING_TABLE_SIZE) {
-        expand_parsing_table();
+        expand_parsing_table(*this->new_states.states_new_array);
     }
 
     for (size_t i = 0; i < cols * rows; ++i) {
@@ -299,23 +301,20 @@ output_parsing_table_lr0(const Grammar& grammar)
     }
 
     for (int i = 0; i < rows; i++) {
-        State* s = states_new_array->state_list[i];
-        output_parsing_table_row_lr0(grammar, s);
+        State* s = this->new_states.states_new_array->state_list[i];
+        this->output_parsing_table_row(s);
     }
 }
 
-/*
- *
- */
 void
-output_parsing_table_lalr(const Grammar& grammar)
+LR0::output_parsing_table_lalr()
 {
-    size_t rows = states_new_array->state_list.size();
+    size_t rows = this->new_states.states_new_array->state_list.size();
     int cols = n_symbol + 1;
 
     // expand size of parsing table array if needed.
     while (rows >= PARSING_TABLE_SIZE) {
-        expand_parsing_table();
+        expand_parsing_table(*this->new_states.states_new_array);
     }
 
     for (size_t i = 0; i < cols * rows; ++i) {
@@ -323,48 +322,47 @@ output_parsing_table_lalr(const Grammar& grammar)
     }
 
     for (int i = 0; i < rows; i++) {
-        State* s = states_new_array->state_list[i];
-        output_parsing_table_row_lalr(grammar, s);
+        State* s = this->new_states.states_new_array->state_list[i];
+        this->output_parsing_table_row_lalr(s);
     }
 }
 
 void
-update_parsing_table_lr0(const Grammar& grammar)
+LR0::update_parsing_table() noexcept
 {
-    ParsingTblRows = states_new->state_count;
-    n_state_opt1 = states_new->state_count;
+    ParsingTblRows = this->new_states.states_new->state_count;
+    n_state_opt1 = this->new_states.states_new->state_count;
 
     // this fills the conflict list, so is need for lalr processing.
-    output_parsing_table_lr0(grammar);
+    this->output_parsing_table();
 }
 
 void
-generate_lr0_parsing_machine(const Grammar& grammar, Queue& config_queue)
+LR0::generate_lr0_parsing_machine(Queue& config_queue)
 {
-    bool debug_gen_parsing_machine = Options::get().debug_gen_parsing_machine;
-    State* new_state = states_new->states_head;
+    State* new_state = this->new_states.states_new->states_head;
 
-    if (debug_gen_parsing_machine) {
-        grammar.fp_v << std::endl
-                     << std::endl
-                     << "--generate parsing machine--" << std::endl;
+    if (this->options.debug_gen_parsing_machine) {
+        this->grammar.fp_v << std::endl
+                           << std::endl
+                           << "--generate parsing machine--" << std::endl;
     }
 
     while (new_state != nullptr) {
-        if (debug_gen_parsing_machine) {
-            grammar.fp_v << states_new->state_count
-                         << " states, current state is " << new_state->state_no
-                         << std::endl;
+        if (this->options.debug_gen_parsing_machine) {
+            this->grammar.fp_v << this->new_states.states_new->state_count
+                               << " states, current state is "
+                               << new_state->state_no << std::endl;
         }
 
         get_closure_lr0(
-          grammar, config_queue, new_state); // get closure of this state.
+          this->grammar, config_queue, new_state); // get closure of this state.
 
         // get successor states and add them to states_new.
-        transition_lr0(grammar, new_state);
+        this->transition_lr0(new_state);
 
         new_state = new_state->next; // point to next unprocessed state.
     }
 
-    update_parsing_table_lr0(grammar);
+    this->update_parsing_table();
 }

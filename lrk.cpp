@@ -140,22 +140,6 @@ dump_conflict_list(const Conflict* c)
     }
 }
 
-void
-test_dump_p_conflict()
-{
-    size_t len = states_new_array->state_list.size();
-    std::cout << "dump_P_conflict(). total states: " << len << std::endl;
-
-    for (size_t i = 0; i < len; i++) {
-        if (states_new_array->rr_count[i] > 0) {
-            std::cout << "state " << i
-                      << " rr_count: " << states_new_array->rr_count[i]
-                      << std::endl;
-            dump_conflict_list(states_new_array->conflict_list[i].get());
-        }
-    }
-}
-
 // return the length of the symbollist.
 auto
 get_lrk_theads_len(SymbolList s) -> int
@@ -287,15 +271,16 @@ lrk_config_lane_tracing(const Grammar& grammar, Configuration* c)
  * @Return: the conflict symbol list of configuration c in INC order.
  */
 static auto
-get_config_conflict_context(Configuration* c) -> SymbolList
+get_config_conflict_context(Configuration* c,
+                            const StateArray& states_new_array) -> SymbolList
 {
     SymbolNode* ret_list = nullptr;
 
     if (nullptr == c)
         return ret_list;
 
-    std::shared_ptr<Conflict>& n =
-      states_new_array->conflict_list[c->owner->state_no];
+    std::shared_ptr<Conflict> n =
+      states_new_array.conflict_list[c->owner->state_no];
     for (; n != nullptr; n = n->next) {
         if (n->r < 0 && n->s < 0) { // is r/r conflict.
             for (SymbolList contxt = c->context->nContext; contxt != nullptr;
@@ -345,13 +330,12 @@ fill_set_c2(LRkPTArray& lrk_pt_array,
 /*
  * @Input: inadequate state no.: state_no.
  */
-static void
-edge_pushing(LRkPTArray& lrk_pt_array, const Grammar& grammar, int state_no)
+void
+LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, int state_no) const
 {
     CfgCtxt* cc = nullptr;
-    Configuration* c = nullptr;
-    State* s = nullptr;
-    if ((s = states_new_array->state_list[state_no]) == nullptr)
+    State* s = this->new_states.states_new_array->state_list[state_no];
+    if (s == nullptr)
         return;
 
     std::cout << "\nedge_pushing on state " << state_no << std::endl;
@@ -362,12 +346,14 @@ edge_pushing(LRkPTArray& lrk_pt_array, const Grammar& grammar, int state_no)
     // note, need to get conflict symbols for each final config also.
 
     for (const auto& i : s->config) {
-        c = i;
-        if (true == is_final_configuration(grammar, c)) {
+        Configuration* c = i;
+        if (is_final_configuration(this->grammar, c)) {
             // check if this final config's context contains conflict symbol,
             // if so add it to set_c, together with the conflict symbol(s).
-            cc = CfgCtxt::create(
-              get_start_config_from_tail(c), get_config_conflict_context(c), c);
+            cc = CfgCtxt::create(get_start_config_from_tail(c),
+                                 get_config_conflict_context(
+                                   c, *this->new_states.states_new_array),
+                                 c);
             c->z = 0;
             set_c = set_insert(set_c, (void*)cc);
         }
@@ -380,7 +366,7 @@ edge_pushing(LRkPTArray& lrk_pt_array, const Grammar& grammar, int state_no)
 
         for (ObjectItem* si = set_c; si != nullptr; si = si->next) {
             cc = static_cast<CfgCtxt*>(si->object);
-            c = cc->c;
+            Configuration* c = cc->c;
             if (nullptr == c) {
                 std::cout << "? c is nullptr";
                 continue;
@@ -394,7 +380,7 @@ edge_pushing(LRkPTArray& lrk_pt_array, const Grammar& grammar, int state_no)
                 continue;
             }
             std::shared_ptr<List> phi =
-              lrk_theads(grammar, c->nMarker->next, k1);
+              lrk_theads(this->grammar, c->nMarker->next, k1);
             if (phi == nullptr) {
                 // std::cout << "phi is nullptr. should not!" << std::endl;
                 continue;
@@ -433,7 +419,7 @@ edge_pushing(LRkPTArray& lrk_pt_array, const Grammar& grammar, int state_no)
                         ConfigPairNode* tmp =
                           lane_head_tail_pairs; // store the old list.
                         lane_head_tail_pairs = nullptr;
-                        lrk_config_lane_tracing(grammar, c);
+                        lrk_config_lane_tracing(this->grammar, c);
                         for (ConfigPairNode* n = lane_head_tail_pairs;
                              n != nullptr;
                              n = n->next) {
@@ -468,21 +454,22 @@ edge_pushing(LRkPTArray& lrk_pt_array, const Grammar& grammar, int state_no)
  * Remove r/r conflict nodes from list.
  */
 static void
-remove_rr_conflict_from_list(int state_no)
+remove_rr_conflict_from_list(int state_no, NewStates& new_states)
 {
     std::shared_ptr<Conflict> c_prev = nullptr;
-    std::shared_ptr<Conflict>& c = states_new_array->conflict_list[state_no];
+    std::shared_ptr<Conflict>& c =
+      new_states.states_new_array->conflict_list[state_no];
     while (nullptr != c) {
         if (c->r < 0 && c->s < 0) {  // remove this node.
             if (c_prev == nullptr) { // remove at head.
-                states_new_array->conflict_list[state_no] = c->next;
-                c = states_new_array->conflict_list[state_no];
+                new_states.states_new_array->conflict_list[state_no] = c->next;
+                c = new_states.states_new_array->conflict_list[state_no];
             } else { // remove in the middle.
                 c_prev->next = c->next;
                 c = c_prev->next;
             }
-            states_new_array->rr_count[state_no]--;
-            rr_count--;
+            new_states.states_new_array->rr_count[state_no]--;
+            new_states.conflicts_count.rr--;
             continue;
         }
 
@@ -490,7 +477,7 @@ remove_rr_conflict_from_list(int state_no)
     }
 
     // if list is empty, remove this conflict.
-    if (states_new_array->conflict_list[state_no] == nullptr) {
+    if (new_states.states_new_array->conflict_list[state_no] == nullptr) {
         for (int& state : states_inadequate->states) {
             if (state_no == state) {
                 state = -1;
@@ -506,10 +493,10 @@ remove_rr_conflict_from_list(int state_no)
  * 2) remove this conflict from conflict list.
  */
 static void
-update_lr1_parsing_table(int state_no)
+update_lr1_parsing_table(int state_no, NewStates& new_states)
 {
-    for (std::shared_ptr<Conflict>& c =
-           states_new_array->conflict_list[state_no];
+    for (std::shared_ptr<Conflict> c =
+           new_states.states_new_array->conflict_list[state_no];
          c != nullptr;
          c = c->next) {
         update_action(get_col(*c->lookahead),
@@ -518,11 +505,11 @@ update_lr1_parsing_table(int state_no)
     }
 
     // remove r/r conflict node from list.
-    remove_rr_conflict_from_list(state_no);
+    remove_rr_conflict_from_list(state_no, new_states);
 }
 
 auto
-lane_tracing_lrk(const Grammar& grammar) -> std::optional<LRkPTArray>
+LaneTracing::lane_tracing_lrk() -> std::optional<LRkPTArray>
 {
     if (0 == states_inadequate->count_unresolved)
         return std::nullopt;
@@ -535,13 +522,12 @@ lane_tracing_lrk(const Grammar& grammar) -> std::optional<LRkPTArray>
     ConfigPairNode::list_dump(lane_head_tail_pairs);
 
     for (const int state_no : states_inadequate->states) {
-        int ct_rr = states_new_array->rr_count[state_no];
+        int ct_rr = this->new_states.states_new_array->rr_count[state_no];
 
         if (state_no >= 0 && ct_rr > 0) {
-            edge_pushing(lrk_pt_array, grammar, state_no);
-
+            this->edge_pushing(lrk_pt_array, state_no);
             // update corresonding entry in LR(1) parsing table.
-            update_lr1_parsing_table(state_no);
+            update_lr1_parsing_table(state_no, new_states);
         }
     }
     return lrk_pt_array;

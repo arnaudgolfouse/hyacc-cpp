@@ -87,21 +87,13 @@ do_loop(const Grammar& grammar);
 static void
 check_lane_top(const Grammar& grammar);
 static auto
-find_successor_state_no(int state_no, const SymbolTblNode* snode) -> int;
-static void
-set_transitors_pass_thru_on(const Grammar& grammar,
-                            const Configuration& cur_config,
-                            Configuration* o);
+find_successor_state_no(int state_no,
+                        const StateArray& states_new_array,
+                        const SymbolTblNode* snode) -> int;
 static auto
 inherit_parent_context(const Grammar& grammar, State* s, State* parent) -> bool;
 static void
 clear_state_context(State* s);
-static void
-lt_phase2_propagate_context_change(const Grammar& grammar,
-                                   std::optional<Queue>& config_queue,
-                                   int state_no,
-                                   LtCluster* c,
-                                   LtTblEntry* e);
 
 /*
  * Initialize this to nullptr at the beginning of phase2_regeneration2().
@@ -129,6 +121,7 @@ static auto
 lt_tbl_find_entry(int from_state) -> LtTblEntry*;
 static auto
 cluster_trace_new_chain_all(const Grammar& grammar,
+                            const StateArray& states_new_array,
                             std::optional<Queue>& config_queue,
                             int parent_state,
                             const LtTblEntry* e) -> bool;
@@ -400,14 +393,14 @@ llist_int2_dump(LlistInt2* list)
 
 // LlistInt2 functions, END.
 
-auto
-lt_tbl_entry_create(State* from, State* to) -> LtTblEntry*
+static auto
+lt_tbl_entry_create(State* from, State* to, const StateArray& states_new_array)
+  -> LtTblEntry*
 {
     auto* e = new LtTblEntry;
     e->from_state = from->state_no;
 
-    if (e->from_state !=
-        states_new_array->state_list[e->from_state]->state_no) {
+    if (e->from_state != states_new_array.state_list[e->from_state]->state_no) {
         throw std::runtime_error(
           "ERROR (lt_tbl_entry_create): state_no not equal");
     }
@@ -436,10 +429,10 @@ lt_tbl_entry_add_to_state(LtTblEntry* e, State* to)
  * don't add the (config, context) information here.
  */
 static void
-lt_tbl_entry_add(State* from, State* to)
+lt_tbl_entry_add(State* from, State* to, const StateArray& states_new_array)
 {
     if (LT_tbl == nullptr) {
-        LT_tbl = lt_tbl_entry_create(from, to);
+        LT_tbl = lt_tbl_entry_create(from, to, states_new_array);
         return;
     }
     LtTblEntry *e = LT_tbl, *e_prev = nullptr;
@@ -451,17 +444,17 @@ lt_tbl_entry_add(State* from, State* to)
         }
         if (e->from_state > from->state_no) { // insert before e.
             if (e_prev == nullptr) {          // insert as the head.
-                LT_tbl = lt_tbl_entry_create(from, to);
+                LT_tbl = lt_tbl_entry_create(from, to, states_new_array);
                 LT_tbl->next = e;
             } else { // insert between e_prev and e
-                e_prev->next = lt_tbl_entry_create(from, to);
+                e_prev->next = lt_tbl_entry_create(from, to, states_new_array);
                 e_prev->next->next = e;
             }
             return;
         }
     }
     // now is at the end of the table LT_tbl, add to list tail.
-    e_prev->next = lt_tbl_entry_create(from, to);
+    e_prev->next = lt_tbl_entry_create(from, to, states_new_array);
     return;
 }
 
@@ -469,11 +462,12 @@ lt_tbl_entry_add(State* from, State* to)
  * Find from state in the LT_tbl.
  * If not found, insert it.
  */
-auto
-lt_tbl_entry_find_insert(State* from) -> LtTblEntry*
+static auto
+lt_tbl_entry_find_insert(State* from, const StateArray& states_new_array)
+  -> LtTblEntry*
 {
     if (nullptr == LT_tbl) { // insert as the first
-        LT_tbl = lt_tbl_entry_create(from, nullptr);
+        LT_tbl = lt_tbl_entry_create(from, nullptr, states_new_array);
         return LT_tbl;
     }
 
@@ -483,11 +477,11 @@ lt_tbl_entry_find_insert(State* from) -> LtTblEntry*
             return e;
         if (e->from_state > from->state_no) { // insert here.
             if (e_prev == nullptr) {          // insert as the first.
-                LT_tbl = lt_tbl_entry_create(from, nullptr);
+                LT_tbl = lt_tbl_entry_create(from, nullptr, states_new_array);
                 LT_tbl->next = e;
                 return LT_tbl;
             } // insert in the middle.
-            e_prev->next = lt_tbl_entry_create(from, nullptr);
+            e_prev->next = lt_tbl_entry_create(from, nullptr, states_new_array);
             e_prev->next->next = e;
             return e_prev->next;
         }
@@ -495,7 +489,7 @@ lt_tbl_entry_find_insert(State* from) -> LtTblEntry*
     }
 
     // otherwise, insert at the end.
-    e_prev->next = lt_tbl_entry_create(from, nullptr);
+    e_prev->next = lt_tbl_entry_create(from, nullptr, states_new_array);
     return e_prev->next;
 }
 
@@ -506,10 +500,11 @@ lt_tbl_entry_find_insert(State* from) -> LtTblEntry*
  * There can be at most one entry found.
  */
 auto
-lt_tbl_entry_find(State* from) -> LtTblEntry*
+lt_tbl_entry_find(State* from, const StateArray& states_new_array)
+  -> LtTblEntry*
 {
     if (nullptr == LT_tbl) { // insert as the first
-        LT_tbl = lt_tbl_entry_create(from, nullptr);
+        LT_tbl = lt_tbl_entry_create(from, nullptr, states_new_array);
         return LT_tbl;
     }
 
@@ -519,11 +514,11 @@ lt_tbl_entry_find(State* from) -> LtTblEntry*
             return e;
         if (e->from_state > from->state_no) { // insert here.
             if (e_prev == nullptr) {          // insert as the first.
-                LT_tbl = lt_tbl_entry_create(from, nullptr);
+                LT_tbl = lt_tbl_entry_create(from, nullptr, states_new_array);
                 LT_tbl->next = e;
                 return LT_tbl;
             } // insert in the middle.
-            e_prev->next = lt_tbl_entry_create(from, nullptr);
+            e_prev->next = lt_tbl_entry_create(from, nullptr, states_new_array);
             e_prev->next->next = e;
             return e_prev->next;
         }
@@ -586,13 +581,15 @@ llist_context_set_get(LtTblEntry* e) -> LlistContextSet*
  * The current config is "cur_red_config" defined at the top.
  */
 static void
-lt_tbl_entry_add_context(State* from, SymbolList ctxt)
+lt_tbl_entry_add_context(State* from,
+                         SymbolList ctxt,
+                         const StateArray& states_new_array)
 {
     if (ctxt == nullptr)
         return;
 
     // 1) locate the LtTblEntry for "from" state.
-    LtTblEntry* e = lt_tbl_entry_find_insert(from);
+    LtTblEntry* e = lt_tbl_entry_find_insert(from, states_new_array);
     if (nullptr == e) {
         throw std::runtime_error(
           std::string("lt_tbl_entry_add_context error: state ") +
@@ -1008,24 +1005,24 @@ lane_head_tail_pairs_replace(LtCluster* c,
  *   if a splitted state is created, return it's state_no.
  *   else, return the old state_no.
  */
-static auto
-cluster_add_lt_tbl_entry(const Grammar& grammar,
-                         LtCluster* c,
-                         int from_state,
-                         LlistContextSet* e_ctxt,
-                         int e_parent_state_no,
-                         bool copy) -> int
+auto
+LaneTracing::cluster_add_lt_tbl_entry(LtCluster* c,
+                                      const int from_state,
+                                      LlistContextSet* e_ctxt,
+                                      const size_t e_parent_state_no,
+                                      bool copy) const -> int
 {
     int state_no = from_state;
 
     if (copy) {
         // make a new state by copying e->from_state,
         // add it to the end of states_new array, and add here.
-        State* s_parent = states_new_array->state_list[e_parent_state_no];
-        State* s = states_new_array->state_list[state_no];
+        State* s_parent =
+          this->new_states.states_new_array->state_list[e_parent_state_no];
+        State* s = this->new_states.states_new_array->state_list[state_no];
         State* s_copy = clone_state(grammar, s);
         // insert a state to the parsing machine. Defined in y.c.
-        insert_state_to_pm(s_copy);
+        this->new_states.insert_state_to_pm(s_copy);
 
         // Replace src_state's previous succcessor with s_copy.
         replace_successor(s_parent, s_copy, s);
@@ -1037,7 +1034,7 @@ cluster_add_lt_tbl_entry(const Grammar& grammar,
                       << std::endl;
         }
 
-        if (Options::get().use_lr_k) {
+        if (this->options.use_lr_k) {
             // For LR(k), replace entry in lane_head_tail_pairs!
             // std::cout << "parrent state: " <<  e_parent_state_no <<
             // std::endl;
@@ -1143,36 +1140,30 @@ combine_cluster(LtCluster* c_new, LtCluster* c_old)
 /// functions for updating context in phase 2 regeneration. START.
 
 /// Called by cluster_trace_new_chain() only.
-inline void
-inherit_propagate(const Grammar& grammar,
-                  std::optional<Queue>& config_queue,
-                  int state_no,
-                  int parent_state_no,
-                  LtCluster* container,
-                  LtTblEntry* e)
+void
+LaneTracing::inherit_propagate(int state_no,
+                               int parent_state_no,
+                               LtCluster* container,
+                               LtTblEntry* e)
 {
-    State* s = states_new_array->state_list[state_no];
-    State* s_p = states_new_array->state_list[parent_state_no];
+    State* s = this->new_states.states_new_array->state_list[state_no];
+    State* s_p = this->new_states.states_new_array->state_list[parent_state_no];
     if (inherit_parent_context(grammar, s, s_p)) {
         s->get_closure(grammar,
                        config_queue); /* needed only if context changed.*/
-        lt_phase2_propagate_context_change(
-          grammar, config_queue, state_no, container, e);
+        this->lt_phase2_propagate_context_change(state_no, container, e);
     }
 }
 
-inline void
-clear_inherit_regenerate(const Grammar& grammar,
-                         std::optional<Queue>& config_queue,
-                         int state_no,
-                         int parent_state_no)
+void
+LaneTracing::clear_inherit_regenerate(int state_no, int parent_state_no)
 {
-    State* s = states_new_array->state_list[state_no];
-    State* s_p = states_new_array->state_list[parent_state_no];
+    State* s = this->new_states.states_new_array->state_list[state_no];
+    State* s_p = this->new_states.states_new_array->state_list[parent_state_no];
     clear_state_context(s);
-    if (inherit_parent_context(grammar, s, s_p)) {
-        s->get_closure(grammar,
-                       config_queue); /* needed only if context changed.*/
+    if (inherit_parent_context(this->grammar, s, s_p)) {
+        s->get_closure(this->grammar,
+                       this->config_queue); /* needed only if context changed.*/
     }
 }
 
@@ -1182,12 +1173,10 @@ clear_inherit_regenerate(const Grammar& grammar,
  * Note that if it is state 0, then should add $end
  * to the goal rule before get_closure() !
  */
-inline void
-clear_regenerate(const Grammar& grammar,
-                 std::optional<Queue>& config_queue,
-                 int state_no)
+void
+LaneTracing::clear_regenerate(int state_no)
 {
-    State* s = states_new_array->state_list[state_no];
+    State* s = this->new_states.states_new_array->state_list[state_no];
     clear_state_context(s);
     if (0 == (state_no)) {
         hash_tbl_insert(STR_END);
@@ -1195,7 +1184,7 @@ clear_regenerate(const Grammar& grammar,
           SymbolNode::create(hash_tbl_find(STR_END));
         s->config[0]->context->context_count = 1;
     }
-    s->get_closure(grammar, config_queue);
+    s->get_closure(this->grammar, this->config_queue);
 }
 
 /*
@@ -1206,11 +1195,9 @@ clear_regenerate(const Grammar& grammar,
  * LtTblEntry's to_states list.
  */
 void
-lt_phase2_propagate_context_change(const Grammar& grammar,
-                                   std::optional<Queue>& config_queue,
-                                   int state_no,
-                                   LtCluster* c,
-                                   LtTblEntry* e)
+LaneTracing::lt_phase2_propagate_context_change(int state_no,
+                                                LtCluster* c,
+                                                LtTblEntry* e)
 {
     if (e == nullptr) {
         return;
@@ -1241,7 +1228,7 @@ lt_phase2_propagate_context_change(const Grammar& grammar,
                 std::cout << "--to state: " << t->n << ", actual: " << t2->n2
                           << std::endl;
             }
-            inherit_propagate(grammar, config_queue, t2->n2, state_no, c, f);
+            this->inherit_propagate(t2->n2, state_no, c, f);
         }
     }
 }
@@ -1256,12 +1243,6 @@ inherit_parent_context(const Grammar& grammar, State* s, State* parent) -> bool
         std::cout << "state " << s->state_no
                   << ": to inherit context from parent state "
                   << parent->state_no << std::endl;
-
-        if (0 && s->state_no == 39) {
-            std::cout << "before: " << std::endl;
-            my_write_state(grammar, *s);
-            my_write_state(grammar, *parent);
-        }
     }
 
     bool is_changed = false;
@@ -1280,7 +1261,7 @@ inherit_parent_context(const Grammar& grammar, State* s, State* parent) -> bool
         if (nullptr == c)
             continue; // should NOT happen.
 
-        if (true == combine_context(c->context, c_p->context)) {
+        if (combine_context(c->context, c_p->context)) {
             is_changed = true;
         }
     }
@@ -1322,11 +1303,8 @@ clear_state_context(State* s)
  *  false - combined with a cluster in all_clusters..
  *  true - NOT combined with another cluster in all_clusters.
  */
-static auto
-cluster_trace_new_chain(const Grammar& grammar,
-                        std::optional<Queue>& config_queue,
-                        int parent_state_no,
-                        int state_no) -> bool
+auto
+LaneTracing::cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
 {
     bool is_new_chain = true;
     LtCluster* c = new_cluster;
@@ -1353,12 +1331,12 @@ cluster_trace_new_chain(const Grammar& grammar,
                       << ": inherit context from state " << parent_state_no
                       << " & propagate" << std::endl;
         }
-        inherit_propagate(
-          grammar, config_queue, ret_state, parent_state_no, c, e);
+        this->inherit_propagate(ret_state, parent_state_no, c, e);
 
-        replace_successor(states_new_array->state_list[parent_state_no],
-                          states_new_array->state_list[ret_state],
-                          states_new_array->state_list[state_no]);
+        const auto& state_list = this->new_states.states_new_array->state_list;
+        replace_successor(state_list[parent_state_no],
+                          state_list[ret_state],
+                          state_list[state_no]);
         return true; // NOTE here it returns true.
     }
 
@@ -1406,12 +1384,8 @@ cluster_trace_new_chain(const Grammar& grammar,
                               << ": inherit context from state "
                               << parent_state_no << ", ";
                 }
-                inherit_propagate(grammar,
-                                  config_queue,
-                                  state_no,
-                                  parent_state_no,
-                                  container,
-                                  e);
+                this->inherit_propagate(
+                  state_no, parent_state_no, container, e);
 
                 container_not_found = false;
                 break;
@@ -1426,8 +1400,8 @@ cluster_trace_new_chain(const Grammar& grammar,
                 std::cout << "4. state " << state_no
                           << " is NOT in any cluster yet" << std::endl;
             }
-            ret_state = cluster_add_lt_tbl_entry(
-              grammar, c, state_no, e_ctxt, parent_state_no, false);
+            ret_state = this->cluster_add_lt_tbl_entry(
+              c, state_no, e_ctxt, parent_state_no, false);
 
             if (c->pairwise_disjoint &&
                 pairwise_disjoint(c->ctxt_set) == false) {
@@ -1442,15 +1416,14 @@ cluster_trace_new_chain(const Grammar& grammar,
                           << ": clear, inherit context from state "
                           << parent_state_no << ", ";
             }
-            clear_inherit_regenerate(
-              grammar, config_queue, state_no, parent_state_no);
+            this->clear_inherit_regenerate(state_no, parent_state_no);
 
         } else {
             // e is already in another cluster, e.g., first_container;
             // but combined context are NOT pairwise-disjoint.
             // so make a copy e' of e and add it to c.
-            ret_state = cluster_add_lt_tbl_entry(
-              grammar, c, state_no, e_ctxt, parent_state_no, true);
+            ret_state = this->cluster_add_lt_tbl_entry(
+              c, state_no, e_ctxt, parent_state_no, true);
             if ((c->pairwise_disjoint = pairwise_disjoint(c->ctxt_set)) ==
                 false) {
                 all_pairwise_disjoint = false;
@@ -1460,13 +1433,11 @@ cluster_trace_new_chain(const Grammar& grammar,
                           << ": clear, inherit context from state "
                           << parent_state_no << ", ";
             }
-            clear_inherit_regenerate(
-              grammar, config_queue, ret_state, parent_state_no);
+            this->clear_inherit_regenerate(ret_state, parent_state_no);
         }
 
         if (nullptr != e) { // recursively trace the chain.
-            is_new_chain =
-              cluster_trace_new_chain_all(grammar, config_queue, ret_state, e);
+            is_new_chain = this->cluster_trace_new_chain_all(ret_state, e);
         }
     }
 
@@ -1477,17 +1448,14 @@ cluster_trace_new_chain(const Grammar& grammar,
  * parent_state: state_no of the parent state.
  */
 auto
-cluster_trace_new_chain_all(const Grammar& grammar,
-                            std::optional<Queue>& config_queue,
-                            int parent_state,
-                            const LtTblEntry* e) -> bool
+LaneTracing::cluster_trace_new_chain_all(int parent_state, const LtTblEntry* e)
+  -> bool
 {
     bool is_new_chain = true;
 
     // recursively trace the chain.
     for (const LlistInt* s = e->to_states; s != nullptr; s = s->next) {
-        if (false == cluster_trace_new_chain(
-                       grammar, config_queue, parent_state, s->n)) {
+        if (false == this->cluster_trace_new_chain(parent_state, s->n)) {
             is_new_chain = false;
         }
     }
@@ -1510,8 +1478,8 @@ all_clusters_add(LtCluster* c)
     }
 }
 
-static void
-phase2_regeneration2(const Grammar& grammar, std::optional<Queue>& config_queue)
+void
+LaneTracing::phase2_regeneration2()
 {
     bool is_new_chain = true;
 
@@ -1530,15 +1498,14 @@ phase2_regeneration2(const Grammar& grammar, std::optional<Queue>& config_queue)
             std::cout << "=>1. clear and regenerate context for state "
                       << x->from_state << std::endl;
         }
-        clear_regenerate(grammar, config_queue, x->from_state);
+        this->clear_regenerate(x->from_state);
 
         x->processed = true;
 
-        is_new_chain =
-          cluster_trace_new_chain_all(grammar, config_queue, x->from_state, x);
+        is_new_chain = this->cluster_trace_new_chain_all(x->from_state, x);
 
         // add new_cluster to the all_clusters list.
-        if (true == is_new_chain) {
+        if (is_new_chain) {
             all_clusters_add(new_cluster);
         }
     }
@@ -1548,12 +1515,12 @@ phase2_regeneration2(const Grammar& grammar, std::optional<Queue>& config_queue)
     }
 
     // if the parsing machine is expanded, update the parsing table.
-    if (states_new->state_count > ParsingTblRows) {
-        update_parsing_table_lr0(grammar);
+    if (this->new_states.states_new->state_count > ParsingTblRows) {
+        this->update_parsing_table();
     }
 
-    std::cout << "LT-LTT end: states count: " << states_new->state_count
-              << std::endl;
+    std::cout << "LT-LTT end: states count: "
+              << this->new_states.states_new->state_count << std::endl;
 }
 
 /************************************************************
@@ -1780,8 +1747,8 @@ my_write_symbol_node_array(const SymbolNode* str)
     }
 }
 
-void
-my_write_context(const Context* c)
+static void
+my_write_context(const Context* c, const bool use_lr_k)
 {
     std::cout << " {";
 
@@ -1793,7 +1760,7 @@ my_write_context(const Context* c)
         }
     }
 
-    if (Options::get().use_lr_k) {
+    if (use_lr_k) {
         // specifically for LR(k). This can be combined with the
         // above if block. Single this part out here is to keep
         // the code easier to maintain for LR(1) and LR(k) separately.
@@ -1855,12 +1822,13 @@ stdout_write_config(const Grammar& grammar, const Configuration* c)
     }
     std::cout << "config (" << c->owner->state_no << "." << c->ruleID << ") : ";
     my_write_production(grammar.rules[c->ruleID], c->marker);
-    my_write_context(c->context);
+    my_write_context(c->context, Options::get().use_lr_k);
     std::cout << "[COMPLETE: " << c->COMPLETE << "]"
               << "[IN_LANE: " << c->IN_LANE << "]"
               << "[LANE_END: " << c->LANE_END << "]"
               << "[LANE_CON: " << c->LANE_CON << "]" << std::endl;
 }
+
 void
 my_write_state(const Grammar& grammar, const State& s)
 {
@@ -1919,9 +1887,8 @@ my_write_config_originators(const Configuration& c)
 /*
  * get context for reduce productions in conflict states.
  */
-static void
-get_inadequate_state_reduce_config_context(const Grammar& grammar,
-                                           const State* s)
+void
+LaneTracing::get_inadequate_state_reduce_config_context(const State* s) const
 {
     if constexpr (DEBUG_PHASE_1) {
         std::cout << "state " << s->state_no << " [" << s->config.size()
@@ -1941,8 +1908,8 @@ get_inadequate_state_reduce_config_context(const Grammar& grammar,
     }
 }
 
-static void
-lane_tracing_phase1(const Grammar& grammar)
+void
+LaneTracing::phase1()
 {
     if constexpr (DEBUG_PHASE_1) {
         std::cout << states_inadequate->states.size()
@@ -1950,8 +1917,9 @@ lane_tracing_phase1(const Grammar& grammar)
     }
 
     for (const int state_no : states_inadequate->states) {
-        const State* s = states_new_array->state_list[state_no];
-        get_inadequate_state_reduce_config_context(grammar, s);
+        const State* s =
+          this->new_states.states_new_array->state_list[state_no];
+        this->get_inadequate_state_reduce_config_context(s);
     }
 
     // next will check resolved conflicts.
@@ -1961,9 +1929,11 @@ lane_tracing_phase1(const Grammar& grammar)
  * called by update_action_table().
  */
 static auto
-find_successor_state_no(int state_no, const SymbolTblNode* snode) -> int
+find_successor_state_no(int state_no,
+                        const StateArray& states_new_array,
+                        const SymbolTblNode* snode) -> int
 {
-    const State* state = states_new_array->state_list[state_no];
+    const State* state = states_new_array.state_list[state_no];
     auto it = state->successor_list.rbegin();
     while (it != state->successor_list.rend()) {
         const State* successor = *it;
@@ -1995,9 +1965,9 @@ clear_state_terminal_transitions(const Grammar& grammar, int state_no)
  * clear all the conflicts from states_new_array->conflict_list.
  */
 static void
-clear_state_conflicts(int state_no)
+clear_state_conflicts(int state_no, StateArray& states_new_array)
 {
-    states_new_array->conflict_list[state_no] = nullptr;
+    states_new_array.conflict_list[state_no] = nullptr;
 }
 
 /*
@@ -2011,32 +1981,32 @@ clear_state_conflicts(int state_no)
  *  }
  * }
  */
-static void
-resolve_lalr1_conflicts(const Grammar& grammar)
+void
+LaneTracing::resolve_lalr1_conflicts()
 {
     if constexpr (DEBUG_RESOLVE_CONFLICT) {
-        print_parsing_table(grammar.fp_v, grammar);
+        print_parsing_table(this->grammar.fp_v, this->grammar);
     }
 
     states_inadequate->count_unresolved = states_inadequate->states.size();
 
     const size_t ct = states_inadequate->states.size();
-    for (int i = 0; i < ct; i++) {
+    for (size_t i = 0; i < ct; i++) {
         const int state_no = states_inadequate->states[i];
         if (state_no < 0)
             continue; // should never happen.
 
-        const State* state = states_new_array->state_list[state_no];
+        const State* state = new_states.states_new_array->state_list[state_no];
 
         // clear the parsing table row for S where lookahead is terminal.
         if constexpr (DEBUG_RESOLVE_CONFLICT) {
             std::cout << "-----clear state[" << i << "] = " << state_no
                       << ". len=" << ct << std::endl;
         }
-        clear_state_terminal_transitions(grammar, state_no);
+        clear_state_terminal_transitions(this->grammar, state_no);
 
         // clear all the conflicts associated with S.
-        clear_state_conflicts(state_no);
+        clear_state_conflicts(state_no, *this->new_states.states_new_array);
 
         // re-insert actions into parsing table for this state.
         for (int j = static_cast<int>(state->config.size() - 1); j >= 0; j--) {
@@ -2047,21 +2017,22 @@ resolve_lalr1_conflicts(const Grammar& grammar)
                 for (const SymbolNode* contxt = config->context->nContext;
                      contxt != nullptr;
                      contxt = contxt->next) {
-                    insert_action(
-                      grammar, contxt->snode, state_no, (-1) * config->ruleID);
+                    this->insert_action(
+                      contxt->snode, state_no, (-1) * config->ruleID);
                 }
             } else if (config->nMarker != nullptr &&
                        config->nMarker->snode->is_terminal()) {
                 // insert shift.
-                insert_action(
-                  grammar,
+                this->insert_action(
                   config->nMarker->snode,
                   state_no,
-                  find_successor_state_no(state_no, config->nMarker->snode));
+                  find_successor_state_no(state_no,
+                                          *new_states.states_new_array,
+                                          config->nMarker->snode));
             }
         }
         std::shared_ptr<Conflict>& c =
-          states_new_array->conflict_list[state_no];
+          this->new_states.states_new_array->conflict_list[state_no];
         if (c == nullptr) {
             states_inadequate->states[i] = -1;
             states_inadequate->count_unresolved--;
@@ -2071,20 +2042,20 @@ resolve_lalr1_conflicts(const Grammar& grammar)
     }
 
     if constexpr (DEBUG_RESOLVE_CONFLICT) {
-        print_parsing_table(grammar.fp_v, grammar);
+        print_parsing_table(this->grammar.fp_v, this->grammar);
     }
 }
 
-void
-write_conflicting_context(int state_no)
+static void
+write_conflicting_context(int state_no, const StateArray& states_new_array)
 {
-    std::shared_ptr<Conflict>& c = states_new_array->conflict_list[state_no];
+    const Conflict* c = states_new_array.conflict_list[state_no].get();
     if (c == nullptr)
         return;
 
     std::cout << "conflicting contexts: " << c->lookahead->symbol;
 
-    for (c = c->next; c != nullptr; c = c->next) {
+    for (c = c->next.get(); c != nullptr; c = c->next.get()) {
         std::cout << ", " << c->lookahead->symbol;
     }
 }
@@ -2122,51 +2093,50 @@ remove_pass_through_states(laneHead* lh_list) -> laneHead*
     return lh_list;
 }
 
-static void
-gpm(const Grammar& grammar,
-    std::optional<Queue>& config_queue,
-    State* new_state)
+void
+LaneTracing::gpm(State* new_state)
 {
-    if (Options::get().debug_gen_parsing_machine) {
+    if (this->options.debug_gen_parsing_machine) {
         std::cout << std::endl
                   << std::endl
                   << "--generate parsing machine--" << std::endl
-                  << "states_new count: " << states_new->state_count
-                  << std::endl;
+                  << "states_new count: "
+                  << this->new_states.states_new->state_count << std::endl;
     }
 
     while (new_state != nullptr) {
-        if (Options::get().debug_gen_parsing_machine) {
-            grammar.fp_v << states_new->state_count
-                         << " states, current state is " << new_state->state_no
-                         << std::endl;
+        if (this->options.debug_gen_parsing_machine) {
+            this->grammar.fp_v << this->new_states.states_new->state_count
+                               << " states, current state is "
+                               << new_state->state_no << std::endl;
         }
 
-        new_state->get_closure(grammar,
-                               config_queue); // get closure of this state.
+        new_state->get_closure(
+          this->grammar,
+          this->config_queue); // get closure of this state.
 
         // get successor states and add them to states_new.
-        new_state->transition(grammar, config_queue);
+        this->state_transition(*new_state);
 
         new_state = new_state->next; // point to next unprocessed state.
     }
 
-    ParsingTblRows = states_new->state_count;
-    n_state_opt1 = states_new->state_count;
+    ParsingTblRows = this->new_states.states_new->state_count;
+    n_state_opt1 = this->new_states.states_new->state_count;
 
-    std::cout << "LT-PGM end: states count: " << states_new->state_count
-              << std::endl;
+    std::cout << "LT-PGM end: states count: "
+              << this->new_states.states_new->state_count << std::endl;
 }
 
 /*
  * Adapted from transition() in y.c.
  */
 static auto
-get_state_successors(const Grammar& grammar, const State* s) -> StateCollection*
+get_state_successors(const Grammar& grammar, const State& s) -> StateCollection*
 {
     StateCollection* coll = create_state_collection();
 
-    for (const auto& c : s->config) {
+    for (const auto& c : s.config) {
         if (is_final_configuration(grammar, c)) {
             // do nothing.
         } else { // do transit operation.
@@ -2204,19 +2174,19 @@ get_state_successors(const Grammar& grammar, const State* s) -> StateCollection*
  * successor of s that has this trans_symbol.
  */
 static auto
-get_successor_index(const State* s, const SymbolTblNode* trans_symbol) -> int
+get_successor_index(const State& s, const SymbolTblNode* trans_symbol)
+  -> std::optional<size_t>
 {
-    for (int i = 0; i < s->successor_list.size(); i++) {
-        if (s->successor_list[i]->trans_symbol->snode == trans_symbol) {
+    for (size_t i = 0; i < s.successor_list.size(); i++) {
+        if (s.successor_list[i]->trans_symbol->snode == trans_symbol) {
             return i; // s->successor_list[i];
         }
     }
     // the following code should never be reached.
-    std::cout << "lane_tracing.c getCorrespondingSuccessor() error:"
-              << std::endl
-              << " nullptr found on state " << s->state_no << ", trans_symbol "
+    std::cout << "[lane_tracing.cpp get_successor_index] error:" << std::endl
+              << " nullptr found on state " << s.state_no << ", trans_symbol "
               << trans_symbol->symbol << std::endl;
-    return -1; // this should NEVER happen
+    return std::nullopt; // this should NEVER happen
 }
 
 /*
@@ -2228,39 +2198,35 @@ get_successor_index(const State* s, const SymbolTblNode* trans_symbol) -> int
  * @Return - true if a new state is really added.
  *          false if an existing state is found.
  */
-static auto
-add_split_state(const Grammar& grammar,
-                std::optional<Queue>& config_queue,
-                State* y,
-                State* s,
-                int successor_index) -> bool
+auto
+LaneTracing::add_split_state(State& y, State& s, size_t successor_index) -> bool
 {
-    int is_compatible = 0;
-    State* os = search_state_hash_tbl(
-      grammar, config_queue, y, &is_compatible); // same or compatible.
+    bool is_compatible = false;
+    State* os =
+      this->search_state_hash_tbl(y,
+                                  &is_compatible); // same or compatible.
 
     if (os == nullptr) { // No existing state found. Add Y as a new state.
-        y->state_no = states_new->state_count;
+        y.state_no = this->new_states.states_new->state_count;
         if constexpr (DEBUG_PHASE_2_REGENERATE) {
             // std::cout << "split - new state" << std::endl;
-            std::cout << "split - add new state " << y->state_no << std::endl;
+            std::cout << "split - add new state " << y.state_no << std::endl;
         }
-        states_new->add_state2(y);
-        states_new_array->add_state(y);
+        this->new_states.states_new->add_state2(&y);
+        this->new_states.states_new_array->add_state(&y);
         // update shift action.
-        update_action(
-          get_col(*y->trans_symbol->snode), s->state_no, y->state_no);
+        update_action(get_col(*y.trans_symbol->snode), s.state_no, y.state_no);
         // update the Y0 successor link of S to Y.
-        s->successor_list[successor_index] = y;
-        while (states_new->state_count >= PARSING_TABLE_SIZE) {
-            expand_parsing_table();
+        s.successor_list[successor_index] = &y;
+        while (this->new_states.states_new->state_count >= PARSING_TABLE_SIZE) {
+            expand_parsing_table(*this->new_states.states_new_array);
         }
         return true;
     } // same or compatible with an existing state.
     // std::cout << "split - old state" << std::endl;
-    update_action(get_col(*os->trans_symbol->snode), s->state_no, os->state_no);
-    s->successor_list[successor_index] = os;
-    State::destroy_state(y);
+    update_action(get_col(*os->trans_symbol->snode), s.state_no, os->state_no);
+    s.successor_list[successor_index] = os;
+    State::destroy_state(&y);
     return false;
 }
 
@@ -2301,15 +2267,15 @@ add_unique_queue(State* s, laneHead* lh_list) -> laneHead*
  * T will be destroyed, so its context lists can be moved to S.
  */
 static void
-regenerate_state_context(State* s, State* t)
+regenerate_state_context(State& s, const State& t)
 {
-    if (t->core_config_count != s->core_config_count) {
+    if (t.core_config_count != s.core_config_count) {
         throw std::runtime_error("regenerate error: inequal config_count");
     }
 
     // clear the context of S.
     for (const auto& config :
-         s->config) { // -> if final config, remove p.t. entry.
+         s.config) { // -> if final config, remove p.t. entry.
         Context* c = config->context;
         free_symbol_node_list(c->nContext);
         c->nContext = nullptr;
@@ -2317,9 +2283,9 @@ regenerate_state_context(State* s, State* t)
     }
 
     // copy the context from T to S.
-    const size_t ct = t->core_config_count;
+    const size_t ct = t.core_config_count;
     for (size_t i = 0; i < ct; i++) {
-        copy_context(s->config[i]->context, t->config[i]->context);
+        copy_context(s.config[i]->context, t.config[i]->context);
     }
 }
 
@@ -2327,12 +2293,12 @@ regenerate_state_context(State* s, State* t)
  * Combine the contexts from T to S. No propagation here.
  */
 static auto
-combine_state_context(State* s_dest, State* s_src) -> bool
+combine_state_context(State& s_dest, const State& s_src) -> bool
 {
     bool is_changed = false;
-    for (int i = 0; i < s_dest->core_config_count; i++) {
-        if (combine_context(s_dest->config[i]->context,
-                            s_src->config[i]->context)) {
+    for (int i = 0; i < s_dest.core_config_count; i++) {
+        if (combine_context(s_dest.config[i]->context,
+                            s_src.config[i]->context)) {
             is_changed = true;
         }
     }
@@ -2344,29 +2310,27 @@ combine_state_context(State* s_dest, State* s_src) -> bool
  * note that transition actions are handled by addSplitState()
  * or keep unchanged.
  */
-static void
-update_state_reduce_action(const Grammar& grammar, State* s)
+void
+LaneTracing::update_state_reduce_action(State& s)
 {
-    for (const auto& c : s->config) {
+    for (const auto& c : s.config) {
         // update reduce action for final/empty production.
-        if (is_final_configuration(grammar, c) ||
+        if (is_final_configuration(this->grammar, c) ||
             get_scanned_symbol(c)->symbol->empty()) {
             const SymbolNode* lookahead = c->context->nContext;
             for (; lookahead != nullptr; lookahead = lookahead->next) {
                 auto [action, state_dest] =
                   get_action(lookahead->snode->type,
                              get_col(*lookahead->snode),
-                             s->state_no);
+                             s.state_no);
                 if (state_dest != c->ruleID) {
-                    if (action == 0 || action == 'r') {
+                    if (action == '\0' || action == 'r') {
                         update_action(get_col(*lookahead->snode),
-                                      s->state_no,
+                                      s.state_no,
                                       (-1) * c->ruleID);
                     } else { // else, is "s" or "acc".
-                        insert_action(grammar,
-                                      lookahead->snode,
-                                      s->state_no,
-                                      (-1) * c->ruleID);
+                        this->insert_action(
+                          lookahead->snode, s.state_no, (-1) * c->ruleID);
                     }
                 }
             }
@@ -2404,10 +2368,8 @@ update_state_reduce_action(const Grammar& grammar, State* s)
  * GPM() on the new states.
  * ==END==
  */
-static void
-phase2_regeneration(const Grammar& grammar,
-                    std::optional<Queue>& config_queue,
-                    laneHead* lh_list)
+void
+LaneTracing::phase2_regeneration(laneHead* lh_list)
 {
     laneHead* h = lh_list;
     State* new_state = nullptr;
@@ -2415,64 +2377,67 @@ phase2_regeneration(const Grammar& grammar,
 
     // 1) handle the head states and PASS_THRU states.
     for (; h != nullptr; h = h->next) {
-        State* s = h->s;
-        s->get_closure(grammar,
-                       config_queue); // get_closure() is defined in y.c
-        update_state_reduce_action(grammar, s);
+        State& s = *h->s;
+        s.get_closure(grammar,
+                      config_queue); // get_closure() is defined in y.c
+        this->update_state_reduce_action(s);
 
         if constexpr (DEBUG_PHASE_2_REGENERATE) {
             std::cout << std::endl
                       << "==reg" << std::endl
-                      << "erate state " << s->state_no << std::endl;
-            my_write_state(grammar, *s);
+                      << "erate state " << s.state_no << std::endl;
+            my_write_state(grammar, s);
         }
         const StateCollection* coll = get_state_successors(grammar, s);
 
-        for (State* y = coll->states_head; y != nullptr; y = y->next) {
-            int successor_index =
-              get_successor_index(s, y->trans_symbol->snode);
-            if (successor_index == -1)
-                continue; // should NEVER happen.
-            State* y0 = s->successor_list[successor_index];
+        for (State* y_ptr = coll->states_head; y_ptr != nullptr;
+             y_ptr = y_ptr->next) {
+            State& y = *y_ptr;
+            std::optional<size_t> successor_index_opt =
+              get_successor_index(s, y.trans_symbol->snode);
 
-            if (y0->PASS_THRU == 0u) {
+            if (!successor_index_opt.has_value())
+                continue; // should NEVER happen.
+            size_t successor_index = *successor_index_opt;
+            State& y0 = *s.successor_list[successor_index];
+
+            if (y0.PASS_THRU == 0u) {
                 if constexpr (DEBUG_PHASE_2_REGENERATE) {
-                    std::cout << "state " << y0->state_no
+                    std::cout << "state " << y0.state_no
                               << " PASS_THRU == 0 - NOT on lane" << std::endl;
                 }
                 continue; // NOT on 'conflicting' lane.
             }
             if constexpr (DEBUG_PHASE_2_REGENERATE) {
-                std::cout << "state " << y0->state_no
+                std::cout << "state " << y0.state_no
                           << " PASS_THRU == 1 - on lane" << std::endl;
-                std::cout << y->trans_symbol->snode->symbol
+                std::cout << y.trans_symbol->snode->symbol
                           << " successor isOnConflictingLane" << std::endl;
             }
 
-            if (y0->REGENERATED == 0u) { // is original.
+            if (y0.REGENERATED == 0u) { // is original.
                 if constexpr (DEBUG_PHASE_2_REGENERATE) {
-                    std::cout << "replace - replace old state " << y0->state_no
+                    std::cout << "replace - replace old state " << y0.state_no
                               << std::endl;
                 }
                 // replace the context of Y0 with those of Y.
                 regenerate_state_context(y0, y);
-                y0->REGENERATED = 1;
-                lh_list = add_unique_queue(y0, lh_list);
+                y0.REGENERATED = 1;
+                lh_list = add_unique_queue(&y0, lh_list);
             } else { // is regenerated state.
-                exists = is_compatible_states(y0, y);
+                exists = is_compatible_states(&y0, &y);
 
                 if (exists) {
                     if constexpr (DEBUG_PHASE_2_REGENERATE) {
                         std::cout << "combine to compatible state "
-                                  << y0->state_no << std::endl;
+                                  << y0.state_no << std::endl;
                     }
                     combine_state_context(y0, y);
-                    lh_list = add_unique_queue(y0, lh_list);
+                    lh_list = add_unique_queue(&y0, lh_list);
                 } else {
-                    if (add_split_state(
-                          grammar, config_queue, y, s, successor_index)) {
+                    if (this->add_split_state(y, s, successor_index)) {
                         if (new_state == nullptr) {
-                            new_state = y;
+                            new_state = &y;
                         }
                         if constexpr (DEBUG_PHASE_2_REGENERATE) {
                             std::cout << "split - new state added" << std::endl;
@@ -2480,8 +2445,8 @@ phase2_regeneration(const Grammar& grammar,
                     }
                 }
             }
-        } // end of for.
-    }     // end of for.
+        }
+    }
 
     // 2) handle the new added states.
     //    If there are any new split states, do GPM on them.
@@ -2489,7 +2454,7 @@ phase2_regeneration(const Grammar& grammar,
         if constexpr (DEBUG_PHASE_2_REGENERATE) {
             std::cout << "GRM(new_state) now." << std::endl;
         }
-        gpm(grammar, config_queue, new_state);
+        this->gpm(new_state);
     }
 }
 
@@ -2508,8 +2473,8 @@ write_the_symbol_list(SymbolList a)
     std::cout << "}";
 }
 
-static auto
-get_the_context(const Grammar& grammar, const Configuration* o) -> SymbolNode*
+auto
+LaneTracing::get_the_context(const Configuration* o) const -> SymbolNode*
 {
     if (o == nullptr)
         return nullptr;
@@ -2520,7 +2485,7 @@ get_the_context(const Grammar& grammar, const Configuration* o) -> SymbolNode*
 
     SymbolNode* gamma = scanned_symbol->next;
     SymbolNode* gamma_theads =
-      get_theads(grammar, gamma); // Note nullptr is a valid terminal.
+      get_theads(this->grammar, gamma); // Note nullptr is a valid terminal.
 
     // note that "" will be the first node in the INC list,
     // so it's not so inefficient.
@@ -2539,7 +2504,10 @@ get_the_context(const Grammar& grammar, const Configuration* o) -> SymbolNode*
         }
     }
 
-    lt_tbl_entry_add_context(o->owner, gamma_theads); // add context.
+    lt_tbl_entry_add_context(
+      o->owner,
+      gamma_theads,
+      *this->new_states.states_new_array); // add context.
 
     return gamma_theads;
 }
@@ -2558,10 +2526,9 @@ get_the_context(const Grammar& grammar, const Configuration* o) -> SymbolNode*
  * c is the originator of c0.
  */
 auto
-trace_back(const Grammar& grammar,
-           const Configuration* c0,
-           Configuration* c,
-           laneHead* lh_list) -> laneHead*
+LaneTracing::trace_back(const Configuration* c0,
+                        Configuration* c,
+                        laneHead* lh_list) const -> laneHead*
 {
     c->LANE_CON = 1; // set as config on conflicting lane.
 
@@ -2579,7 +2546,7 @@ trace_back(const Grammar& grammar,
                       << "." << c->ruleID << " " << std::endl;
         }
 
-        if (Options::get().use_lr_k) { // for LR(k) use only.
+        if (this->options.use_lr_k) { // for LR(k) use only.
             if constexpr (DEBUG_PHASE_2_GET_TBL) {
                 std::cout << "config_red_config: "
                           << cur_red_config->owner->state_no << "."
@@ -2605,7 +2572,8 @@ trace_back(const Grammar& grammar,
     }
 
     for (Configuration* o : c->originators->list) {
-        set_transitors_pass_thru_on(grammar, *c, o); // set PASS_THRU ON.
+        this->set_transitors_pass_thru_on(*c,
+                                          o); // set PASS_THRU ON.
         if (o->LANE_CON == 0u) {
             if constexpr (DEBUG_PHASE_2) {
                 std::cout << "config on lane: " << o->owner->state_no << "."
@@ -2619,7 +2587,7 @@ trace_back(const Grammar& grammar,
                 }
             }
 
-            lh_list = trace_back(grammar, c, o, lh_list);
+            lh_list = this->trace_back(c, o, lh_list);
         } else {
             if constexpr (DEBUG_PHASE_2) {
                 std::cout << "already traced: " << o->owner->state_no << "."
@@ -2722,14 +2690,13 @@ trace_back_lrk_clear(const Configuration* c0, Configuration* c)
  *
  * Do this by tracing back each final config from this state.
  */
-static auto
-get_state_conflict_lane_head(const Grammar& grammar,
-                             int state_no,
-                             laneHead* lh_list) -> laneHead*
+auto
+LaneTracing::get_state_conflict_lane_head(int state_no, laneHead* lh_list) const
+  -> laneHead*
 {
-    const State* s = states_new_array->state_list[state_no];
+    const State* s = this->new_states.states_new_array->state_list[state_no];
     for (const auto& con : s->config) {
-        if (is_final_configuration(grammar, con)) {
+        if (is_final_configuration(this->grammar, con)) {
             if constexpr (DEBUG_PHASE_2) {
                 std::cout << std::endl
                           << "final config: " << state_no << '.' << con->ruleID
@@ -2742,7 +2709,7 @@ get_state_conflict_lane_head(const Grammar& grammar,
                           << con->ruleID << std::endl;
             }
             cur_red_config = con;
-            lh_list = trace_back(grammar, nullptr, con, lh_list);
+            lh_list = this->trace_back(nullptr, con, lh_list);
         }
     }
 
@@ -2753,8 +2720,8 @@ get_state_conflict_lane_head(const Grammar& grammar,
  * Get those states from which conflicting lanes start from,
  * and their associated conflicting contexts.
  */
-static auto
-get_conflict_lane_head(const Grammar& grammar) -> laneHead*
+auto
+LaneTracing::get_conflict_lane_head() const -> laneHead*
 {
     laneHead* lane_head_list = nullptr;
 
@@ -2762,16 +2729,19 @@ get_conflict_lane_head(const Grammar& grammar) -> laneHead*
         if (state_no >= 0) {
             if constexpr (DEBUG_GET_LANEHEAD) {
                 std::cout << "inadequate state: " << state_no << ". ";
-                write_conflicting_context(state_no);
+                write_conflicting_context(state_no,
+                                          *this->new_states.states_new_array);
             }
 
-            if (states_new_array->rr_count[state_no] > 0) {
+            if (this->new_states.states_new_array->rr_count[state_no] > 0) {
                 if constexpr (DEBUG_GET_LANEHEAD) {
-                    std::cout << " [" << states_new_array->rr_count[state_no]
-                              << " r/r conflicts]";
+                    std::cout
+                      << " ["
+                      << this->new_states.states_new_array->rr_count[state_no]
+                      << " r/r conflicts]";
                 }
-                lane_head_list = get_state_conflict_lane_head(
-                  grammar, state_no, lane_head_list);
+                lane_head_list =
+                  this->get_state_conflict_lane_head(state_no, lane_head_list);
             }
 
             if constexpr (DEBUG_GET_LANEHEAD) {
@@ -2789,8 +2759,8 @@ get_conflict_lane_head(const Grammar& grammar) -> laneHead*
     return lane_head_list;
 }
 
-static void
-lane_tracing_phase2(const Grammar& grammar, std::optional<Queue>& config_queue)
+void
+LaneTracing::phase2()
 {
     lane_head_tail_pairs = nullptr; // for LR(k) use only.
     LT_tbl = nullptr;               // initialize the LT_tbl.
@@ -2801,7 +2771,7 @@ lane_tracing_phase2(const Grammar& grammar, std::optional<Queue>& config_queue)
                   << std::endl;
     }
 
-    laneHead* lane_head_list = get_conflict_lane_head(grammar);
+    laneHead* lane_head_list = this->get_conflict_lane_head();
     if (lane_head_list == nullptr) {
         std::cout << "laneHeadList is nullptr. return" << std::endl;
         return;
@@ -2815,36 +2785,35 @@ lane_tracing_phase2(const Grammar& grammar, std::optional<Queue>& config_queue)
         std::cout << "Now do regeneration" << std::endl;
     }
 
-    if (!Options::get().use_combine_compatible_states) {
-        phase2_regeneration2(grammar, config_queue); // using all_clusters.
+    if (!this->options.use_combine_compatible_states) {
+        this->phase2_regeneration2(); // using all_clusters.
     } else {
-        phase2_regeneration(grammar, config_queue, lane_head_list);
+        this->phase2_regeneration(lane_head_list);
     }
 }
 
 auto
-lane_tracing(const Grammar& grammar, std::optional<Queue>& config_queue)
-  -> std::optional<LRkPTArray>
+LaneTracing::lane_tracing() -> std::optional<LRkPTArray>
 {
-    auto& options = Options::get();
     std::optional<LRkPTArray> lrk_pt_array = std::nullopt;
     IN_EDGE_PUSHING_LANE_TRACING = false;
     MAX_K = 1; // max K used in LR(k).
 
-    lane_tracing_phase1(grammar);
-    resolve_lalr1_conflicts(grammar);
+    this->phase1();
+    this->resolve_lalr1_conflicts();
 
-    if (options.use_lane_tracing && states_inadequate->count_unresolved > 0) {
-        lane_tracing_phase2(grammar, config_queue);
-        resolve_lalr1_conflicts(grammar);   ///
-        output_parsing_table_lalr(grammar); ///
+    if (this->options.use_lane_tracing &&
+        states_inadequate->count_unresolved > 0) {
+        this->phase2();
+        this->resolve_lalr1_conflicts();
+        this->output_parsing_table_lalr();
 
-        if (options.use_lr_k && rr_count > 0) {
+        if (this->options.use_lr_k && new_states.conflicts_count.rr > 0) {
             // do LR(k) if there are still r/r conflicts.
-            lrk_pt_array = lane_tracing_lrk(grammar);
+            lrk_pt_array = this->lane_tracing_lrk();
         }
     } else {
-        output_parsing_table_lalr(grammar); // is this needed?
+        this->output_parsing_table_lalr(); // is this needed?
     }
 
     if (GRAMMAR_AMBIGUOUS) {
@@ -3225,17 +3194,16 @@ is_on_transitor_chain(Configuration* c, Configuration* o) -> bool
  * o - the originator. o does not change in the call stack.
  */
 void
-set_transitors_pass_thru_on(const Grammar& grammar,
-                            const Configuration& cur_config,
-                            Configuration* o)
+LaneTracing::set_transitors_pass_thru_on(const Configuration& cur_config,
+                                         Configuration* o) const
 {
     // find the next transitor for originator o.
     for (Configuration* c : cur_config.transitors->list) {
-        get_originators(grammar, c, c);
+        get_originators(this->grammar, c, c);
 
         if (is_on_transitor_chain(c, o)) {
 
-            if (false == Options::get().use_combine_compatible_states) {
+            if (!this->options.use_combine_compatible_states) {
                 if constexpr (DEBUG_PHASE_2_GET_TBL) {
                     std::cout << "B: next entry in entry_table: ("
                               << c->owner->state_no << "." << c->ruleID << ", "
@@ -3243,7 +3211,9 @@ set_transitors_pass_thru_on(const Grammar& grammar,
                               << cur_config.ruleID << ")" << std::endl;
                 }
                 // add another entry to LT_tbl.
-                lt_tbl_entry_add(c->owner, cur_config.owner);
+                lt_tbl_entry_add(c->owner,
+                                 cur_config.owner,
+                                 *this->new_states.states_new_array);
             }
 
             if (c->owner != cur_config.owner && c->owner != o->owner) {
@@ -3257,12 +3227,12 @@ set_transitors_pass_thru_on(const Grammar& grammar,
                 }
                 c->owner->PASS_THRU = 1;
             }
-            set_transitors_pass_thru_on(grammar, *c, o);
+            this->set_transitors_pass_thru_on(*c, o);
         } // end is_on_transitor_chain.
     }
 
     if (o->owner == cur_config.owner) {
-        get_the_context(grammar, o);
+        this->get_the_context(o);
     }
 }
 

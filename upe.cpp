@@ -235,12 +235,11 @@ Grammar::is_unit_production(size_t rule_no) const -> bool
 /*
  * Called by function insert_actionsOfCombinedStates().
  */
-static void
-insert_action_of_symbol(const Grammar& grammar,
-                        SymbolTblNode* symbol,
-                        int new_state,
-                        int old_state_index,
-                        std::vector<int>& old_states)
+void
+YAlgorithm::insert_action_of_symbol(SymbolTblNode* symbol,
+                                    const int new_state,
+                                    const size_t old_state_index,
+                                    std::vector<int>& old_states)
 {
     auto [action, state_dest] =
       get_action(symbol->type, get_col(*symbol), old_states[old_state_index]);
@@ -252,12 +251,12 @@ insert_action_of_symbol(const Grammar& grammar,
   //%d on symbol %s\n", action, state_dest, new_state, symbol->symbol);
 
     if (action == 'a') {
-        insert_action(grammar, symbol, new_state, CONST_ACC);
+        this->insert_action(symbol, new_state, CONST_ACC);
     } else if (action == 's' || action == 'g') {
-        insert_action(grammar, symbol, new_state, state_dest);
+        this->insert_action(symbol, new_state, state_dest);
     } else if (action == 'r') {
         if (!grammar.is_unit_production(state_dest)) {
-            insert_action(grammar, symbol, new_state, (-1) * state_dest);
+            this->insert_action(symbol, new_state, (-1) * state_dest);
         }
     }
 }
@@ -270,10 +269,9 @@ insert_action_of_symbol(const Grammar& grammar,
  * Called by remove_unit_production_step1and2() only.
  */
 void
-insert_actions_of_combined_states(const Grammar& grammar,
-                                  int new_state,
-                                  int src_state,
-                                  std::vector<int>& old_states)
+YAlgorithm::insert_actions_of_combined_states(int new_state,
+                                              int src_state,
+                                              std::vector<int>& old_states)
 {
     // std::cout << "Source state: " <<  src_state<< ". ";
     // std::cout << "Combine these states into state " <<  new_state<< ":" <<
@@ -284,21 +282,20 @@ insert_actions_of_combined_states(const Grammar& grammar,
 
     for (int i = 0; i < old_states.size(); i++) {
         // Copy action of end marker STR_END.
-        insert_action_of_symbol(
-          grammar, hash_tbl_find(STR_END), new_state, i, old_states);
+        this->insert_action_of_symbol(
+          hash_tbl_find(STR_END), new_state, i, old_states);
 
         // copy actions of terminals.
-        for (const SymbolNode* a = grammar.terminal_list; a != nullptr;
+        for (const SymbolNode* a = this->grammar.terminal_list; a != nullptr;
              a = a->next) {
-            insert_action_of_symbol(
-              grammar, a->snode, new_state, i, old_states);
+            this->insert_action_of_symbol(a->snode, new_state, i, old_states);
         }
 
         // copy actions of non_terminals.
-        for (const SymbolNode* a = grammar.non_terminal_list; a != nullptr;
+        for (const SymbolNode* a = this->grammar.non_terminal_list;
+             a != nullptr;
              a = a->next) {
-            insert_action_of_symbol(
-              grammar, a->snode, new_state, i, old_states);
+            this->insert_action_of_symbol(a->snode, new_state, i, old_states);
         }
     } // end for
 }
@@ -631,9 +628,8 @@ remove_unit_production_step5(const Grammar& grammar, const MRLeaves& mr_leaves)
     }
 }
 
-static void
-remove_unit_production_step1and2(const Grammar& grammar,
-                                 const MRLeaves& mr_leaves)
+void
+YAlgorithm::remove_unit_production_step1and2(const MRLeaves& mr_leaves)
 {
     bool debug_remove_up_step_1_2 = Options::get().debug_remove_up_step_1_2;
     // as discussed in the function comments of getUnitProdShift(),
@@ -672,14 +668,15 @@ remove_unit_production_step1and2(const Grammar& grammar,
                     ups_state = ParsingTblRows;
                     ParsingTblRows++;
                     if (ParsingTblRows >= PARSING_TABLE_SIZE) {
-                        expand_parsing_table();
+                        expand_parsing_table(
+                          *this->new_states.states_new_array);
                     }
                     create_new_ups_state(ups, ups_state, unit_prod_dest_states);
 
                     // Combine actions of states into state ups_state.
                     // Do this only if this combined state does not exist yet.
-                    insert_actions_of_combined_states(
-                      grammar, ups_state, state, unit_prod_dest_states);
+                    this->insert_actions_of_combined_states(
+                      ups_state, state, unit_prod_dest_states);
                 }
 
                 // Update the link from src_state to leaf transition state
@@ -705,14 +702,14 @@ remove_unit_production_step1and2(const Grammar& grammar,
 // Dr. Pager, Acta Informatica 9, 31-59 (1977), page 38.
 ////////////////////////////////////////////////////////
 void
-remove_unit_production(const Grammar& grammar)
+YAlgorithm::remove_unit_production()
 {
-    MRLeaves mr_leaves = build_multirooted_tree(grammar);
+    MRLeaves mr_leaves = build_multirooted_tree(this->grammar);
 
-    remove_unit_production_step1and2(grammar, mr_leaves);
-    remove_unit_production_step3(grammar);
-    remove_unit_production_step4(grammar);
-    remove_unit_production_step5(grammar, mr_leaves);
+    remove_unit_production_step1and2(mr_leaves);
+    remove_unit_production_step3(this->grammar);
+    remove_unit_production_step4(this->grammar);
+    remove_unit_production_step5(this->grammar, mr_leaves);
 
     n_state_opt12 = states_reachable.size() + 1;
 }
@@ -729,7 +726,7 @@ remove_unit_production(const Grammar& grammar)
  * Determine if rows i and j in the parsing table are the same.
  */
 auto
-is_equal_row(int i, int j) -> bool
+is_equal_row(const int i, const int j) -> bool
 {
     for (int col = 0; col < ParsingTblCols; col++) {
         SymbolTblNode* n = ParsingTblColHdr[col];
@@ -752,8 +749,8 @@ update_repeated_row(const Grammar& grammar,
                     int old_state,
                     int row)
 {
-    // std::cout << "In row " <<  row<< ", replace " <<  old_state<< " by " <<
-    // new_state << std::endl;
+    // std::cout << "In row " << row << ", replace " << old_state << " by "
+    //           << new_state << std::endl;
 
     // for end marker column STR_END
     SymbolTblNode* n = hash_tbl_find(STR_END);

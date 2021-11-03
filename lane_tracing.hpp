@@ -120,7 +120,8 @@ extern LtCluster* all_clusters;
 /* Functions */
 
 extern auto
-lt_tbl_entry_find(State* from) -> LtTblEntry*;
+lt_tbl_entry_find(State* from, const StateArray& states_new_array)
+  -> LtTblEntry*;
 
 /*
  * Data structures in lrk.c
@@ -200,21 +201,10 @@ extern LRkPtEntry* LRk_PT; // extension parsing table for LR(k).
 /*
  * Functions in lane_tracing.c
  */
-extern auto
-trace_back(const Grammar& grammar,
-           const Configuration* c0,
-           Configuration* c,
-           laneHead* lh_list) -> laneHead*;
 extern void
 trace_back_lrk(const Configuration* c0, Configuration* c);
 extern void
 trace_back_lrk_clear(const Configuration* c0, Configuration* c);
-
-/*
- * Functions in lrk.cpp
- */
-[[nodiscard]] extern auto
-lane_tracing_lrk(const Grammar& grammar) -> std::optional<LRkPTArray>;
 
 // Set - a linked list of objects.
 struct ObjectItem
@@ -336,6 +326,61 @@ struct CfgCtxt
 extern auto
 lrk_theads(const Grammar& grammar, SymbolList alpha, int k)
   -> std::shared_ptr<List>;
+
+/// @brief Holds the information passed to the lane-tracing algorithm.
+class LaneTracing : public YAlgorithm
+{
+  public:
+    explicit LaneTracing(const Grammar& grammar,
+                         const Options& options,
+                         NewStates& new_states,
+                         std::optional<Queue>& config_queue)
+      : YAlgorithm(grammar, options, new_states, config_queue)
+    {}
+    [[nodiscard]] auto lane_tracing() -> std::optional<LRkPTArray>;
+
+  private:
+    void phase1();
+    void phase2();
+    void gpm(State* new_state);
+    auto add_split_state(State& y, State& s, size_t successor_index) -> bool;
+    void update_state_reduce_action(State& s);
+    void phase2_regeneration(laneHead* lh_list);
+    void phase2_regeneration2();
+    void set_transitors_pass_thru_on(const Configuration& cur_config,
+                                     Configuration* o) const;
+    void inherit_propagate(int state_no,
+                           int parent_state_no,
+                           LtCluster* container,
+                           LtTblEntry* e);
+    void lt_phase2_propagate_context_change(int state_no,
+                                            LtCluster* c,
+                                            LtTblEntry* e);
+    void clear_regenerate(int state_no);
+    void clear_inherit_regenerate(int state_no, int parent_state_no);
+    auto cluster_trace_new_chain_all(int parent_state, const LtTblEntry* e)
+      -> bool;
+    auto cluster_trace_new_chain(int parent_state_no, int state_no) -> bool;
+    auto cluster_add_lt_tbl_entry(LtCluster* c,
+                                  int from_state,
+                                  LlistContextSet* e_ctxt,
+                                  size_t e_parent_state_no,
+                                  bool copy) const -> int;
+    auto get_the_context(const Configuration* o) const -> SymbolNode*;
+    auto trace_back(const Configuration* c0,
+                    Configuration* c,
+                    laneHead* lh_list) const -> laneHead*;
+    [[nodiscard]] auto get_state_conflict_lane_head(int state_no,
+                                                    laneHead* lh_list) const
+      -> laneHead*;
+    [[nodiscard]] auto get_conflict_lane_head() const -> laneHead*;
+    void get_inadequate_state_reduce_config_context(const State* s) const;
+    void resolve_lalr1_conflicts();
+
+    // In `lrk.cpp`
+    [[nodiscard]] auto lane_tracing_lrk() -> std::optional<LRkPTArray>;
+    void edge_pushing(LRkPTArray& lrk_pt_array, int state_no) const;
+};
 
 // in the lane_tracing of edge_pushing.
 extern bool IN_EDGE_PUSHING_LANE_TRACING;

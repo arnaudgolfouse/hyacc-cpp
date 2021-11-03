@@ -30,6 +30,7 @@
 #include "y.hpp"
 #include <charconv>
 #include <cstddef>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <optional>
@@ -325,7 +326,8 @@ get_start_symbol(const std::optional<std::string> token_type,
  * like when the ysymbol is a string "abc" and not a number.
  */
 static void
-get_expect_sr_conflict(GetYaccGrammarOutput& output)
+get_expect_sr_conflict(GetYaccGrammarOutput& output,
+                       uint32_t expected_sr_conflict)
 {
     if (output.get_symbol().empty())
         return;
@@ -349,16 +351,9 @@ get_expect_sr_conflict(GetYaccGrammarOutput& output)
     }
     if (ec == std::errc::result_out_of_range) {
         throw std::runtime_error(
-          std::string("This number is larger than an int: '")
+          std::string("This number is larger than an uint32_t: '")
             .append(output.get_symbol()) +
           '\'');
-    }
-    if (expected_sr_conflict < 0) {
-        using std::to_string;
-        throw std::runtime_error(
-          std::string("error [") + to_string(output.position.line) + ", " +
-          to_string(output.position.col) + "]: %expect value " +
-          std::string(output.get_symbol()) + " is not positive");
     }
     if (expected_sr_conflict == 0) {
         using std::to_string;
@@ -460,7 +455,9 @@ my_perror(const std::string_view msg, const char c, const Position position)
  */
 static auto
 process_yacc_file_input_section1(std::ifstream& fp,
-                                 GetYaccGrammarOutput& output) -> Section1Output
+                                 GetYaccGrammarOutput& output,
+                                 const uint32_t expected_sr_conflict)
+  -> Section1Output
 {
     int precedence = 0;
     yacc_section1_state state = IS_NONE,
@@ -645,7 +642,7 @@ process_yacc_file_input_section1(std::ifstream& fp,
             if (isspace(c) && output.get_symbol().empty()) {
                 // ignore white space.
             } else if (isspace(c)) {
-                get_expect_sr_conflict(output);
+                get_expect_sr_conflict(output, expected_sr_conflict);
             } else {
                 output.add_char_to_symbol(c);
             }
@@ -1683,8 +1680,6 @@ GetYaccGrammarOutput::GetYaccGrammarOutput(std::ofstream& fp_v)
     for (auto i = 0; i < SYMBOL_INIT_SIZE; i++) {
         this->ysymbol.push_back(-1);
     }
-
-    expected_sr_conflict = 0;
 }
 
 /*
@@ -1694,8 +1689,9 @@ GetYaccGrammarOutput::GetYaccGrammarOutput(std::ofstream& fp_v)
  * Called by function main() in y.c.
  */
 auto
-get_yacc_grammar(const std::string& infile, std::ofstream& fp_v)
-  -> GetYaccGrammarOutput
+get_yacc_grammar(const std::string& infile,
+                 std::ofstream& fp_v,
+                 uint32_t& expected_sr_conflict) -> GetYaccGrammarOutput
 {
     if constexpr (DEBUG_YACC_INPUT_PARSER) {
         std::cout << "input file: " << infile << std::endl;
@@ -1708,13 +1704,14 @@ get_yacc_grammar(const std::string& infile, std::ofstream& fp_v)
     }
 
     GetYaccGrammarOutput output = GetYaccGrammarOutput(fp_v);
+    expected_sr_conflict = 0;
 
     if constexpr (ADD_GOAL_RULE) {
         get_goal_rule_lhs(output.grammar);
     }
 
     Section1Output section1_output =
-      process_yacc_file_input_section1(fp, output);
+      process_yacc_file_input_section1(fp, output, expected_sr_conflict);
     SymNode* tokens_tail = section1_output.tokens_tail;
     SymbolTableNode* start_symbol = section1_output.start_symbol;
     process_yacc_file_input_section2(output, tokens_tail, fp);
