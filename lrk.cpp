@@ -31,11 +31,10 @@
 #include "lane_tracing.hpp"
 #include "y.hpp"
 #include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <optional>
-
-constexpr bool DEBUG_LRK = false;
 
 /** For (conflict_config, lane_end_config) pairs. */
 ConfigPairList lane_head_tail_pairs;
@@ -90,7 +89,7 @@ test_int()
 
     set_dump(s, &print_int);
     s = set_insert(s, (void*)&j);
-    s = set_insert(s, (void*)&j);
+    s = set_insert(s, (void*)&k);
     s = set_delete(s, (void*)&i);
     s = set_delete(s, (void*)&j);
     set_dump(s, &print_int);
@@ -230,8 +229,7 @@ insert_lrk_pt(LRkPTArray& lrk_pt_array,
         } else { // exist is true, and c0 != nullptr.
             CfgCtxt* cc = CfgCtxt::create(c, SymbolNode::create(col), c_tail);
             set_c2 = insert_cfg_ctxt_to_set(cc, set_c2);
-            if (c0->end ==
-                reinterpret_cast<Configuration*>(CONST_CONFLICT_SYMBOL)) {
+            if (reinterpret_cast<uintptr_t>(c0->end) == CONST_CONFLICT_SYMBOL) {
                 // do nothing.
             } else {
                 cc =
@@ -258,10 +256,10 @@ LaneTracing::lrk_config_lane_tracing(Configuration* c) noexcept
     cur_red_config = c;
 
     // get LANE_END configs and add to lane_head_tail_pairs list.
-    trace_back_lrk(nullptr, c);
+    trace_back_lrk(c);
 
     // clear the LANE_CON flag of configurations on conflicting lanes.
-    trace_back_lrk_clear(nullptr, c);
+    trace_back_lrk_clear(c);
 
     c->LANE_END = 1; // recover the value of c->LANE_END.
     // note that the value of cur_red_config does not need recovery.

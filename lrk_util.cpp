@@ -924,7 +924,7 @@ List::add_derivatives(const Grammar& grammar, ObjectItem* o, int j, int k)
             n = n->next;
         }
 
-        new_list = replace_with_rhs(grammar, new_list, n_prev, r->ruleID);
+        new_list = replace_with_rhs(grammar, new_list, n_prev, r->rule_id);
         // assumption: new_list != nullptr, t != nullptr.
         if (nullptr != new_list) {
             new_list = lrk_theads_truncate_list_by_k(new_list, k);

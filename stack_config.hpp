@@ -35,29 +35,38 @@
 
 struct Stack
 {
-    std::vector<Configuration*> array;
+    std::vector<std::optional<Configuration*>> array;
 
     explicit Stack() { this->array.reserve(Stack::INIT_SIZE); }
 
     void dump(const Grammar& grammar) const noexcept;
-    inline void push(Configuration* n) { this->array.push_back(n); }
-    inline auto pop() -> Configuration*
+    inline void push(std::optional<Configuration*> n)
+    {
+        this->array.push_back(n);
+    }
+    /// Pop the element at the top of the stack.
+    ///
+    /// If the stack if empty, this will return `nullptr`.
+    inline auto pop() -> std::optional<Configuration*>
     {
         if (this->array.empty()) {
             if (Stack::USE_WARNING)
-                std::cout << "stack_pop warning: underflow, return nullptr"
+                std::cerr << "Stack::pop warning: underflow, return nullptr"
                           << std::endl;
             return nullptr;
         }
-        auto* last = this->array.back();
+        auto last = this->array.back();
         this->array.pop_back();
         return last;
     }
-    inline auto top() -> Configuration*
+    /// Get the element at the top of the stack.
+    ///
+    /// If the stack if empty, this will return `nullptr`.
+    [[nodiscard]] inline auto top() const -> std::optional<Configuration*>
     {
         if (this->array.empty()) {
             if (Stack::USE_WARNING)
-                std::cout << "stack_pop warning: underflow, return nullptr"
+                std::cerr << "Stack::top warning: underflow, return nullptr"
                           << std::endl;
             return nullptr;
         }

@@ -134,7 +134,7 @@ extern std::atomic_int MAX_K;
 
 struct RuleIndexNode
 {
-    int ruleID;
+    size_t rule_id;
     RuleIndexNode* next;
 };
 using RuleIDNode = struct RuleIndexNode;
@@ -928,7 +928,7 @@ free_symbol_node(SymbolNode* n);
 extern void
 free_symbol_node_list(SymbolNode* a);
 extern auto
-create_rule_id_node(int rule_id) -> RuleIDNode*;
+create_rule_id_node(size_t rule_id) -> RuleIDNode*;
 extern void
 write_symbol_list(SymbolList a, const std::string_view name);
 extern auto

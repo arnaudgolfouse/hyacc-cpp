@@ -62,11 +62,11 @@ get_config_successors_lr0(const Grammar& grammar, Queue& config_queue, State* s)
                     // Grammar.rules[r->ruleID] starts with this scanned symbol.
 
                     // If not an existing config, add to state s.
-                    int index = is_compatible_successor_config(s, r->ruleID);
+                    int index = is_compatible_successor_config(s, r->rule_id);
 
                     if (index == -1) { // new config.
                         add_successor_config_to_state_lr0(
-                          grammar, s, r->ruleID);
+                          grammar, s, r->rule_id);
                         config_queue.push(static_cast<int>(s->config.size()) -
                                           1);
                         index = static_cast<int>(s->config.size()) - 1;

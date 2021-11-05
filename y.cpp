@@ -876,7 +876,7 @@ get_theads(const Grammar& grammar, SymbolNode* alpha) -> SymbolNode*
     for (n = heads->next; n != nullptr; n = n->next) {
         for (const RuleIDNode* rules = n->snode->ruleIDList; rules != nullptr;
              rules = rules->next) {
-            Production* p = grammar.rules[rules->ruleID];
+            Production* p = grammar.rules[rules->rule_id];
             insert_rhs_to_heads(p->nRHS_head, heads, theads);
         }
     }
@@ -1288,11 +1288,11 @@ get_config_successors(const Grammar& grammar, Queue& config_queue, State* s)
 
                     // If not an existing config, add to state s.
                     const int index =
-                      is_compatible_successor_config(s, r->ruleID);
+                      is_compatible_successor_config(s, r->rule_id);
 
                     if (index == -1) { // new config.
                         add_successor_config_to_state(
-                          grammar, s, r->ruleID, &tmp_context);
+                          grammar, s, r->rule_id, &tmp_context);
                         config_queue.push(s->config.size() - 1);
 
                     } else if (combine_context(
@@ -1347,10 +1347,10 @@ get_successor_for_config(const Grammar& grammar,
                 // symbol.
 
                 // If not an existing config, add to state s.
-                if (is_existing_successor_config(s, r->ruleID, &tmp_context) ==
+                if (is_existing_successor_config(s, r->rule_id, &tmp_context) ==
                     false) {
                     add_successor_config_to_state(
-                      grammar, s, r->ruleID, &tmp_context);
+                      grammar, s, r->rule_id, &tmp_context);
                 }
 
             } // end for

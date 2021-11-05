@@ -44,13 +44,13 @@ constexpr bool DEBUG_HASHTBL = false;
  *******************************************/
 
 auto
-create_rule_id_node(int rule_id) -> RuleIDNode*
+create_rule_id_node(size_t rule_id) -> RuleIDNode*
 {
     auto* r = new RuleIDNode;
     if (r == nullptr)
         throw std::runtime_error("create_rule_id_node: out of memory\n");
 
-    r->ruleID = rule_id;
+    r->rule_id = rule_id;
     r->next = nullptr;
     return r;
 }
@@ -61,10 +61,10 @@ write_rule_id_list(const SymbolTblNode& n)
     RuleIDNode* a = n.ruleIDList;
     std::cout << *n.symbol << ": ";
     if (a != nullptr) {
-        std::cout << a->ruleID;
+        std::cout << a->rule_id;
 
         for (a = a->next; a != nullptr; a = a->next) {
-            std::cout << ", " << a->ruleID;
+            std::cout << ", " << a->rule_id;
         }
     }
     std::cout << std::endl;
@@ -358,7 +358,7 @@ create_symbol_tbl_node(const std::string_view symbol) -> SymbolTblNode*
  * Empty string and EOF '$' are _NEITHER type.
  */
 static auto
-get_symbol_type(SymbolTblNode* n) -> const std::string_view
+get_symbol_type(const SymbolTblNode* n) -> const std::string_view
 {
     if (n->type == symbol_type::TERMINAL)
         return "T";
@@ -386,9 +386,9 @@ get_assoc_name(associativity a) -> const std::string_view
 void
 hash_tbl_init()
 {
-    for (int i = 0; i < HT_SIZE; i++) {
-        HashTbl[i].count = 0;
-        HashTbl[i].next = nullptr;
+    for (auto& elem : HashTbl) {
+        elem.count = 0;
+        elem.next = nullptr;
     }
 
     if constexpr (DEBUG_HASHTBL) {
@@ -491,9 +491,9 @@ hash_tbl_destroy()
     SymbolTblNode* nnext = nullptr;
 
     // std::cout << "--destroy hash table--" << std::endl;
-    for (int i = 0; i < HT_SIZE; i++) {
-        if (HashTbl[i].count > 0) {
-            for (SymbolTblNode* n = HashTbl[i].next; n != nullptr; n = nnext) {
+    for (auto& elem : HashTbl) {
+        if (elem.count > 0) {
+            for (SymbolTblNode* n = elem.next; n != nullptr; n = nnext) {
                 nnext = n->next;
                 // std::cout << "freeing node for " << *n->symbol << std::endl;
                 destroy_rule_id_list(n->ruleIDList);
@@ -504,7 +504,7 @@ hash_tbl_destroy()
 }
 
 static void
-symbol_tbl_node_dump(std::ostream& os, SymbolTblNode* n)
+symbol_tbl_node_dump(std::ostream& os, const SymbolTblNode* n)
 {
     os << *n->symbol << " [type=" << get_symbol_type(n)
        << ",vanish=" << (n->vanishable ? "T" : "F") << ",seq=" << n->seq
@@ -520,14 +520,15 @@ void
 hash_tbl_dump(std::ostream& os)
 {
     int count = 0, list_count = 0;
-    SymbolTblNode* n = nullptr;
 
     os << std::endl << "\n--Hash table--" << std::endl;
-    for (int i = 0; i < HT_SIZE; i++) {
-        if (HashTbl[i].count > 0) {
+    size_t i = 0;
+    for (const auto& elem : HashTbl) {
+        if (elem.count > 0) {
             list_count++;
-            os << "HashTbl[" << i << "] (count=" << HashTbl[i].count << "): ";
-            for (n = HashTbl[i].next; n->next != nullptr; n = n->next) {
+            os << "HashTbl[" << i << "] (count=" << elem.count << "): ";
+            const SymbolTblNode* n = elem.next;
+            for (; n->next != nullptr; n = n->next) {
                 symbol_tbl_node_dump(os, n);
                 os << ", ";
                 count++;
@@ -536,6 +537,7 @@ hash_tbl_dump(std::ostream& os)
             os << std::endl;
             count++;
         }
+        i++;
     }
     os << "--hash table size: " << HT_SIZE << "--" << std::endl;
     os << "--symbol count: " << count << ", load factor lamda (" << count << '/'

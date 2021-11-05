@@ -40,17 +40,17 @@ Stack::dump(const Grammar& grammar) const noexcept
     if (this->count() == 0)
         return;
 
-    for (int i = 0; i < this->count(); i++) {
+    for (size_t i = 0; i < this->count(); i++) {
         if ((i > 0) && (i % LINE_SIZE == 0))
             std::cout << std::endl;
-        Configuration* c = this->array[i];
+        auto c = this->array[i];
         std::cout << "[" << i << "] ";
         if (c == nullptr) {
             std::cout << "0" << std::endl;
-        } else if (c == reinterpret_cast<Configuration*>(-1)) {
-            std::cout << "*" << std::endl;
+        } else if (c.has_value()) {
+            stdout_write_config(grammar, *c);
         } else {
-            stdout_write_config(grammar, c);
+            std::cout << "*" << std::endl;
         }
     }
     std::cout << std::endl;

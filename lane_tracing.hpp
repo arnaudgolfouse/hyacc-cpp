@@ -92,6 +92,13 @@ struct LtTblEntry
     LlistContextSet* ctxt_set; // in INC order of config->ruleID.
     LlistInt* to_states;       // in INC order of state_no.
     LtTblEntry* next;
+
+    /*
+     * In LT_tbl, find the entry where from_state is state_no.
+     *
+     * Note that in LT_tbl, the entries are in INC order of state_no.
+     */
+    [[nodiscard]] auto find_entry(int from_state) noexcept -> LtTblEntry*;
 };
 
 /*
@@ -105,7 +112,7 @@ struct LtCluster
     LtCluster* next;
 
     static auto find_actual_containing_cluster(int state_no) -> LtCluster*;
-    void dump() const noexcept;
+    void dump(LtTblEntry& lane_tracing_table) const noexcept;
     /// Return:
     ///   the splitted state's no if state_no is in c->states list
     ///   -1 otherwise.
@@ -117,12 +124,6 @@ struct LtCluster
 };
 
 extern LtCluster* all_clusters;
-
-/* Functions */
-
-extern auto
-lt_tbl_entry_find(State* from, const StateArray& states_new_array)
-  -> LtTblEntry*;
 
 /*
  * Data structures in lrk.c
@@ -201,9 +202,9 @@ struct LRkPtEntry
  * Functions in lane_tracing.c
  */
 extern void
-trace_back_lrk(const Configuration* c0, Configuration* c);
+trace_back_lrk(Configuration* c);
 extern void
-trace_back_lrk_clear(const Configuration* c0, Configuration* c);
+trace_back_lrk_clear(Configuration* c);
 
 // Set - a linked list of objects.
 struct ObjectItem
@@ -341,23 +342,33 @@ class LaneTracing : public YAlgorithm
   private:
     Stack lane;
     Stack stack;
+    bool trace_further = false;
+    bool test_failed = false;
+    bool grammar_ambiguous = false;
+    /// Initialize this to nullptr at the beginning of lane_tracing_phase2().
+    /// This list is in INC order on from_state->state_no.
+    LtTblEntry* LT_tbl = nullptr;
 
     void phase1();
     void phase2();
     void gpm(State* new_state);
+    void lt_tbl_entry_add(State* from, State* to);
+    auto lt_tbl_entry_find_insert(State* from) -> LtTblEntry*;
+    auto lt_tbl_entry_find(State* from) -> LtTblEntry*;
+    void lt_tbl_entry_add_context(State* from, SymbolList ctxt) noexcept(false);
     auto add_split_state(State& y, State& s, size_t successor_index) -> bool;
     void update_state_reduce_action(State& s);
     void phase2_regeneration(laneHead* lh_list);
     void phase2_regeneration2();
     void set_transitors_pass_thru_on(const Configuration& cur_config,
-                                     Configuration* o) const noexcept(false);
+                                     const Configuration& o) noexcept(false);
     void inherit_propagate(int state_no,
                            int parent_state_no,
                            LtCluster* container,
-                           LtTblEntry* e);
+                           const LtTblEntry* e);
     void lt_phase2_propagate_context_change(int state_no,
                                             LtCluster* c,
-                                            LtTblEntry* e);
+                                            const LtTblEntry* e);
     void clear_regenerate(int state_no);
     void clear_inherit_regenerate(int state_no, int parent_state_no);
     auto cluster_trace_new_chain_all(int parent_state, const LtTblEntry* e)
@@ -368,16 +379,13 @@ class LaneTracing : public YAlgorithm
                                   LlistContextSet* e_ctxt,
                                   size_t e_parent_state_no,
                                   bool copy) const -> int;
-    auto get_the_context(const Configuration* o) const noexcept(false)
-      -> SymbolNode*;
-    auto trace_back(const Configuration* c0,
-                    Configuration* c,
-                    laneHead* lh_list) const noexcept(false) -> laneHead*;
-    [[nodiscard]] auto get_state_conflict_lane_head(int state_no,
-                                                    laneHead* lh_list) const
-      noexcept(false) -> laneHead*;
-    [[nodiscard]] auto get_conflict_lane_head() const noexcept(false)
+    auto get_the_context(const Configuration* o) noexcept(false) -> SymbolNode*;
+    auto trace_back(Configuration* c, laneHead* lh_list) noexcept(false)
       -> laneHead*;
+    [[nodiscard]] auto get_state_conflict_lane_head(
+      int state_no,
+      laneHead* lh_list) noexcept(false) -> laneHead*;
+    [[nodiscard]] auto get_conflict_lane_head() noexcept(false) -> laneHead*;
     void get_inadequate_state_reduce_config_context(const State* s);
     void resolve_lalr1_conflicts();
     void do_loop() noexcept(false);
@@ -385,6 +393,9 @@ class LaneTracing : public YAlgorithm
     void pop_lane();
     void check_stack_top();
     void dump_stacks() const;
+    void move_markers(Configuration* o) noexcept;
+    void context_adding(SymbolList context_generated,
+                        size_t cur_config_index) const;
     void stack_operation(int* fail_ct, Configuration* o);
     void context_adding_routine(SymbolList context_generated,
                                 Configuration* o,

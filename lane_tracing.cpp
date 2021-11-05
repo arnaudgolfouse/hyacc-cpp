@@ -29,6 +29,7 @@
 #include "stack_config.hpp"
 #include "y.hpp"
 #include <cstddef>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <optional>
@@ -46,27 +47,14 @@ constexpr bool DEBUG_PHASE_2_REGENERATE2 = false;
 constexpr bool DEBUG_PHASE_2_REGENERATE = false;
 constexpr bool DEBUG_GET_ORIGINATOR = false;
 
-constexpr bool DEBUG_ORIGIN = false;
-
-/*
- * Variables used for lane tracing. Start.
- */
-
-static int TRACE_FURTHER;
-static int TEST_FAILED;
-
 /*
  * Current final config that is traced in trace_back() function.
  * Used for phase 2 state combining.
  */
 Configuration* cur_red_config;
-static bool GRAMMAR_AMBIGUOUS = false;
 
 constexpr unsigned int FLAG_ON = 1u;
 constexpr unsigned int FLAG_OFF = 0u;
-
-static Configuration* LT_MARKER = (Configuration*)-1;
-static Configuration* LT_ZERO = 0;
 
 extern bool in_lanetracing;
 bool IN_EDGE_PUSHING_LANE_TRACING;
@@ -77,7 +65,7 @@ SymbolList EDGE_PUSHING_CONTEXT_GENERATED;
  */
 
 static void
-get_originators(const Grammar& grammar, Configuration* c0, Configuration* c);
+get_originators(const Grammar& grammar, Configuration* c0, Configuration& c);
 static auto
 find_successor_state_no(int state_no,
                         const StateArray& states_new_array,
@@ -98,25 +86,7 @@ LtCluster* new_cluster;
  * Initialized to true. If in regeneration context conflicts occur,
  * set this to false, which means the grammar is NOT LR(1).
  */
-bool all_pairwise_disjoint;
-
-/*
- * Initialize this to nullptr at the beginning of lane_tracing_phase2().
- * This list is in INC order on from_state->state_no.
- */
-LtTblEntry* LT_tbl;
-
-/* declaration of functions */
-static void
-dump_lt_tbl();
-static auto
-lt_tbl_find_entry(int from_state) -> LtTblEntry*;
-static auto
-cluster_trace_new_chain_all(const Grammar& grammar,
-                            const StateArray& states_new_array,
-                            std::optional<Queue>& config_queue,
-                            int parent_state,
-                            const LtTblEntry* e) -> bool;
+static bool all_pairwise_disjoint;
 
 void
 dump_llist_context_set(LlistContextSet* contxt_set)
@@ -179,11 +149,10 @@ llist_context_set_add_context(LlistContextSet* c, SymbolList contxt_set)
 /*
  * Return a clone of c.
  */
-auto
-llist_context_set_clone(LlistContextSet* c) -> LlistContextSet*
+static auto
+llist_context_set_clone(const LlistContextSet* c) -> LlistContextSet*
 {
-
-    if (nullptr == c)
+    if (c == nullptr)
         return nullptr;
     // std::cout << "clone c: "; dump_LlistContextSet(c); std::cout <<
     // std::endl;
@@ -422,14 +391,15 @@ lt_tbl_entry_add_to_state(LtTblEntry* e, State* to)
  * Add an entry (from_state, to_state) to the LT_tbl,
  * don't add the (config, context) information here.
  */
-static void
-lt_tbl_entry_add(State* from, State* to, const StateArray& states_new_array)
+void
+LaneTracing::lt_tbl_entry_add(State* from, State* to)
 {
-    if (LT_tbl == nullptr) {
-        LT_tbl = lt_tbl_entry_create(from, to, states_new_array);
+    if (this->LT_tbl == nullptr) {
+        this->LT_tbl =
+          lt_tbl_entry_create(from, to, *this->new_states.states_new_array);
         return;
     }
-    LtTblEntry *e = LT_tbl, *e_prev = nullptr;
+    LtTblEntry *e = this->LT_tbl, *e_prev = nullptr;
     // search if the from state already exists.
     for (; e != nullptr; e_prev = e, e = e->next) {
         if (e->from_state == from->state_no) {
@@ -438,17 +408,20 @@ lt_tbl_entry_add(State* from, State* to, const StateArray& states_new_array)
         }
         if (e->from_state > from->state_no) { // insert before e.
             if (e_prev == nullptr) {          // insert as the head.
-                LT_tbl = lt_tbl_entry_create(from, to, states_new_array);
-                LT_tbl->next = e;
+                this->LT_tbl = lt_tbl_entry_create(
+                  from, to, *this->new_states.states_new_array);
+                this->LT_tbl->next = e;
             } else { // insert between e_prev and e
-                e_prev->next = lt_tbl_entry_create(from, to, states_new_array);
+                e_prev->next = lt_tbl_entry_create(
+                  from, to, *this->new_states.states_new_array);
                 e_prev->next->next = e;
             }
             return;
         }
     }
     // now is at the end of the table LT_tbl, add to list tail.
-    e_prev->next = lt_tbl_entry_create(from, to, states_new_array);
+    e_prev->next =
+      lt_tbl_entry_create(from, to, *this->new_states.states_new_array);
     return;
 }
 
@@ -456,26 +429,28 @@ lt_tbl_entry_add(State* from, State* to, const StateArray& states_new_array)
  * Find from state in the LT_tbl.
  * If not found, insert it.
  */
-static auto
-lt_tbl_entry_find_insert(State* from, const StateArray& states_new_array)
-  -> LtTblEntry*
+auto
+LaneTracing::lt_tbl_entry_find_insert(State* from) -> LtTblEntry*
 {
-    if (nullptr == LT_tbl) { // insert as the first
-        LT_tbl = lt_tbl_entry_create(from, nullptr, states_new_array);
-        return LT_tbl;
+    if (this->LT_tbl == nullptr) { // insert as the first
+        this->LT_tbl = lt_tbl_entry_create(
+          from, nullptr, *this->new_states.states_new_array);
+        return this->LT_tbl;
     }
 
-    LtTblEntry *e = LT_tbl, *e_prev = nullptr;
+    LtTblEntry *e = this->LT_tbl, *e_prev = nullptr;
     for (; e != nullptr; e_prev = e, e = e->next) {
         if (e->from_state == from->state_no)
             return e;
         if (e->from_state > from->state_no) { // insert here.
             if (e_prev == nullptr) {          // insert as the first.
-                LT_tbl = lt_tbl_entry_create(from, nullptr, states_new_array);
-                LT_tbl->next = e;
-                return LT_tbl;
+                this->LT_tbl = lt_tbl_entry_create(
+                  from, nullptr, *this->new_states.states_new_array);
+                this->LT_tbl->next = e;
+                return this->LT_tbl;
             } // insert in the middle.
-            e_prev->next = lt_tbl_entry_create(from, nullptr, states_new_array);
+            e_prev->next = lt_tbl_entry_create(
+              from, nullptr, *this->new_states.states_new_array);
             e_prev->next->next = e;
             return e_prev->next;
         }
@@ -483,7 +458,8 @@ lt_tbl_entry_find_insert(State* from, const StateArray& states_new_array)
     }
 
     // otherwise, insert at the end.
-    e_prev->next = lt_tbl_entry_create(from, nullptr, states_new_array);
+    e_prev->next =
+      lt_tbl_entry_create(from, nullptr, *this->new_states.states_new_array);
     return e_prev->next;
 }
 
@@ -494,25 +470,27 @@ lt_tbl_entry_find_insert(State* from, const StateArray& states_new_array)
  * There can be at most one entry found.
  */
 auto
-lt_tbl_entry_find(State* from, const StateArray& states_new_array)
-  -> LtTblEntry*
+LaneTracing::lt_tbl_entry_find(State* from) -> LtTblEntry*
 {
-    if (nullptr == LT_tbl) { // insert as the first
-        LT_tbl = lt_tbl_entry_create(from, nullptr, states_new_array);
-        return LT_tbl;
+    if (this->LT_tbl == nullptr) { // insert as the first
+        this->LT_tbl = lt_tbl_entry_create(
+          from, nullptr, *this->new_states.states_new_array);
+        return this->LT_tbl;
     }
 
-    LtTblEntry *e = LT_tbl, *e_prev = nullptr;
+    LtTblEntry *e = this->LT_tbl, *e_prev = nullptr;
     for (; e != nullptr; e_prev = e, e = e->next) {
         if (e->from_state == from->state_no)
             return e;
         if (e->from_state > from->state_no) { // insert here.
             if (e_prev == nullptr) {          // insert as the first.
-                LT_tbl = lt_tbl_entry_create(from, nullptr, states_new_array);
-                LT_tbl->next = e;
-                return LT_tbl;
+                this->LT_tbl = lt_tbl_entry_create(
+                  from, nullptr, *this->new_states.states_new_array);
+                this->LT_tbl->next = e;
+                return this->LT_tbl;
             } // insert in the middle.
-            e_prev->next = lt_tbl_entry_create(from, nullptr, states_new_array);
+            e_prev->next = lt_tbl_entry_create(
+              from, nullptr, *this->new_states.states_new_array);
             e_prev->next->next = e;
             return e_prev->next;
         }
@@ -529,7 +507,6 @@ lt_tbl_entry_find(State* from, const StateArray& states_new_array)
 static auto
 llist_context_set_get(LtTblEntry* e) noexcept(false) -> LlistContextSet*
 {
-
     if (e == nullptr) {
         throw std::runtime_error("llist_context_set_get error: e is nullptr");
     }
@@ -574,16 +551,15 @@ llist_context_set_get(LtTblEntry* e) noexcept(false) -> LlistContextSet*
  *
  * The current config is "cur_red_config" defined at the top.
  */
-static void
-lt_tbl_entry_add_context(State* from,
-                         SymbolList ctxt,
-                         const StateArray& states_new_array) noexcept(false)
+void
+LaneTracing::lt_tbl_entry_add_context(State* from,
+                                      SymbolList ctxt) noexcept(false)
 {
     if (ctxt == nullptr)
         return;
 
     // 1) locate the LtTblEntry for "from" state.
-    LtTblEntry* e = lt_tbl_entry_find_insert(from, states_new_array);
+    LtTblEntry* e = this->lt_tbl_entry_find_insert(from);
     if (nullptr == e) {
         throw std::runtime_error(
           std::string("lt_tbl_entry_add_context error: state ") +
@@ -598,9 +574,9 @@ lt_tbl_entry_add_context(State* from,
 }
 
 static void
-dump_lt_tbl_entry(LtTblEntry* e)
+dump_lt_tbl_entry(const LtTblEntry* e)
 {
-    if (nullptr == e)
+    if (e == nullptr)
         return;
 
     std::cout << e->from_state << " \t| ";
@@ -611,14 +587,14 @@ dump_lt_tbl_entry(LtTblEntry* e)
     std::cout << std::endl;
 }
 
-void
-dump_lt_tbl()
+static void
+dump_lt_tbl(const LtTblEntry* lane_tracing_table)
 {
-    if (LT_tbl == nullptr)
+    if (lane_tracing_table == nullptr)
         return;
 
     std::cout << "FROM \t| CONFIG:{CONTEXT} | TO" << std::endl;
-    for (LtTblEntry* e = LT_tbl; e != nullptr; e = e->next) {
+    for (const LtTblEntry* e = lane_tracing_table; e != nullptr; e = e->next) {
         dump_lt_tbl_entry(e);
     }
 }
@@ -705,14 +681,15 @@ cluster_destroy(LtCluster* c)
 }
 
 void
-LtCluster::dump() const noexcept
+LtCluster::dump(LtTblEntry& lane_tracing_table) const noexcept
 {
     LtTblEntry* e = nullptr;
 
     std::cout << "states: " << std::endl;
     for (LlistInt2* n = this->states; n != nullptr; n = n->next) {
         std::cout << n->n1 << "/" << n->n2 << " [to: ";
-        if ((e = lt_tbl_find_entry(n->n1)) != nullptr) {
+        e = lane_tracing_table.find_entry(n->n1);
+        if (e != nullptr) {
             for (LlistInt* s = e->to_states; s != nullptr; s = s->next) {
                 LlistInt2* m = llist_int2_find_n1(this->states, s->n);
                 std::cout << s->n << "/" << ((m == nullptr) ? -1 : m->n2)
@@ -728,11 +705,11 @@ LtCluster::dump() const noexcept
 }
 
 static void
-all_clusters_dump()
+all_clusters_dump(LtTblEntry& lane_tracing_table)
 {
     std::cout << "--all_clusters.START--" << std::endl;
     for (const LtCluster* c = all_clusters; c != nullptr; c = c->next) {
-        c->dump();
+        c->dump(lane_tracing_table);
     }
     std::cout << "--END--" << std::endl;
 }
@@ -795,17 +772,16 @@ cluster_contain_actual_state(LtCluster* c, int state_no) -> int
  *   if src contains a LlistContextSet node whose config is in dst,
  *     combine the context.
  */
-auto
-llist_context_set_merge_chain(LlistContextSet* dst, LlistContextSet* src)
+static auto
+llist_context_set_merge_chain(LlistContextSet* dst, const LlistContextSet* src)
   -> LlistContextSet*
 {
-
     if (src == nullptr)
         return dst;
     if (dst == nullptr)
         return llist_context_set_clone(src);
 
-    LlistContextSet* b = src;
+    const LlistContextSet* b = src;
     LlistContextSet *a_prev = nullptr, *a = dst;
     for (; a != nullptr; a_prev = a, a = a->next) {
         while (b != nullptr) {
@@ -833,7 +809,7 @@ llist_context_set_merge_chain(LlistContextSet* dst, LlistContextSet* src)
             if (a == nullptr) {
                 break;
             }
-        } // end of while(b != nullptr).
+        }
 
         if (b == nullptr || a == nullptr)
             break;
@@ -982,7 +958,7 @@ lane_head_tail_pairs_replace(LtCluster* c,
         if (n->end->owner == s &&
             c->states->find_n2(n->start->owner->state_no) != nullptr) {
             // do replacement for n->end: from that in s to s_copy.
-            for (int i = 0; i < s->config.size(); i++) {
+            for (size_t i = 0; i < s->config.size(); i++) {
                 if (s->config[i] == n->end) {
                     n->end = s_copy->config[i];
                     break;
@@ -1101,9 +1077,9 @@ LtCluster::find_actual_containing_cluster(int state_no) -> LtCluster*
  * Note that in LT_tbl, the entries are in INC order of state_no.
  */
 auto
-lt_tbl_find_entry(int from_state) -> LtTblEntry*
+LtTblEntry::find_entry(int from_state) noexcept -> LtTblEntry*
 {
-    for (LtTblEntry* e = LT_tbl; e != nullptr; e = e->next) {
+    for (LtTblEntry* e = this; e != nullptr; e = e->next) {
         int cmp = e->from_state - from_state;
         if (cmp == 0)
             return e;
@@ -1138,7 +1114,7 @@ void
 LaneTracing::inherit_propagate(int state_no,
                                int parent_state_no,
                                LtCluster* container,
-                               LtTblEntry* e)
+                               const LtTblEntry* e)
 {
     State* s = this->new_states.states_new_array->state_list[state_no];
     State* s_p = this->new_states.states_new_array->state_list[parent_state_no];
@@ -1189,7 +1165,7 @@ LaneTracing::clear_regenerate(int state_no)
 void
 LaneTracing::lt_phase2_propagate_context_change(int state_no,
                                                 LtCluster* c,
-                                                LtTblEntry* e)
+                                                const LtTblEntry* e)
 {
     if (e == nullptr) {
         return;
@@ -1204,7 +1180,7 @@ LaneTracing::lt_phase2_propagate_context_change(int state_no,
     }
 
     for (const LlistInt* t = e->to_states; t != nullptr; t = t->next) {
-        LtTblEntry* f = lt_tbl_find_entry(t->n);
+        const LtTblEntry* f = this->LT_tbl->find_entry(t->n);
         if (f != nullptr) {
             // need to replace t->n with the true state_no in cluster c.
             const LlistInt2* t2 = llist_int2_find_n1(c->states, t->n);
@@ -1307,8 +1283,8 @@ LaneTracing::cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
     }
 
     // e will be used no matter what happen.
-    LtTblEntry* e = lt_tbl_find_entry(state_no);
-    if (nullptr == e) { // Is this possible? YES IT IS.
+    LtTblEntry* e = this->LT_tbl->find_entry(state_no);
+    if (e == nullptr) { // Is this possible? YES IT IS.
         if constexpr (DEBUG_PHASE_2_REGENERATE2) {
             std::cout << "END of chain - state_no: " << state_no << std::endl;
         }
@@ -1400,7 +1376,7 @@ LaneTracing::cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
                 c->pairwise_disjoint = false;
                 all_pairwise_disjoint = false;
             }
-            if (nullptr != e)
+            if (e != nullptr)
                 e->processed = true;
 
             if constexpr (DEBUG_PHASE_2_REGENERATE2) {
@@ -1503,7 +1479,7 @@ LaneTracing::phase2_regeneration2()
     }
 
     if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-        all_clusters_dump(); // dump if is new chain.
+        all_clusters_dump(*this->LT_tbl); // dump if is new chain.
     }
 
     // if the parsing machine is expanded, update the parsing table.
@@ -1675,11 +1651,11 @@ write_originator_list(OriginatorList* o)
  * Add transitor to c's transitor list if it does not exist yet.
  */
 static auto
-insert_transitor_list(Configuration* c, Configuration* transitor) -> bool
+insert_transitor_list(Configuration& c, Configuration* transitor) -> bool
 {
-    OriginatorList* o = c->transitors;
+    OriginatorList* o = c.transitors;
 
-    if (c == transitor)
+    if (&c == transitor)
         return false;
 
     for (const ConfigurationNode* item : o->list) {
@@ -2001,8 +1977,9 @@ LaneTracing::resolve_lalr1_conflicts()
         clear_state_conflicts(state_no, *this->new_states.states_new_array);
 
         // re-insert actions into parsing table for this state.
-        for (int j = static_cast<int>(state->config.size() - 1); j >= 0; j--) {
-            const Configuration* config = state->config[j];
+        for (auto it = state->config.rbegin(); it < state->config.rend();
+             it++) {
+            const Configuration* config = *it;
             if (is_final_configuration(grammar, config) &&
                 config->context != nullptr) {
                 // insert reduce
@@ -2286,7 +2263,7 @@ static auto
 combine_state_context(State& s_dest, const State& s_src) -> bool
 {
     bool is_changed = false;
-    for (int i = 0; i < s_dest.core_config_count; i++) {
+    for (size_t i = 0; i < s_dest.core_config_count; i++) {
         if (combine_context(s_dest.config[i]->context,
                             s_src.config[i]->context)) {
             is_changed = true;
@@ -2463,7 +2440,7 @@ write_the_symbol_list(SymbolList a)
 }
 
 auto
-LaneTracing::get_the_context(const Configuration* o) const noexcept(false)
+LaneTracing::get_the_context(const Configuration* o) noexcept(false)
   -> SymbolNode*
 {
     if (o == nullptr)
@@ -2494,10 +2471,8 @@ LaneTracing::get_the_context(const Configuration* o) const noexcept(false)
         }
     }
 
-    lt_tbl_entry_add_context(
-      o->owner,
-      gamma_theads,
-      *this->new_states.states_new_array); // add context.
+    this->lt_tbl_entry_add_context(o->owner,
+                                   gamma_theads); // add context.
 
     return gamma_theads;
 }
@@ -2512,13 +2487,10 @@ LaneTracing::get_the_context(const Configuration* o) const noexcept(false)
  * labeled as "LANE_END" by other lanes, since such intermediate
  * config are always transition configs and are not included as
  * originator by this lane.
- *
- * c is the originator of c0.
  */
 auto
-LaneTracing::trace_back(const Configuration* c0,
-                        Configuration* c,
-                        laneHead* lh_list) const noexcept(false) -> laneHead*
+LaneTracing::trace_back(Configuration* c, laneHead* lh_list) noexcept(false)
+  -> laneHead*
 {
     c->LANE_CON = 1; // set as config on conflicting lane.
 
@@ -2563,7 +2535,7 @@ LaneTracing::trace_back(const Configuration* c0,
 
     for (Configuration* o : c->originators->list) {
         this->set_transitors_pass_thru_on(*c,
-                                          o); // set PASS_THRU ON.
+                                          *o); // set PASS_THRU ON.
         if (o->LANE_CON == 0u) {
             if constexpr (DEBUG_PHASE_2) {
                 std::cout << "config on lane: " << o->owner->state_no << "."
@@ -2577,7 +2549,7 @@ LaneTracing::trace_back(const Configuration* c0,
                 }
             }
 
-            lh_list = this->trace_back(c, o, lh_list);
+            lh_list = this->trace_back(o, lh_list);
         } else {
             if constexpr (DEBUG_PHASE_2) {
                 std::cout << "already traced: " << o->owner->state_no << "."
@@ -2595,7 +2567,7 @@ LaneTracing::trace_back(const Configuration* c0,
  * lane_head_tail_pairs list.
  */
 void
-trace_back_lrk(const Configuration* c0, Configuration* c)
+trace_back_lrk(Configuration* c)
 {
     c->LANE_CON = 1; // set as config on conflicting lane.
 
@@ -2624,8 +2596,6 @@ trace_back_lrk(const Configuration* c0, Configuration* c)
         return;
     }
 
-    // get_originators(c, c);
-
     if (c->originators == nullptr) {
         std::cout << "trace_back: c->originators is nullptr. error? report bug"
                   << std::endl;
@@ -2639,7 +2609,7 @@ trace_back_lrk(const Configuration* c0, Configuration* c)
                           << o->ruleID << std::endl;
             }
 
-            trace_back_lrk(c, o);
+            trace_back_lrk(o);
         } else {
             if constexpr (DEBUG_PHASE_2) {
                 std::cout << "already traced: " << o->owner->state_no << "."
@@ -2656,7 +2626,7 @@ trace_back_lrk(const Configuration* c0, Configuration* c)
  *          LANE_END configurations.
  */
 void
-trace_back_lrk_clear(const Configuration* c0, Configuration* c)
+trace_back_lrk_clear(Configuration* c)
 {
     c->LANE_CON = 0; // set as config on conflicting lane.
 
@@ -2669,7 +2639,7 @@ trace_back_lrk_clear(const Configuration* c0, Configuration* c)
 
     for (Configuration* o : c->originators->list) {
         if (o->LANE_CON == 1u) {
-            trace_back_lrk_clear(c, o);
+            trace_back_lrk_clear(o);
         }
     }
 }
@@ -2681,8 +2651,9 @@ trace_back_lrk_clear(const Configuration* c0, Configuration* c)
  * Do this by tracing back each final config from this state.
  */
 auto
-LaneTracing::get_state_conflict_lane_head(int state_no, laneHead* lh_list) const
-  noexcept(false) -> laneHead*
+LaneTracing::get_state_conflict_lane_head(int state_no,
+                                          laneHead* lh_list) noexcept(false)
+  -> laneHead*
 {
     const State* s = this->new_states.states_new_array->state_list[state_no];
     for (const auto& con : s->config) {
@@ -2699,7 +2670,7 @@ LaneTracing::get_state_conflict_lane_head(int state_no, laneHead* lh_list) const
                           << con->ruleID << std::endl;
             }
             cur_red_config = con;
-            lh_list = this->trace_back(nullptr, con, lh_list);
+            lh_list = this->trace_back(con, lh_list);
         }
     }
 
@@ -2711,7 +2682,7 @@ LaneTracing::get_state_conflict_lane_head(int state_no, laneHead* lh_list) const
  * and their associated conflicting contexts.
  */
 auto
-LaneTracing::get_conflict_lane_head() const noexcept(false) -> laneHead*
+LaneTracing::get_conflict_lane_head() noexcept(false) -> laneHead*
 {
     laneHead* lane_head_list = nullptr;
 
@@ -2768,7 +2739,7 @@ LaneTracing::phase2()
     }
 
     if constexpr (DEBUG_PHASE_2_GET_TBL) {
-        dump_lt_tbl();
+        dump_lt_tbl(this->LT_tbl);
     }
 
     if constexpr (DEBUG_PHASE_2_REGENERATE) {
@@ -2806,7 +2777,7 @@ LaneTracing::lane_tracing() -> std::optional<LRkPTArray>
         this->output_parsing_table_lalr(); // is this needed?
     }
 
-    if (GRAMMAR_AMBIGUOUS) {
+    if (this->grammar_ambiguous) {
         std::cout << "Grammar is ambiguous" << std::endl;
     }
     return lrk_pt_array;
@@ -2950,7 +2921,7 @@ get_contexts_generated(SymbolList list, bool* null_possible) -> SymbolList
 void
 LaneTracing::stack_operation(int* fail_ct, Configuration* o)
 {
-    Configuration* tmp = nullptr;
+    std::optional<Configuration*> tmp = std::nullopt;
 
     (*fail_ct)++;
 
@@ -2962,14 +2933,14 @@ LaneTracing::stack_operation(int* fail_ct, Configuration* o)
         case 1:
             this->lane.push(o);
             o->IN_LANE = FLAG_ON;
-            TEST_FAILED = FLAG_ON;
+            this->test_failed = true;
             break;
         case 2:
             tmp = this->lane.pop();
-            this->lane.push(LT_MARKER);
+            this->lane.push(std::nullopt);
             this->lane.push(tmp);
 
-            this->stack.push(LT_MARKER);
+            this->stack.push(std::nullopt);
             this->stack.push(o);
             break;
         default: // fail_ct >= 3
@@ -2982,31 +2953,31 @@ LaneTracing::stack_operation(int* fail_ct, Configuration* o)
     }
 }
 
-static void
-move_markers(Stack& lane, Configuration* o)
+void
+LaneTracing::move_markers(Configuration* o) noexcept
 {
     int r = 0;
     int ct = static_cast<int>(lane.count()) - 1;
 
     for (; ct >= 0; ct--) {
-        const Configuration* c = lane.array[ct];
+        const auto c = this->lane.array[ct];
         if (c == o)
             break;
 
-        if (c == LT_MARKER) {
-            lane.array[ct] = LT_ZERO;
+        if (!c.has_value()) {
+            this->lane.array[ct] = nullptr;
             r++;
         }
     }
 
-    if (TEST_FAILED == FLAG_OFF) {
+    if (!this->test_failed) {
         for (; r > 0; r--)
-            lane.push(LT_MARKER);
+            this->lane.push(std::nullopt);
     } else {
-        Configuration* c = lane.pop();
+        auto c = this->lane.pop();
         for (; r > 0; r--)
-            lane.push(LT_MARKER);
-        lane.push(c);
+            this->lane.push(std::nullopt);
+        this->lane.push(c);
     }
 }
 
@@ -3020,10 +2991,9 @@ move_markers(Stack& lane, Configuration* o)
  * NOTE: here it accesses the this->lane stack internal member
  *       array directly.
  */
-static void
-context_adding(const Stack& lane,
-               SymbolList context_generated,
-               size_t cur_config_index)
+void
+LaneTracing::context_adding(SymbolList context_generated,
+                            size_t cur_config_index) const
 {
     if constexpr (DEBUG_PHASE_1) {
         std::cout << "CONTEXT ADDING ROUTINE: " << std::endl;
@@ -3033,22 +3003,25 @@ context_adding(const Stack& lane,
     SymbolNode* n = context_generated;
 
     while (n != nullptr) {
-        // :( doesn't work
-        // NOLINTNEXTLINE(modernize-loop-convert)
-        for (auto it = lane.array.rbegin(); it != lane.array.rend(); it++) {
-            Configuration* c = *it;
-            if (c != LT_ZERO && c != LT_MARKER) {
+        auto it = this->lane.array.rbegin();
+        for (size_t i = 0; i < (this->lane.array.size() - 1 - cur_config_index);
+             i++) {
+            it++;
+        }
+        for (; it != this->lane.array.rend(); it++) {
+            auto c = *it;
+            if (c.has_value() && c.value() != nullptr) {
                 if constexpr (DEBUG_PHASE_1) {
-                    std::cout << "add context to " << c->owner->state_no << "."
-                              << c->ruleID << std::endl;
+                    std::cout << "add context to " << (*c)->owner->state_no
+                              << "." << (*c)->ruleID << std::endl;
                 }
                 bool exist = false;
-                c->context->nContext = insert_symbol_list_unique(
-                  c->context->nContext, n->snode, &exist);
+                (*c)->context->nContext = insert_symbol_list_unique(
+                  (*c)->context->nContext, n->snode, &exist);
                 if (exist)
                     break;
                 // else, NOT exist, insert was sucessful.
-                c->context->context_count++;
+                (*c)->context->context_count++;
             }
         }
         SymbolNode* tmp = n;
@@ -3063,21 +3036,20 @@ LaneTracing::context_adding_routine(SymbolList context_generated,
                                     int cur_config_index,
                                     int* fail_ct)
 {
-    context_adding(this->lane, context_generated, cur_config_index);
+    this->context_adding(context_generated, cur_config_index);
 
-    if (TRACE_FURTHER == FLAG_ON) {
-
+    if (this->trace_further) {
         if constexpr (DEBUG_PHASE_1) {
-            std::cout << "__TRACE_FURTHER is ON" << std::endl;
+            std::cout << "TRACE_FURTHER is ON" << std::endl;
         }
 
-        TRACE_FURTHER = FLAG_OFF;
+        this->trace_further = false;
         this->stack_operation(fail_ct, o);
     }
 
     if constexpr (DEBUG_PHASE_1) {
-        if (TRACE_FURTHER != FLAG_ON) {
-            std::cout << "__TRACE_FURTHER is OFF" << std::endl;
+        if (!this->trace_further) {
+            std::cout << "TRACE_FURTHER is OFF" << std::endl;
         }
     }
 }
@@ -3109,8 +3081,8 @@ LaneTracing::lane_tracing_reduction(Configuration* c) noexcept(false)
 
     this->lane.push(c);
     c->IN_LANE = FLAG_ON;
-    TRACE_FURTHER = FLAG_OFF;
-    TEST_FAILED = FLAG_OFF;
+    this->trace_further = false;
+    this->test_failed = false;
 
     if constexpr (DEBUG_EDGE_PUSHING) {
         std::cout << "DO_LOOP:" << std::endl;
@@ -3131,8 +3103,8 @@ dump_lane_start_states(const Stack& lane,
     if (nullptr == gamma_theads)
         return;
 
-    std::cout << "START " << lane.array[0]->owner->state_no << "."
-              << lane.array[0]->ruleID << ": " << o->owner->state_no << "."
+    std::cout << "START " << (*lane.array[0])->owner->state_no << "."
+              << (*lane.array[0])->ruleID << ": " << o->owner->state_no << "."
               << o->ruleID << " generates contexts";
     if (gamma_theads == nullptr) {
         std::cout << ":" << std::endl;
@@ -3176,9 +3148,9 @@ write_config(Configuration* c)
  * Returns true is one of c's originators is o.
  */
 static auto
-is_on_transitor_chain(Configuration* c, Configuration* o) -> bool
+is_on_transitor_chain(const Configuration& c, const Configuration* o) -> bool
 {
-    for (const Configuration* orig : c->originators->list) {
+    for (const Configuration* orig : c.originators->list) {
         if (orig == o)
             return true;
     }
@@ -3190,13 +3162,13 @@ is_on_transitor_chain(Configuration* c, Configuration* o) -> bool
  */
 void
 LaneTracing::set_transitors_pass_thru_on(const Configuration& cur_config,
-                                         Configuration* o) const noexcept(false)
+                                         const Configuration& o) noexcept(false)
 {
     // find the next transitor for originator o.
     for (Configuration* c : cur_config.transitors->list) {
-        get_originators(this->grammar, c, c);
+        get_originators(this->grammar, c, *c);
 
-        if (is_on_transitor_chain(c, o)) {
+        if (is_on_transitor_chain(*c, &o)) {
 
             if (!this->options.use_combine_compatible_states) {
                 if constexpr (DEBUG_PHASE_2_GET_TBL) {
@@ -3206,12 +3178,10 @@ LaneTracing::set_transitors_pass_thru_on(const Configuration& cur_config,
                               << cur_config.ruleID << ")" << std::endl;
                 }
                 // add another entry to LT_tbl.
-                lt_tbl_entry_add(c->owner,
-                                 cur_config.owner,
-                                 *this->new_states.states_new_array);
+                this->lt_tbl_entry_add(c->owner, cur_config.owner);
             }
 
-            if (c->owner != cur_config.owner && c->owner != o->owner) {
+            if (c->owner != cur_config.owner && c->owner != o.owner) {
                 // use this criteria because: cur_config does not need to be
                 // handled here since it's already handled in trace_back().
                 // you also don't want to set o->owner to be PASS_THRU, since
@@ -3226,8 +3196,8 @@ LaneTracing::set_transitors_pass_thru_on(const Configuration& cur_config,
         } // end is_on_transitor_chain.
     }
 
-    if (o->owner == cur_config.owner) {
-        this->get_the_context(o);
+    if (o.owner == cur_config.owner) {
+        this->get_the_context(&o);
     }
 }
 
@@ -3237,9 +3207,9 @@ LaneTracing::set_transitors_pass_thru_on(const Configuration& cur_config,
  * let s = c->owner, find transitors for c in parent states of s.
  */
 static void
-get_transitors(const Grammar& grammar, Configuration* c0, Configuration* c)
+get_transitors(const Grammar& grammar, Configuration* c0, Configuration& c)
 {
-    const auto& l = c->owner->parents_list;
+    const auto& l = c.owner->parents_list;
     if (l == nullptr) {
         std::cout << "Error: get_transitors() - L is nullptr" << std::endl;
         return;
@@ -3248,23 +3218,24 @@ get_transitors(const Grammar& grammar, Configuration* c0, Configuration* c)
         return;
 
     if constexpr (DEBUG_GET_ORIGINATOR) {
-        std::cout << "get transitor for " << c->owner->state_no << "."
-                  << c->ruleID << "." << c->marker << std::endl;
+        std::cout << "get transitor for " << c.owner->state_no << "."
+                  << c.ruleID << "." << c.marker << std::endl;
     }
 
     for (const auto& p : l->state_list) {
         // now get transitor for c.
-        for (const auto& t : p->config) {
-            if (t->ruleID == c->ruleID && t->marker == c->marker - 1) {
+        for (const auto& t_ptr : p->config) {
+            Configuration& t = *t_ptr;
+            if (t.ruleID == c.ruleID && t.marker == c.marker - 1) {
                 // is a transitor.
                 if constexpr (DEBUG_GET_ORIGINATOR) {
                     std::cout << "++ ++ transitor found for ["
-                              << c->owner->state_no << "." << c->ruleID << "."
-                              << c->marker << "]: [" << p->state_no << "."
-                              << t->ruleID << "." << t->marker << "]"
+                              << c.owner->state_no << "." << c.ruleID << "."
+                              << c.marker << "]: [" << p->state_no << "."
+                              << t.ruleID << "." << t.marker << "]"
                               << std::endl;
                 }
-                insert_transitor_list(c, t);
+                insert_transitor_list(c, &t);
                 get_originators(grammar, c0, t);
             }
         }
@@ -3284,24 +3255,24 @@ get_transitors(const Grammar& grammar, Configuration* c0, Configuration* c)
  *   d.scanned_symbol = c.LHS_symbol
  */
 void
-get_originators(const Grammar& grammar, Configuration* c0, Configuration* c)
+get_originators(const Grammar& grammar, Configuration* c0, Configuration& c)
 {
     if constexpr (DEBUG_GET_ORIGINATOR) {
-        std::cout << "-- current config: " << c->owner->state_no << "."
-                  << c->ruleID << "." << c->marker << std::endl;
+        std::cout << "-- current config: " << c.owner->state_no << "."
+                  << c.ruleID << "." << c.marker << std::endl;
     }
 
-    if (c->isCoreConfig == 1u) { // core config, search parent states.
+    if (c.isCoreConfig == 1u) { // core config, search parent states.
         get_transitors(grammar, c0, c);
     } else { // not core config. find originators in current state.
-        for (const auto& d : c->owner->config) {
-            if (c == d) {
+        for (const auto& d : c.owner->config) {
+            if (&c == d) {
                 continue;
             } // ignore c.
             if (d->nMarker == nullptr) {
                 continue;
             }
-            if (d->nMarker->snode == grammar.rules[c->ruleID]->nLHS->snode) {
+            if (d->nMarker->snode == grammar.rules[c.ruleID]->nLHS->snode) {
                 if constexpr (DEBUG_GET_ORIGINATOR) {
                     std::cout << "-- -- originator found for ["
                               << c0->owner->state_no << "." << c0->ruleID << "."
@@ -3320,28 +3291,31 @@ get_originators(const Grammar& grammar, Configuration* c0, Configuration* c)
 void
 LaneTracing::do_loop() noexcept(false)
 {
-    Configuration* cur_config = this->lane.top();
+    // CAREFUL : whether this is nullopt or not does **not** depend on whether
+    // this->stack is empty !
+    auto cur_config_opt = this->lane.top();
     const size_t cur_config_index = this->lane.count() - 1;
 
-    if (cur_config == LT_MARKER || cur_config == LT_ZERO ||
-        cur_config == nullptr) { // should never happen.
+    if (!cur_config_opt.has_value() ||
+        cur_config_opt.value() == nullptr) { // should never happen.
         throw std::runtime_error("do_loop cur_config error");
     }
+    Configuration& cur_config = **cur_config_opt;
 
     if constexpr (DEBUG_GET_ORIGINATOR) {
         std::cout << "==call get_originators(cur_config) in do_loop()=="
                   << std::endl;
     }
-    get_originators(this->grammar, cur_config, cur_config);
+    get_originators(this->grammar, &cur_config, cur_config);
 
     int fail_ct = 0;
 
     if constexpr (DEBUG_PHASE_1) {
         std::cout << "++++++++++TOP of this->lane is: ";
-        stdout_write_config(this->grammar, cur_config);
+        stdout_write_config(this->grammar, &cur_config);
     }
 
-    for (ConfigurationNode* o : cur_config->originators->list) {
+    for (ConfigurationNode* o : cur_config.originators->list) {
         if constexpr (DEBUG_PHASE_1) {
             std::cout << "________NEXT ORIGINATOR___________________"
                       << std::endl;
@@ -3425,16 +3399,16 @@ LaneTracing::do_loop() noexcept(false)
                             std::cout << "IN_LANE ON" << std::endl;
                             std::cout << "GRAMMAR is AMBIGUOUS" << std::endl;
                         }
-                        GRAMMAR_AMBIGUOUS = true;
+                        this->grammar_ambiguous = true;
                         /// exit(1); //////////////// exit prematurely.
-                        move_markers(this->lane, o);
+                        this->move_markers(o);
                     } else {
                         if constexpr (DEBUG_PHASE_1) {
                             std::cout << "IN_LANE OFF. set TRACE_FURTHER ON"
                                       << std::endl;
                         }
 
-                        TRACE_FURTHER = FLAG_ON;
+                        this->trace_further = true;
                     }
                 }
             } else {
@@ -3447,8 +3421,8 @@ LaneTracing::do_loop() noexcept(false)
                     std::cout << "Found lane_end: " << o->owner->state_no << "."
                               << o->ruleID << std::endl;
                     std::cout << "conflict config: "
-                              << this->lane.array.at(0)->owner->state_no << "."
-                              << this->lane.array.at(0)->ruleID
+                              << (*this->lane.array.at(0))->owner->state_no
+                              << "." << (*this->lane.array.at(0))->ruleID
                               << ", lane head state " << o->owner->state_no
                               << ", contexts: ";
                     write_symbol_list(gamma_theads, "contexts");
@@ -3486,7 +3460,7 @@ LaneTracing::do_loop() noexcept(false)
                         std::cout << "test_c true" << std::endl;
                     }
 
-                    move_markers(this->lane, o);
+                    this->move_markers(o);
 
                     contexts_generated = combine_context_list(
                       contexts_generated, o->context->nContext);
@@ -3508,12 +3482,12 @@ LaneTracing::do_loop() noexcept(false)
         std::cout << "________END OF DO_LOOP____________________" << std::endl;
     }
 
-    if (TEST_FAILED == FLAG_ON) {
+    if (this->test_failed) {
         if constexpr (DEBUG_PHASE_1) {
-            std::cout << "__TEST_FAILED is ON__" << std::endl;
+            std::cout << "TEST_FAILED is ON__" << std::endl;
         }
 
-        TEST_FAILED = FLAG_OFF;
+        this->test_failed = false;
         this->do_loop();
     } else {
         this->check_lane_top();
@@ -3534,9 +3508,11 @@ LaneTracing::pop_lane()
 void
 LaneTracing::check_stack_top()
 {
-    Configuration* top = this->stack.top();
+    // CAREFUL : whether this is nullopt or not does **not** depend on whether
+    // this->stack is empty !
+    auto top_opt = this->stack.top();
 
-    if (top == LT_MARKER) {
+    if (!top_opt.has_value()) {
         if constexpr (DEBUG_PHASE_1) {
             std::cout << "__check_stack_top true" << std::endl;
         }
@@ -3545,6 +3521,7 @@ LaneTracing::check_stack_top()
         this->pop_lane();
 
     } else {
+        Configuration* top = *top_opt;
         if constexpr (DEBUG_PHASE_1) {
             std::cout << "__check_stack_top false" << std::endl;
         }
@@ -3604,9 +3581,17 @@ propogate_context_sets(const Grammar& grammar, Configuration* c)
 void
 LaneTracing::check_lane_top()
 {
-    Configuration* lane_top = this->lane.top();
+    // CAREFUL : whether this is nullopt or not does **not** depend on whether
+    // this->stack is empty !
+    auto lane_top_opt = this->lane.top();
 
-    if (lane_top == LT_MARKER) {
+    if (!lane_top_opt.has_value()) {
+        throw std::runtime_error("[In LaneTracing::check_lane_top] the lane "
+                                 "top should have a value !");
+    }
+    Configuration* lane_top = *lane_top_opt;
+
+    if (lane_top == nullptr) {
         if constexpr (DEBUG_PHASE_1) {
             std::cout << "check lane top true" << std::endl;
         }
@@ -3617,7 +3602,7 @@ LaneTracing::check_lane_top()
             std::cout << "check lane top false" << std::endl;
         }
 
-        if (lane_top == LT_ZERO) {
+        if (lane_top == nullptr) {
             if constexpr (DEBUG_PHASE_1) {
                 std::cout << "lane top is ZERO." << std::endl;
             }

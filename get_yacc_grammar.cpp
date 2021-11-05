@@ -1151,7 +1151,7 @@ get_symbol_rule_id_list(const Grammar& g)
     for (SymbolNode* a = g.non_terminal_list; a != nullptr; a = a->next) {
         SymbolTblNode* n = a->snode;
         RuleIDNode* tail = nullptr;
-        for (int i = 0; i < g.rules.size(); i++) {
+        for (size_t i = 0; i < g.rules.size(); i++) {
             if (n == g.rules[i]->nLHS->snode) {
                 RuleIDNode* r = create_rule_id_node(i);
                 if (tail == nullptr) {
