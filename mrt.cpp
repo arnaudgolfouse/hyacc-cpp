@@ -100,7 +100,8 @@ check_array_size_mr_parents(const MRParents* p)
  * Returns the array index if found, -1 otherwise.
  */
 auto
-get_index_in_mr_parents(const SymbolTblNode* s, const MRParents& p) -> int
+get_index_in_mr_parents(const std::shared_ptr<const SymbolTableNode> s,
+                        const MRParents& p) -> int
 {
     int i = 0;
     for (const auto& parent : p) {
@@ -115,20 +116,21 @@ get_index_in_mr_parents(const SymbolTblNode* s, const MRParents& p) -> int
  * Determines if string s is in an array a of length count.
  */
 auto
-is_in_mr_parents(const SymbolTblNode* s, const MRParents& p) -> bool
+is_in_mr_parents(const std::shared_ptr<const SymbolTableNode> s,
+                 const MRParents& p) -> bool
 {
     return (get_index_in_mr_parents(s, p) >= 0);
 }
 
 auto
-is_parent_symbol(const SymbolTblNode* s) -> bool
+is_parent_symbol(const std::shared_ptr<const SymbolTableNode> s) -> bool
 {
     return is_in_mr_parents(s, *all_parents);
 }
 
 auto
 MRTreeNode::find_node_in_tree(const std::shared_ptr<MRTreeNode>& node,
-                              const SymbolTblNode* symbol)
+                              const std::shared_ptr<const SymbolTableNode> symbol)
   -> std::shared_ptr<MRTreeNode>
 {
     if (node == nullptr) {
@@ -147,7 +149,8 @@ MRTreeNode::find_node_in_tree(const std::shared_ptr<MRTreeNode>& node,
 }
 
 auto
-find_node_in_forest(const MRLeaves& mr_leaves, SymbolTblNode* symbol)
+find_node_in_forest(const MRLeaves& mr_leaves,
+                    std::shared_ptr<SymbolTableNode> symbol)
   -> std::shared_ptr<MRTreeNode>
 {
     for (const auto& mr_leave : mr_leaves) {
@@ -160,7 +163,8 @@ find_node_in_forest(const MRLeaves& mr_leaves, SymbolTblNode* symbol)
 }
 
 auto
-MRTreeNode::create(SymbolTblNode* symbol) -> std::shared_ptr<MRTreeNode>
+MRTreeNode::create(std::shared_ptr<SymbolTableNode> symbol)
+  -> std::shared_ptr<MRTreeNode>
 {
     auto node = std::make_shared<MRTreeNode>();
     node->parent.reserve(MR_TREE_NODE_INIT_PARENT_COUNT);
@@ -175,8 +179,8 @@ MRTreeNode::create(SymbolTblNode* symbol) -> std::shared_ptr<MRTreeNode>
  */
 void
 insert_new_tree(MRLeaves& mr_leaves,
-                SymbolTblNode* parent,
-                SymbolTblNode* child)
+                std::shared_ptr<SymbolTableNode> parent,
+                std::shared_ptr<SymbolTableNode> child)
 {
     std::shared_ptr<MRTreeNode> leaf = MRTreeNode::create(child);
     leaf->parent.push_back(MRTreeNode::create(parent));
@@ -186,7 +190,7 @@ insert_new_tree(MRLeaves& mr_leaves,
 }
 
 void
-MRTreeNode::insert_parent(SymbolTblNode* symbol)
+MRTreeNode::insert_parent(std::shared_ptr<SymbolTableNode> symbol)
 {
     this->parent.push_back(MRTreeNode::create(symbol));
 }
@@ -261,7 +265,7 @@ write_mr_forest(std::ostream& os, const MRLeaves& mr_leaves)
 void
 MRTreeNode::insert_child(const std::shared_ptr<MRTreeNode> self,
                          MRLeaves& mr_leaves,
-                         SymbolTblNode* symbol)
+                         std::shared_ptr<SymbolTableNode> symbol)
 {
     std::shared_ptr<MRTreeNode> child = MRTreeNode::create(symbol);
     int leaf_index = self->is_mr_leaf(mr_leaves);

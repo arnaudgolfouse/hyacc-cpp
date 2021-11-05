@@ -23,6 +23,7 @@
 #include "y.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <vector>
 
 /*
@@ -191,7 +192,7 @@ struct LRkConfigListNode
 struct LRkPtEntry
 {
     int state;
-    SymbolTblNode* token;
+    std::shared_ptr<SymbolTableNode> token;
     LRkConfigListNode* cfg_list;
     int conflict_count; // 0 if no conflict. can be > 1, but counted as 1
                         // when report in statistics.
@@ -273,15 +274,16 @@ struct LRkPT
 
     static auto create(int k) noexcept -> LRkPT*;
     void dump() const noexcept;
-    auto find(int state, SymbolTblNode* token, bool* found) const noexcept
-      -> LRkPTRow*;
+    auto find(int state,
+              std::shared_ptr<SymbolTableNode> token,
+              bool* found) const noexcept -> LRkPTRow*;
     auto get_entry(int state,
-                   SymbolTblNode* token,
-                   const SymbolTblNode* col_token,
+                   std::shared_ptr<SymbolTableNode> token,
+                   std::shared_ptr<const SymbolTableNode> col_token,
                    bool* exist) noexcept -> ConfigPairNode*;
     auto add_reduction(int state,
-                       SymbolTblNode* token,
-                       const SymbolTblNode* s,
+                       std::shared_ptr<SymbolTableNode> token,
+                       std::shared_ptr<const SymbolTableNode> s,
                        Configuration* c,
                        Configuration* c_tail) noexcept -> bool;
 };
@@ -333,9 +335,10 @@ class LaneTracing : public YAlgorithm
   public:
     explicit LaneTracing(const Grammar& grammar,
                          const Options& options,
+                         std::ofstream& fp_v,
                          NewStates& new_states,
                          std::optional<Queue>& config_queue)
-      : YAlgorithm(grammar, options, new_states, config_queue)
+      : YAlgorithm(grammar, options, fp_v, new_states, config_queue)
     {}
     [[nodiscard]] auto lane_tracing() -> std::optional<LRkPTArray>;
 

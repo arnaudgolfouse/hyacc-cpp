@@ -46,7 +46,7 @@ struct MRTreeNode
     SymbolNode* symbol;
     std::vector<std::shared_ptr<MRTreeNode>> parent;
 
-    static auto create(SymbolTblNode* symbol) -> std::shared_ptr<MRTreeNode>;
+    static auto create(std::shared_ptr<SymbolTableNode> symbol) -> std::shared_ptr<MRTreeNode>;
     // Prints out all node sequences starting from
     // the given node to its ancestors.
     void write_leaf_branch(std::ostream& os,
@@ -56,8 +56,8 @@ struct MRTreeNode
     // The child node contains the given symbol.
     static void insert_child(std::shared_ptr<MRTreeNode> self,
                              MRLeaves& mr_leaves,
-                             SymbolTblNode* symbol);
-    void insert_parent(SymbolTblNode* symbol);
+                             std::shared_ptr<SymbolTableNode> symbol);
+    void insert_parent(std::shared_ptr<SymbolTableNode> symbol);
     // Returns the index in array MRLeaves[] if given node
     // is a leaf, otherwise returns -1.
     auto is_mr_leaf(const MRLeaves& mr_leaves) noexcept -> int const;
@@ -67,7 +67,7 @@ struct MRTreeNode
                                              MRTreeNode* child,
                                              MRLeaves& mr_leaves);
     static auto find_node_in_tree(const std::shared_ptr<MRTreeNode>& node,
-                                  const SymbolTblNode* symbol)
+                                  std::shared_ptr<const SymbolTableNode> symbol)
       -> std::shared_ptr<MRTreeNode>;
 };
 
@@ -132,7 +132,7 @@ extern bool leaf_index_for_parent_done;
 extern auto
 create_mr_parents() -> std::shared_ptr<MRParents>;
 extern auto
-get_index_in_mr_parents(const SymbolTblNode* s, const MRParents& p) -> int;
+get_index_in_mr_parents(std::shared_ptr<const SymbolTableNode> s, const MRParents& p) -> int;
 extern void
 get_parents_for_mr_leaf(const MRLeaves& mr_leaves,
                         size_t leaf_index,

@@ -33,6 +33,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -54,13 +55,6 @@ const std::string_view STR_PLACE_HOLDER = "$placeholder";
 const std::string_view STR_END = "$end";
 const std::string_view STR_EMPTY = "";
 const std::string_view STR_ERROR = "error"; // reserved word.
-
-/// Output of `process_yacc_file_input_section1`.
-struct Section1Output
-{
-    SymbolNode* tokens_tail;
-    SymbolTblNode* start_symbol;
-};
 
 /*
  * %prec is in section2. See output_nonterminal() function
@@ -90,7 +84,7 @@ enum yacc_section1_state
 };
 
 static void
-add_rhs_symbol(Grammar& grammar, SymbolTblNode* symbol)
+add_rhs_symbol(Grammar& grammar, std::shared_ptr<SymbolTableNode> symbol)
 {
     // std::cout  << std::endl<< "==add RHS symbol: " <<  symbol << std::endl;
     Production* p = grammar.rules.back();
@@ -145,15 +139,6 @@ y_strcasecmp(const std::string_view a, const std::string_view b) -> int
     return 0;
 }
 
-static void
-init_terminal_property(SymbolTblNode* n)
-{
-    n->TP = new TerminalProperty;
-    n->TP->precedence = 0;
-    n->TP->assoc = associativity::NONASSOC;
-    n->TP->is_quoted = false;
-}
-
 /*
  *  A valid identifier: [alph|_](alph|digit|_)*.
  *  where alph is [a-zA-Z], digit is [0-9].
@@ -179,22 +164,22 @@ validate_identifier(const std::string_view s) -> bool
  * Assumption: n is a terminal, and n->TP != nullptr.
  */
 static void
-get_terminal_precedence(SymbolTblNode* n,
+get_terminal_precedence(SymbolTableNode& n,
                         yacc_section1_state state,
                         int precedence)
 {
-    if (n->type != symbol_type::TERMINAL || n->TP == nullptr)
+    if (n.type != symbol_type::TERMINAL || n.TP == nullptr)
         return;
 
     if (state == IS_LEFT) {
-        n->TP->assoc = associativity::LEFT;
-        n->TP->precedence = precedence;
+        n.TP->assoc = associativity::LEFT;
+        n.TP->precedence = precedence;
     } else if (state == IS_RIGHT) {
-        n->TP->assoc = associativity::RIGHT;
-        n->TP->precedence = precedence;
+        n.TP->assoc = associativity::RIGHT;
+        n.TP->precedence = precedence;
     } else if (state == IS_NONASSOC) {
-        n->TP->assoc = associativity::NONASSOC;
-        n->TP->precedence = precedence;
+        n.TP->assoc = associativity::NONASSOC;
+        n.TP->precedence = precedence;
     }
 }
 
@@ -202,7 +187,7 @@ get_terminal_precedence(SymbolTblNode* n,
  * Add a token to the tokens list.
  */
 static void
-add_token(SymbolNode* tokens_tail, SymbolTblNode* n)
+add_token(SymbolNode* tokens_tail, std::shared_ptr<SymbolTableNode> n)
 {
     if (tokens_tail == nullptr) {
         tokens_tail = tokens = SymbolNode::create(n);
@@ -215,12 +200,13 @@ add_token(SymbolNode* tokens_tail, SymbolTblNode* n)
 }
 
 static auto
-get_symbol(const symbol_type t, GetYaccGrammarOutput& output) -> SymbolTblNode*
+get_symbol(const symbol_type t, GetYaccGrammarOutput& output)
+  -> std::shared_ptr<SymbolTableNode>
 {
     if (output.get_symbol().empty())
         return nullptr;
 
-    SymbolTblNode* n = hash_tbl_insert(output.get_symbol());
+    std::shared_ptr<SymbolTableNode> n = hash_tbl_insert(output.get_symbol());
     output.reset_symbol();
 
     if (t != symbol_type::NEITHER)
@@ -257,7 +243,7 @@ output_terminal(SymbolNode* tokens_tail,
         return;
     }
 
-    SymbolTblNode* n = get_symbol(symbol_type::NEITHER, output);
+    auto n = get_symbol(symbol_type::NEITHER, output);
 
     switch (n->type) {
         case symbol_type::TERMINAL: /* already entered */
@@ -279,11 +265,11 @@ output_terminal(SymbolNode* tokens_tail,
 
     // get property of this terminal.
     // Quote informatin is used to decide to print it to y.tab.h.
-    init_terminal_property(n);
+    n->init_terminal_property();
 
     if (state == IS_QUOTED_TERMINAL) {
         n->TP->is_quoted = true;
-        get_terminal_precedence(n, prev_state, precedence);
+        get_terminal_precedence(*n, prev_state, precedence);
     } else {
         if (!validate_identifier(*n->symbol)) {
             std::cout << "[output_terminal]: error [line "
@@ -291,11 +277,11 @@ output_terminal(SymbolNode* tokens_tail,
                       << "]: invalid identifier: '" << *n->symbol << '\''
                       << std::endl;
             n->TP->is_quoted = false;
-            get_terminal_precedence(n, state, precedence);
+            get_terminal_precedence(*n, state, precedence);
             return;
         }
         n->TP->is_quoted = false;
-        get_terminal_precedence(n, state, precedence);
+        get_terminal_precedence(*n, state, precedence);
     }
 
     if (must_add_token)
@@ -306,15 +292,17 @@ static void
 get_type_symbol(const std::optional<std::string> token_type,
                 GetYaccGrammarOutput& output)
 {
-    SymbolTblNode* n = get_symbol(symbol_type::NONTERMINAL, output);
+    auto n = get_symbol(symbol_type::NONTERMINAL, output);
     n->token_type = token_type;
 }
 
 [[nodiscard]] static auto
 get_start_symbol(const std::optional<std::string> token_type,
-                 GetYaccGrammarOutput& output) -> SymbolTblNode*
+                 GetYaccGrammarOutput& output)
+  -> std::shared_ptr<SymbolTableNode>
 {
-    SymbolTblNode* start_symbol = get_symbol(symbol_type::NONTERMINAL, output);
+    std::shared_ptr<SymbolTableNode> start_symbol =
+      get_symbol(symbol_type::NONTERMINAL, output);
     start_symbol->token_type = token_type;
     return start_symbol;
 }
@@ -447,17 +435,10 @@ my_perror(const std::string_view msg, const char c, const Position position)
         .append(msg));
 }
 
-/*
- * Processes section 1 (declaration section)
- * of yacc input file.
- *
- * Currently this only gets the "%start" line if there is one.
- */
-static auto
-process_yacc_file_input_section1(std::ifstream& fp,
-                                 GetYaccGrammarOutput& output,
-                                 const uint32_t expected_sr_conflict)
-  -> Section1Output
+auto
+GetYaccGrammarOutput::process_yacc_file_input_section1(
+  std::ifstream& fp,
+  const uint32_t expected_sr_conflict) -> Section1Output
 {
     int precedence = 0;
     yacc_section1_state state = IS_NONE,
@@ -466,13 +447,13 @@ process_yacc_file_input_section1(std::ifstream& fp,
     int union_depth = 0;
     off_t union_start = 0;
 
-    output.reset_symbol();
+    this->reset_symbol();
     tokens = nullptr;
     SymbolNode* tokens_tail = nullptr;
-    SymbolTblNode* start_symbol = nullptr;
+    std::shared_ptr<SymbolTableNode> start_symbol = nullptr;
     tokens_ct = 0;
-    output.position.line = 1;
-    output.position.col = 1;
+    this->position.line = 1;
+    this->position.col = 1;
 
     char c = 0, last_c = '\n', last_last_c = 0;
     while (fp.get(c)) {
@@ -492,15 +473,15 @@ process_yacc_file_input_section1(std::ifstream& fp,
             } else if (isalpha(c)) { // %token, %left, ... etc.
                 token_type.reset();
                 state = IS_DIRECTIVE;
-                output.add_char_to_symbol(c);
+                this->add_char_to_symbol(c);
             } else {
                 using std::to_string;
                 throw std::runtime_error(
                   std::string(
                     "[process_yacc_file_input_section1]: error [line ") +
-                  to_string(output.position.line) + ", col " +
-                  to_string(output.position.col) +
-                  "]: wrong directive name: %" + to_string(c));
+                  to_string(this->position.line) + ", col " +
+                  to_string(this->position.col) + "]: wrong directive name: %" +
+                  to_string(c));
             }
 
         } else if (state == IS_CODE) {
@@ -514,41 +495,41 @@ process_yacc_file_input_section1(std::ifstream& fp,
             state = IS_COMMENT;
         } else if (c == '/' && state != IS_QUOTED_TERMINAL) {
             // '/' is not a valid char in a unquoted token.
-            if (state == IS_TOKEN && !output.get_symbol().empty()) {
+            if (state == IS_TOKEN && !this->get_symbol().empty()) {
                 output_terminal(tokens_tail,
                                 state,
                                 prev_state,
                                 token_type,
-                                output,
+                                *this,
                                 precedence);
             }
         } else if (state == IS_DIRECTIVE) {
             if (isspace(c)) {
-                if (output.get_symbol().empty()) {
-                    my_perror("invalid char after %%", c, output.position);
+                if (this->get_symbol().empty()) {
+                    my_perror("invalid char after %%", c, this->position);
                 }
                 state = get_section1_state(
-                  output.get_symbol(), output.position, precedence);
-                output.reset_symbol();
+                  this->get_symbol(), this->position, precedence);
+                this->reset_symbol();
             } else {
-                output.add_char_to_symbol(c);
+                this->add_char_to_symbol(c);
             }
         } else if (state == IS_QUOTED_TERMINAL) {
             // putchar(c);
             // avoid '\'' and '\\'.
             if (c == '\'' &&
-                (last_c != '\\' || (output.get_symbol().size() == 2 &&
-                                    output.get_symbol()[0] == '\\'))) {
+                (last_c != '\\' || (this->get_symbol().size() == 2 &&
+                                    this->get_symbol()[0] == '\\'))) {
                 // std::cout << "] terminal ends" << std::endl;
                 output_terminal(tokens_tail,
                                 state,
                                 prev_state,
                                 token_type,
-                                output,
+                                *this,
                                 precedence); // output quoted terminal.
                 state = prev_state;
             } else if (!isspace(c)) {
-                output.add_char_to_symbol(c);
+                this->add_char_to_symbol(c);
             }
         } else if (state == IS_TOKEN_TYPE) {
             if (isspace(c)) {
@@ -558,27 +539,27 @@ process_yacc_file_input_section1(std::ifstream& fp,
                 // and should not happen.
             } else if (c == '>') {
                 // process token type. to be implemented.
-                // output.ysymbol[output.ysymbol_pt] = '\0';
+                // this->ysymbol[this->ysymbol_pt] = '\0';
                 // std::cout << "token type [" <<  position.line<< ", " <<
                 // position.col<< "]: " <<  ysymbol << std::endl;
 
-                token_type = output.get_symbol();
-                output.reset_symbol();
+                token_type = this->get_symbol();
+                this->reset_symbol();
                 state = prev_state;
             } else {
-                output.add_char_to_symbol(c);
+                this->add_char_to_symbol(c);
             }
 
         } else if (state == IS_TOKEN || state == IS_LEFT || state == IS_RIGHT ||
                    state == IS_NONASSOC) {
-            if (isspace(c) && output.get_symbol().empty()) {
+            if (isspace(c) && this->get_symbol().empty()) {
                 // do nothing, ignore space
             } else if (isspace(c)) { // output another token
                 output_terminal(tokens_tail,
                                 state,
                                 prev_state,
                                 token_type,
-                                output,
+                                *this,
                                 precedence);
             } else if (c == '\'') {
                 // std::cout << "terminal starts: ['";
@@ -588,30 +569,30 @@ process_yacc_file_input_section1(std::ifstream& fp,
                 prev_state = state;
                 state = IS_TOKEN_TYPE;
             } else { // add char to token string
-                output.add_char_to_symbol(c);
+                this->add_char_to_symbol(c);
             }
 
         } else if (state == IS_TYPE) { // %type declares non-terminals.
-            if (isspace(c) && output.get_symbol().empty()) {
+            if (isspace(c) && this->get_symbol().empty()) {
                 // do nothing, ignore space
             } else if (isspace(c)) { // output another non-terminal.
-                get_type_symbol(token_type, output);
+                get_type_symbol(token_type, *this);
             } else if (c == '<') { // start of <token_type>.
                 prev_state = state;
                 state = IS_TOKEN_TYPE;
             } else { // add char to token string
-                output.add_char_to_symbol(c);
+                this->add_char_to_symbol(c);
             }
         } else if (state == IS_START) {
             // else, do nothing, ignore this line.
-            if (isspace(c) && output.get_symbol().empty()) {
+            if (isspace(c) && this->get_symbol().empty()) {
                 // do nothing, ignore space.
             } else if (isspace(c)) { // output start token
                 start_symbol =
                   get_start_symbol(token_type,
-                                   output); // start symbol is a non-terminal.
-            } else {                        // add char to token string.
-                output.add_char_to_symbol(c);
+                                   *this); // start symbol is a non-terminal.
+            } else {                       // add char to token string.
+                this->add_char_to_symbol(c);
             }
         } else if (state == IS_UNION) {
             if (c == '{') { // union starts.
@@ -639,12 +620,12 @@ process_yacc_file_input_section1(std::ifstream& fp,
 
         } else if (state == IS_EXPECT) {
             // else, do nothing, ignore this line.
-            if (isspace(c) && output.get_symbol().empty()) {
+            if (isspace(c) && this->get_symbol().empty()) {
                 // ignore white space.
             } else if (isspace(c)) {
-                get_expect_sr_conflict(output, expected_sr_conflict);
+                get_expect_sr_conflict(*this, expected_sr_conflict);
             } else {
-                output.add_char_to_symbol(c);
+                this->add_char_to_symbol(c);
             }
 
         } else if (state == IS_PURE_PARSER) {
@@ -658,14 +639,14 @@ process_yacc_file_input_section1(std::ifstream& fp,
         last_last_c = last_c;
         last_c = c;
 
-        output.position.col++;
+        this->position.col++;
         if (c == '\n') {
-            output.position.line++;
-            output.position.col = 1;
+            this->position.line++;
+            this->position.col = 1;
         }
     }
     return Section1Output{ tokens_tail, start_symbol };
-    // writeTokens();
+    // write_tokens();
 }
 
 /////////////////////////////////////////////////////////////
@@ -694,7 +675,7 @@ create_empty_production() -> Production*
 }
 
 static auto
-create_new_rule(Grammar& grammar) -> Production*
+create_new_rule(Grammar& grammar) -> Production*&
 {
     grammar.rules.push_back(create_empty_production());
     return grammar.rules.back();
@@ -710,7 +691,8 @@ static void
 insert_mid_prod_rule(Grammar& grammar, int ct)
 {
     constexpr size_t NAME_LHS_SIZE = 20;
-    std::array<char, NAME_LHS_SIZE> name_lhs{};
+    std::string name_lhs;
+    name_lhs.reserve(NAME_LHS_SIZE);
 
     create_new_rule(grammar);
 
@@ -721,8 +703,11 @@ insert_mid_prod_rule(Grammar& grammar, int ct)
     grammar.rules[rule_id - 1] = p;
 
     // now fill the value of the new added rule.
-    sprintf(name_lhs.data(), "$$%lu_@%d", rule_id - 1, ct);
-    SymbolTblNode* n = hash_tbl_insert(name_lhs.data());
+    name_lhs += "$$";
+    name_lhs += std::to_string(rule_id - 1);
+    name_lhs += "_@";
+    name_lhs += std::to_string(ct);
+    std::shared_ptr<SymbolTableNode> n = hash_tbl_insert(name_lhs);
     n->type = symbol_type::NONTERMINAL;
     p->nLHS = SymbolNode::create(n);
     p->hasCode = 1;
@@ -731,10 +716,10 @@ insert_mid_prod_rule(Grammar& grammar, int ct)
 }
 
 static void
-add_lhs_symbol(const Grammar& grammar, SymbolTblNode* symbol)
+add_lhs_symbol(Grammar& grammar, std::shared_ptr<SymbolTableNode> symbol)
 {
     // std::cout  << std::endl<< "==add LHS symbol: " <<  symbol << std::endl;
-    Production* p = grammar.rules.back();
+    Production* p = create_new_rule(grammar);
     p->nLHS = SymbolNode::create(symbol);
 }
 
@@ -746,7 +731,7 @@ get_rhs_prec_symbol(const Grammar& grammar,
                     const std::string_view symbol,
                     const Position position)
 {
-    SymbolTblNode* n = hash_tbl_find(symbol);
+    std::shared_ptr<SymbolTableNode> n = hash_tbl_find(symbol);
     if (n == nullptr) {
         using std::to_string;
         throw std::runtime_error(
@@ -776,7 +761,8 @@ set_has_code(const Grammar& grammar)
 /////////////////////////////////////////////////////////////
 
 static auto
-is_in_vanish_symbol_list(const Grammar& grammar, const SymbolTblNode* n) -> bool
+is_in_vanish_symbol_list(const Grammar& grammar,
+                         const std::shared_ptr<SymbolTableNode> n) -> bool
 {
     // std::cout << "isInVanishSymbolList input: " <<  symbol << std::endl;
     if (n->symbol->empty()) {
@@ -1101,7 +1087,7 @@ static void
 get_symbol_parsing_tbl_col(const Grammar& g)
 {
     SymbolNode* a = g.terminal_list;
-    SymbolTblNode* n = hash_tbl_find(STR_END);
+    std::shared_ptr<SymbolTableNode> n = hash_tbl_find(STR_END);
     n->seq = 0;
 
     for (int i = 1; a != nullptr; a = a->next, i++) {
@@ -1109,6 +1095,7 @@ get_symbol_parsing_tbl_col(const Grammar& g)
         n->seq = i;
     }
 
+    a = g.non_terminal_list;
     for (int i = 1; a != nullptr; a = a->next, i++) {
         n = hash_tbl_find(*a->snode->symbol);
         n->seq = g.terminal_count + i;
@@ -1117,13 +1104,13 @@ get_symbol_parsing_tbl_col(const Grammar& g)
 
 /*
  *  Get the list of Parsing table column header symbols.
- *  This plus the getSymbolParsingTblCol() function make it
+ *  This plus the get_symbol_parsing_tbl_col() function make it
  *  easy to refer between column number and column symbol.
  */
 static void
 get_parsing_tbl_col_hdr(const Grammar& grammar)
 {
-    ParsingTblColHdr = std::vector<SymbolTblNode*>(
+    ParsingTblColHdr = std::vector<std::shared_ptr<SymbolTableNode>>(
       1 + grammar.terminal_count + grammar.non_terminal_count, nullptr);
 
     ParsingTblColHdr.at(0) = hash_tbl_find(STR_END);
@@ -1149,7 +1136,7 @@ static void
 get_symbol_rule_id_list(const Grammar& g)
 {
     for (SymbolNode* a = g.non_terminal_list; a != nullptr; a = a->next) {
-        SymbolTblNode* n = a->snode;
+        std::shared_ptr<SymbolTableNode> n = a->snode;
         RuleIDNode* tail = nullptr;
         for (size_t i = 0; i < g.rules.size(); i++) {
             if (n == g.rules[i]->nLHS->snode) {
@@ -1203,90 +1190,70 @@ get_grammar_params(Grammar& grammar)
 // Functions to get grammar parameters. START.
 /////////////////////////////////////////////////////////////
 
-/*
- * Outputs a new symbol and inserts it to the LHS or RHS
- * of a rule of the grammar.
- *
- * Note that a construct like "%prec UNARY" indicates the
- * precedence of this rule. Both "%prec" and "UNARY" are
- * not true terminals, and should not be inserted into the
- * terminal symbol list. The detail  of handling precedence
- * is to be implemented.
- *
- * If a new symbol is on the LHS, it's a non-terminal.
- * If it is on the RHS and not found in the symbol table,
- * and not quoted by '', then it's a non-terminal.
- * Note that all terminals not quoted by '' should already
- * be delcared in section 1.
- *
- * Empty string is not allowed.
- */
-static auto
-output_nonterminal(GetYaccGrammarOutput& output,
-                   SymbolNode* tokens_tail,
-                   YACC_STATE state,
-                   bool& is_prec,
-                   const YACC_STATE yacc_sec2_state) -> SymbolTblNode*
+auto
+GetYaccGrammarOutput::output_nonterminal(SymbolNode* tokens_tail,
+                                         const YACC_STATE state,
+                                         bool& is_prec,
+                                         const YACC_STATE yacc_sec2_state)
+  -> std::shared_ptr<SymbolTableNode>
 {
-    if (output.get_symbol().empty()) {
+    if (this->get_symbol().empty()) {
         if (state == TERMINAL) {
             using std::to_string;
             throw std::runtime_error(
               std::string("[output_nonterminal]: error [line ") +
-              to_string(output.position.line) + ", col " +
-              to_string(output.position.col) + "]: empty token is not allowed");
+              to_string(this->position.line) + ", col " +
+              to_string(this->position.col) + "]: empty token is not allowed");
         }
         return nullptr;
     }
 
-    if (y_strcasecmp(output.get_symbol(), "%prec") == 0) {
+    if (y_strcasecmp(this->get_symbol(), "%prec") == 0) {
         is_prec = true;
-        output.reset_symbol();
+        this->reset_symbol();
         return nullptr;
     }
     if (is_prec) {
         // is a ficticious terminal, no token actually.
-        get_rhs_prec_symbol(output.grammar,
-                            output.get_symbol(),
-                            output.position); // ysymbol should exist.
+        get_rhs_prec_symbol(this->grammar,
+                            this->get_symbol(),
+                            this->position); // ysymbol should exist.
         // std::cout << "%prec on symbol " <<  ysymbol << std::endl;
         is_prec = false;
-        output.reset_symbol();
+        this->reset_symbol();
         return nullptr;
     }
     // std::cout << "another symbol: " <<  ysymbol << std::endl;
 
     if constexpr (DEBUG_YACC_INPUT_PARSER) {
-        std::cout << output.get_symbol() << ' ';
+        std::cout << this->get_symbol() << ' ';
     }
 
-    SymbolTblNode* n = hash_tbl_find(output.get_symbol());
+    std::shared_ptr<SymbolTableNode> n = hash_tbl_find(this->get_symbol());
 
     if (yacc_sec2_state == LHS) {
         if (n == nullptr) {
-            n = hash_tbl_insert(output.get_symbol());
+            n = hash_tbl_insert(this->get_symbol());
             n->type = symbol_type::NONTERMINAL;
         } else if (n->type == symbol_type::TERMINAL) {
             using std::to_string;
             throw std::runtime_error(
               (std::string("[output_nonterminal]: error [line ") +
-               to_string(output.position.line) + ", col " +
-               to_string(output.position.col) + "]: symbol ")
-                .append(output.get_symbol()) +
+               to_string(this->position.line) + ", col " +
+               to_string(this->position.col) + "]: symbol ")
+                .append(this->get_symbol()) +
               " is declared as terminal but used as non-terminal");
         }
-        create_new_rule(output.grammar); // CREATE NEW RULE HERE.
-        add_lhs_symbol(output.grammar, n);
-
+        add_lhs_symbol(this->grammar, n);
     } else { // RHS.
         if (n == nullptr) {
-            n = hash_tbl_insert(output.get_symbol());
+            n = hash_tbl_insert(this->get_symbol());
 
             // if quoted by '', is terminal, otherwise is non-terminal.
             // "error" is a reserved word, a terminal.
-            if (state == TERMINAL || output.get_symbol() == STR_ERROR) {
+            if (state == TERMINAL || this->get_symbol() == STR_ERROR) {
                 n->type = symbol_type::TERMINAL;
-                init_terminal_property(n);
+                n->init_terminal_property();
                 n->TP->is_quoted = true;
 
                 // add this to the tokens list.
@@ -1296,10 +1263,10 @@ output_nonterminal(GetYaccGrammarOutput& output,
             }
         }
 
-        add_rhs_symbol(output.grammar, n);
+        add_rhs_symbol(this->grammar, n);
     }
 
-    output.reset_symbol();
+    this->reset_symbol();
     return n;
 }
 
@@ -1309,7 +1276,8 @@ output_nonterminal(GetYaccGrammarOutput& output,
  *   LHS : RHS1 | RHS2 ...
  */
 inline auto
-get_cur_lhs(SymbolTblNode* n, const Position position) -> SymbolTblNode*
+get_cur_lhs(std::shared_ptr<SymbolTableNode> n, const Position position)
+  -> std::shared_ptr<SymbolTableNode>
 {
     if (n == nullptr) {
         using std::to_string;
@@ -1321,14 +1289,9 @@ get_cur_lhs(SymbolTblNode* n, const Position position) -> SymbolTblNode*
     return n;
 }
 
-/*
- * Processes section 2 (grammar section)
- * of a yacc input file.
- */
-static void
-process_yacc_file_input_section2(GetYaccGrammarOutput& output,
-                                 SymbolNode* tokens_tail,
-                                 std::ifstream& fp)
+void
+GetYaccGrammarOutput::process_yacc_file_input_section2(SymbolNode* tokens_tail,
+                                                       std::ifstream& fp)
 {
     // for mid-production actions.
     int mid_prod_code_ct = 0;
@@ -1336,10 +1299,10 @@ process_yacc_file_input_section2(GetYaccGrammarOutput& output,
     bool end_of_code = false;
     // used for %prec
     bool is_prec = false;
-    SymbolTblNode* cur_lhs = nullptr;
+    std::shared_ptr<SymbolTableNode> cur_lhs = nullptr;
 
     YACC_STATE yacc_sec2_state = LHS;
-    output.reset_symbol();
+    this->reset_symbol();
 
     char c = 0, last_c = 0;
     while (fp.get(c)) {
@@ -1348,29 +1311,29 @@ process_yacc_file_input_section2(GetYaccGrammarOutput& output,
 
         switch (yacc_sec2_state) {
             case LHS:
-                if (isspace(c) && output.get_symbol().empty()) {
+                if (isspace(c) && this->get_symbol().empty()) {
                     // Ignore empty spaces before LHS symbol.
                 } else if (c == ':') {
-                    cur_lhs = get_cur_lhs(
-                      output_nonterminal(
-                        output, tokens_tail, LHS, is_prec, yacc_sec2_state),
-                      output.position); // OUTPUT LHS SYMBOL.
+                    cur_lhs =
+                      get_cur_lhs(this->output_nonterminal(
+                                    tokens_tail, LHS, is_prec, yacc_sec2_state),
+                                  this->position); // OUTPUT LHS SYMBOL.
                     if constexpr (DEBUG_YACC_INPUT_PARSER) {
                         std::cout << "-> ";
                     }
                     yacc_sec2_state = RHS;
                 } else if (isspace(c)) {
-                    cur_lhs = get_cur_lhs(
-                      output_nonterminal(
-                        output, tokens_tail, LHS, is_prec, yacc_sec2_state),
-                      output.position); // OUTPUT LHS SYMBOL.
+                    cur_lhs =
+                      get_cur_lhs(this->output_nonterminal(
+                                    tokens_tail, LHS, is_prec, yacc_sec2_state),
+                                  this->position); // OUTPUT LHS SYMBOL.
                     if constexpr (DEBUG_YACC_INPUT_PARSER) {
                         std::cout << "-> ";
                     }
                     yacc_sec2_state = COLON;
                 } else if (last_c == '/' && c == '*') {
                     yacc_sec2_state = LHS_COMMENT;
-                    output.reset_symbol();
+                    this->reset_symbol();
                 } else if (c == '/') {
                     // do nothing. '/' is not a valid char for a symbol.
                 } else if (c == ';') {
@@ -1380,7 +1343,7 @@ process_yacc_file_input_section2(GetYaccGrammarOutput& output,
                     // the first '%' will be inserted. But since it won't
                     // call output_nonterminal(), a new rule won't be created.
                     // So no problem will occur here.
-                    output.add_char_to_symbol(c);
+                    this->add_char_to_symbol(c);
                 }
                 break;
             case LHS_COMMENT:
@@ -1396,7 +1359,7 @@ process_yacc_file_input_section2(GetYaccGrammarOutput& output,
                 } else if (last_c == '/' && c == '*') {
                     yacc_sec2_state = COLON_COMMENT;
                 } else if (!isspace(c)) {
-                    my_perror("in state COLON", c, output.position);
+                    my_perror("in state COLON", c, this->position);
                 }
                 break;
             case COLON_COMMENT:
@@ -1406,9 +1369,8 @@ process_yacc_file_input_section2(GetYaccGrammarOutput& output,
                 break;
             case RHS:
                 if (isspace(c)) {
-                    if (!output.get_symbol().empty()) {
-                        output_nonterminal(
-                          output,
+                    if (!this->get_symbol().empty()) {
+                        this->output_nonterminal(
                           tokens_tail,
                           RHS,
                           is_prec,
@@ -1419,9 +1381,8 @@ process_yacc_file_input_section2(GetYaccGrammarOutput& output,
                     // std::cout << "terminal starts(line " <<  position.line<<
                     // "): ["
                     // <<  c;
-                    if (!output.get_symbol().empty()) {
-                        output_nonterminal(
-                          output,
+                    if (!this->get_symbol().empty()) {
+                        this->output_nonterminal(
                           tokens_tail,
                           RHS,
                           is_prec,
@@ -1430,23 +1391,22 @@ process_yacc_file_input_section2(GetYaccGrammarOutput& output,
                     yacc_sec2_state = TERMINAL;
                     if (end_of_code) { // for mid-prod action.
                         mid_prod_code_ct++;
-                        insert_mid_prod_rule(output.grammar, mid_prod_code_ct);
+                        insert_mid_prod_rule(this->grammar, mid_prod_code_ct);
                         end_of_code = false;
                     }
                 } else if (c == ';') {
                     end_of_code = false; // for mid-prod action.
-                    if (output.get_symbol().empty() && is_prec) {
+                    if (this->get_symbol().empty() && is_prec) {
                         using std::to_string;
                         throw std::runtime_error(
                           std::string("[process_yacc_file_input_section2]: "
                                       "error [line ") +
-                          to_string(output.position.line) + ", col " +
-                          to_string(output.position.col) +
+                          to_string(this->position.line) + ", col " +
+                          to_string(this->position.col) +
                           "]: forgot the symbol after %prec?");
                     }
-                    if (!output.get_symbol().empty())
-                        output_nonterminal(
-                          output,
+                    if (!this->get_symbol().empty())
+                        this->output_nonterminal(
                           tokens_tail,
                           RHS,
                           is_prec,
@@ -1457,18 +1417,17 @@ process_yacc_file_input_section2(GetYaccGrammarOutput& output,
                     yacc_sec2_state = LHS;
                 } else if (c == '|') {   // another rule with same LHS.
                     end_of_code = false; // for mid-prod action.
-                    if (output.get_symbol().empty() && is_prec) {
+                    if (this->get_symbol().empty() && is_prec) {
                         using std::to_string;
                         throw std::runtime_error(
                           std::string("[process_yacc_file_input_section2]: "
                                       "error [line ") +
-                          to_string(output.position.line) + ", col " +
-                          to_string(output.position.col) +
+                          to_string(this->position.line) + ", col " +
+                          to_string(this->position.col) +
                           "]: forgot the symbol after %prec?");
                     }
-                    if (!output.get_symbol().empty())
-                        output_nonterminal(
-                          output,
+                    if (!this->get_symbol().empty())
+                        this->output_nonterminal(
                           tokens_tail,
                           RHS,
                           is_prec,
@@ -1477,10 +1436,9 @@ process_yacc_file_input_section2(GetYaccGrammarOutput& output,
                         std::cout << std::endl << *cur_lhs->symbol << " -> ";
                     }
                     // std::cout  << std::endl;
-                    create_new_rule(output.grammar); // CREATE NEW RULE HERE.
-                    add_lhs_symbol(output.grammar, cur_lhs);
+                    add_lhs_symbol(this->grammar, cur_lhs);
                 } else if (c == '{') {
-                    set_has_code(output.grammar); // has associated code.
+                    set_has_code(this->grammar); // has associated code.
                     /// std::cout << "start of code at rule " <<
                     ///  grammar.rule_count<< ":" << std::endl<< "{";
                     yacc_sec2_state = CODE;
@@ -1493,34 +1451,33 @@ process_yacc_file_input_section2(GetYaccGrammarOutput& output,
                     // do nothing.
                 } else if (c == ':') {
                     my_perror(
-                      "A ';' is missed in the last rule?", c, output.position);
+                      "A ';' is missed in the last rule?", c, this->position);
                 } else {
                     if (end_of_code) { // for mid-prod action.
                         mid_prod_code_ct++;
-                        insert_mid_prod_rule(output.grammar, mid_prod_code_ct);
+                        insert_mid_prod_rule(this->grammar, mid_prod_code_ct);
                         end_of_code = false;
                     }
-                    output.add_char_to_symbol(c);
+                    this->add_char_to_symbol(c);
                 }
                 break;
             case TERMINAL:
                 // putchar(c);
                 // avoid '\'' and '\\'.
                 if (c == '\'' &&
-                    (last_c != '\\' || (output.get_symbol().size() == 2 &&
-                                        output.get_symbol()[0] == '\\'))) {
+                    (last_c != '\\' || (this->get_symbol().size() == 2 &&
+                                        this->get_symbol()[0] == '\\'))) {
                     // std::cout << "] terminal ends" << std::endl;
                     yacc_sec2_state = RHS;
-                    output_nonterminal(output,
-                                       tokens_tail,
-                                       TERMINAL,
-                                       is_prec,
-                                       yacc_sec2_state); // OUTPUT NEXT RHS
-                                                         // SYMBOL. is terminal.
+                    this->output_nonterminal(
+                      tokens_tail,
+                      TERMINAL,
+                      is_prec,
+                      yacc_sec2_state); // OUTPUT NEXT RHS SYMBOL. is terminal.
                 } else {
-                    /* if (isspace(c))std::cout << "hit space here " <<
+                    /* if (isspace(c)) std::cout << "hit space here " <<
                      * position.line<< " " <<  position.col << std::endl; */
-                    output.add_char_to_symbol(c);
+                    this->add_char_to_symbol(c);
                 }
                 break;
             case CODE:
@@ -1568,18 +1525,17 @@ process_yacc_file_input_section2(GetYaccGrammarOutput& output,
                 break;
             default:
                 break;
-        } // end switch
+        }
 
         // putchar(c);
         last_c = c;
 
-        output.position.col++;
+        this->position.col++;
         if (c == '\n') {
-            output.position.line++;
-            output.position.col = 1;
+            this->position.line++;
+            this->position.col = 1;
         }
-
-    } // end while
+    }
 }
 
 /*
@@ -1589,7 +1545,8 @@ process_yacc_file_input_section2(GetYaccGrammarOutput& output,
  * RHS of goal production.
  */
 static void
-get_goal_rule_rhs(const Grammar& grammar, SymbolTblNode* start_symbol)
+get_goal_rule_rhs(const Grammar& grammar,
+                  std::shared_ptr<SymbolTableNode> start_symbol)
 {
     if (grammar.rules.size() > 1) {
         if (start_symbol != nullptr) {
@@ -1602,17 +1559,8 @@ get_goal_rule_rhs(const Grammar& grammar, SymbolTblNode* start_symbol)
         grammar.rules[0]->RHS_count = 1;
     } else {
         throw std::runtime_error(
-          "getGoalRuleRHS() error: there is no user rule.");
+          "get_goal_rule_rhs() error: there is no user rule.");
     }
-}
-
-static void
-get_goal_rule_lhs(Grammar& grammar)
-{
-    SymbolTblNode* n = hash_tbl_insert(STR_ACCEPT);
-    create_new_rule(grammar); // goal production rule.
-    grammar.rules[0]->nLHS = SymbolNode::create(n);
-    n->type = symbol_type::NONTERMINAL;
 }
 
 /*
@@ -1632,7 +1580,7 @@ post_modification(Grammar& grammar)
     if (options.preserve_unit_prod_with_code)
         return;
 
-    SymbolTblNode* n = hash_tbl_insert(STR_PLACE_HOLDER);
+    std::shared_ptr<SymbolTableNode> n = hash_tbl_insert(STR_PLACE_HOLDER);
     n->type = symbol_type::NONTERMINAL;
 
     int count = 0;
@@ -1665,7 +1613,8 @@ GetYaccGrammarOutput::GetYaccGrammarOutput(std::ofstream& fp_v)
   : grammar(fp_v)
 {
     // insert special symbols to hash table.
-    SymbolTblNode* n = hash_tbl_insert(STR_END); // end marker of production.
+    std::shared_ptr<SymbolTableNode> n =
+      hash_tbl_insert(STR_END); // end marker of production.
     n->type = symbol_type::TERMINAL;
 
     hash_tbl_insert(STR_ACCEPT);
@@ -1689,9 +1638,10 @@ GetYaccGrammarOutput::GetYaccGrammarOutput(std::ofstream& fp_v)
  * Called by function main() in y.c.
  */
 auto
-get_yacc_grammar(const std::string& infile,
-                 std::ofstream& fp_v,
-                 uint32_t& expected_sr_conflict) -> GetYaccGrammarOutput
+GetYaccGrammarOutput::get_yacc_grammar(const std::string& infile,
+                                       std::ofstream& fp_v,
+                                       uint32_t& expected_sr_conflict)
+  -> GetYaccGrammarOutput
 {
     if constexpr (DEBUG_YACC_INPUT_PARSER) {
         std::cout << "input file: " << infile << std::endl;
@@ -1706,15 +1656,21 @@ get_yacc_grammar(const std::string& infile,
     GetYaccGrammarOutput output = GetYaccGrammarOutput(fp_v);
     expected_sr_conflict = 0;
 
+    // Add a `$accept -> ...` rule.
     if constexpr (ADD_GOAL_RULE) {
-        get_goal_rule_lhs(output.grammar);
+        std::shared_ptr<SymbolTableNode> n = hash_tbl_insert(STR_ACCEPT);
+        auto& new_rule =
+          create_new_rule(output.grammar); // goal production rule.
+        new_rule->nLHS = SymbolNode::create(n);
+        n->type = symbol_type::NONTERMINAL;
     }
 
-    Section1Output section1_output =
-      process_yacc_file_input_section1(fp, output, expected_sr_conflict);
+    GetYaccGrammarOutput::Section1Output section1_output =
+      output.process_yacc_file_input_section1(fp, expected_sr_conflict);
     SymNode* tokens_tail = section1_output.tokens_tail;
-    SymbolTableNode* start_symbol = section1_output.start_symbol;
-    process_yacc_file_input_section2(output, tokens_tail, fp);
+    std::shared_ptr<SymbolTableNode> start_symbol =
+      section1_output.start_symbol;
+    output.process_yacc_file_input_section2(tokens_tail, fp);
 
     fp.close();
 

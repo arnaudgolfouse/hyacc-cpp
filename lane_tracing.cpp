@@ -69,7 +69,7 @@ get_originators(const Grammar& grammar, Configuration* c0, Configuration& c);
 static auto
 find_successor_state_no(int state_no,
                         const StateArray& states_new_array,
-                        const SymbolTblNode* snode) -> int;
+                        std::shared_ptr<const SymbolTableNode> snode) -> int;
 static auto
 inherit_parent_context(const Grammar& grammar, State* s, State* parent) -> bool;
 static void
@@ -1214,7 +1214,8 @@ inherit_parent_context(const Grammar& grammar, State* s, State* parent) -> bool
     }
 
     bool is_changed = false;
-    const SymbolTblNode* trans_symbol = s->trans_symbol->snode;
+    const std::shared_ptr<const SymbolTableNode> trans_symbol =
+      s->trans_symbol->snode;
     for (const auto& c_p : parent->config) {
         if (is_final_configuration(grammar, c_p))
             continue;
@@ -1222,7 +1223,7 @@ inherit_parent_context(const Grammar& grammar, State* s, State* parent) -> bool
             continue;
 
         c_p->marker++;
-        int config_index = 0;
+        size_t config_index = 0;
         const Configuration* c =
           find_similar_core_config(s, c_p, &config_index);
         c_p->marker--;
@@ -1498,7 +1499,7 @@ LaneTracing::phase2_regeneration2()
 /* for laneHeads list */
 
 static auto
-create_lane_head(State* s, SymbolTblNode* n) -> laneHead*
+create_lane_head(State* s, std::shared_ptr<SymbolTableNode> n) -> laneHead*
 {
     auto* h = new laneHead;
     h->s = s;
@@ -1525,7 +1526,7 @@ destroy_lane_head_node(laneHead* h)
  * Called by addLaneHeadList() only, h and n are Not nullptr.
  */
 static void
-add_context_to_lane_head(laneHead* h, SymbolTblNode* n)
+add_context_to_lane_head(laneHead* h, std::shared_ptr<SymbolTableNode> n)
 {
     SymbolNode *sn = h->contexts, *sn_prev = nullptr;
     for (; sn != nullptr; sn_prev = sn, sn = sn->next) {
@@ -1716,7 +1717,7 @@ my_write_symbol_node_array(const SymbolNode* str)
 }
 
 static void
-my_write_context(const Context* c, const bool use_lr_k)
+my_write_context(const Context* c)
 {
     std::cout << " {";
 
@@ -1725,21 +1726,6 @@ my_write_context(const Context* c, const bool use_lr_k)
         std::cout << s->snode->symbol;
         while ((s = s->next) != nullptr) {
             std::cout << ", " << s->snode->symbol;
-        }
-    }
-
-    if (use_lr_k) {
-        // specifically for LR(k). This can be combined with the
-        // above if block. Single this part out here is to keep
-        // the code easier to maintain for LR(1) and LR(k) separately.
-        for (c = c->next; c != nullptr; c = c->next) {
-            std::cout << "; ";
-            if ((s = c->nContext) != nullptr) {
-                std::cout << s->snode->symbol;
-                while ((s = s->next) != nullptr) {
-                    std::cout << ", " << s->snode->symbol;
-                }
-            }
         }
     }
 
@@ -1790,7 +1776,7 @@ stdout_write_config(const Grammar& grammar, const Configuration* c)
     }
     std::cout << "config (" << c->owner->state_no << "." << c->ruleID << ") : ";
     my_write_production(grammar.rules[c->ruleID], c->marker);
-    my_write_context(c->context, Options::get().use_lr_k);
+    my_write_context(c->context);
     std::cout << "[COMPLETE: " << c->COMPLETE << "]"
               << "[IN_LANE: " << c->IN_LANE << "]"
               << "[LANE_END: " << c->LANE_END << "]"
@@ -1899,7 +1885,7 @@ LaneTracing::phase1()
 static auto
 find_successor_state_no(int state_no,
                         const StateArray& states_new_array,
-                        const SymbolTblNode* snode) -> int
+                        const std::shared_ptr<const SymbolTableNode> snode) -> int
 {
     const State* state = states_new_array.state_list[state_no];
     auto it = state->successor_list.rbegin();
@@ -2107,7 +2093,8 @@ get_state_successors(const Grammar& grammar, const State& s) -> StateCollection*
         if (is_final_configuration(grammar, c)) {
             // do nothing.
         } else { // do transit operation.
-            SymbolTblNode* scanned_symbol = get_scanned_symbol(c);
+            std::shared_ptr<SymbolTableNode> scanned_symbol =
+              get_scanned_symbol(c);
             if (scanned_symbol->symbol->empty()) { // empty reduction.
                 continue;
             }
@@ -2141,7 +2128,8 @@ get_state_successors(const Grammar& grammar, const State& s) -> StateCollection*
  * successor of s that has this trans_symbol.
  */
 static auto
-get_successor_index(const State& s, const SymbolTblNode* trans_symbol)
+get_successor_index(const State& s,
+                    const std::shared_ptr<const SymbolTableNode> trans_symbol)
   -> std::optional<size_t>
 {
     for (size_t i = 0; i < s.successor_list.size(); i++) {
@@ -2848,8 +2836,9 @@ test_d(const Configuration* c) -> bool
  *  exist - label whether snode already existed.
  */
 static auto
-insert_symbol_list_unique(SymbolList list, SymbolTblNode* snode, bool* exist)
-  -> SymbolNode*
+insert_symbol_list_unique(SymbolList list,
+                          std::shared_ptr<SymbolTableNode> snode,
+                          bool* exist) -> SymbolNode*
 {
     *exist = false;
 

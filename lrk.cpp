@@ -207,7 +207,7 @@ static auto
 insert_lrk_pt(LRkPTArray& lrk_pt_array,
               int state_no,
               SymbolNode* token_list,
-              SymbolTblNode* col,
+              std::shared_ptr<SymbolTableNode> col,
               Configuration* c,
               Configuration* c_tail,
               Set* set_c2) -> Set*
@@ -452,7 +452,7 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, int state_no)
  * Remove r/r conflict nodes from list.
  */
 static void
-remove_rr_conflict_from_list(int state_no, NewStates& new_states)
+remove_rr_conflict_from_list(size_t state_no, NewStates& new_states)
 {
     std::shared_ptr<Conflict> c_prev = nullptr;
     std::shared_ptr<Conflict>& c =
@@ -477,7 +477,7 @@ remove_rr_conflict_from_list(int state_no, NewStates& new_states)
     // if list is empty, remove this conflict.
     if (new_states.states_new_array->conflict_list[state_no] == nullptr) {
         for (int& state : states_inadequate->states) {
-            if (state_no == state) {
+            if (static_cast<int>(state_no) == state) {
                 state = -1;
                 states_inadequate->count_unresolved--;
             }
@@ -491,7 +491,7 @@ remove_rr_conflict_from_list(int state_no, NewStates& new_states)
  * 2) remove this conflict from conflict list.
  */
 static void
-update_lr1_parsing_table(int state_no, NewStates& new_states)
+update_lr1_parsing_table(size_t state_no, NewStates& new_states)
 {
     for (std::shared_ptr<Conflict> c =
            new_states.states_new_array->conflict_list[state_no];

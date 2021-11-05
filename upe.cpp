@@ -118,7 +118,7 @@ print_int_array(std::ostream& os, const std::vector<int>& a)
  */
 static void
 get_unit_prod_shift(int state,
-                    SymbolTblNode* leaf,
+                    std::shared_ptr<SymbolTableNode> leaf,
                     const MRParents& parents,
                     std::vector<int>& unit_prod_dest_states)
 {
@@ -126,7 +126,7 @@ get_unit_prod_shift(int state,
     unit_prod_dest_states.clear();
 
     for (const auto& parent : parents) {
-        SymbolTblNode* n = parent->snode;
+        std::shared_ptr<SymbolTableNode> n = parent->snode;
         auto [action, state_dest] = get_action(n->type, get_col(*n), state);
         // std::cout << action << ", " << state_dest << std::endl;
         if (action == 'g') {
@@ -150,7 +150,7 @@ get_unit_prod_shift(int state,
 static void
 write_unit_prod_shift(std::ostream& os,
                       int state,
-                      SymbolTblNode* leaf,
+                      std::shared_ptr<SymbolTableNode> leaf,
                       const std::vector<int>& unit_prod_dest_states,
                       int new_ups_state)
 {
@@ -236,7 +236,7 @@ Grammar::is_unit_production(size_t rule_no) const -> bool
  * Called by function insert_actionsOfCombinedStates().
  */
 void
-YAlgorithm::insert_action_of_symbol(SymbolTblNode* symbol,
+YAlgorithm::insert_action_of_symbol(std::shared_ptr<SymbolTableNode> symbol,
                                     const int new_state,
                                     const size_t old_state_index,
                                     std::vector<int>& old_states)
@@ -353,7 +353,7 @@ get_reachable_states_for_symbol(const Grammar& grammar,
                                 int cur_state,
                                 std::vector<int>& states_reachable)
 {
-    const SymbolTblNode* n = hash_tbl_find(symbol);
+    const std::shared_ptr<const SymbolTableNode> n = hash_tbl_find(symbol);
 
     auto [action, state_dest] = get_action(n->type, get_col(*n), cur_state);
     if ((action == 's' || action == 'g') &&
@@ -492,7 +492,7 @@ print_final_parsing_table(const Grammar& grammar)
         if (is_reachable_state(row)) {
             grammar.fp_v << row << "\t";
             for (int col = 0; col < ParsingTblCols; col++) {
-                SymbolTblNode* n = ParsingTblColHdr[col];
+                std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
                 if (is_goal_symbol(grammar, n) == false &&
                     is_parent_symbol(n) == false) {
                     auto [action, state] = get_action(n->type, col, row);
@@ -592,7 +592,7 @@ print_condensed_final_parsing_table(const Grammar& grammar)
         if (is_reachable_state(row)) {
             grammar.fp_v << i << "\t";
             for (int col = 0; col < ParsingTblCols; col++) {
-                SymbolTblNode* n = ParsingTblColHdr[col];
+                std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
                 if (is_goal_symbol(grammar, n) == false &&
                     is_parent_symbol(n) == false) {
                     auto [action, state_no] = get_action(n->type, col, row);
@@ -657,7 +657,7 @@ YAlgorithm::remove_unit_production_step1and2(const MRLeaves& mr_leaves)
     // now, steps 1 and 2.
     for (int state = 0; state < ParsingTblRows; state++) {
         for (int i = 0; i < mr_leaves.size(); i++) {
-            SymbolTblNode* leaf = mr_leaves[i]->symbol->snode;
+            std::shared_ptr<SymbolTableNode> leaf = mr_leaves[i]->symbol->snode;
             const auto& parents = leaf_parents[i];
 
             get_unit_prod_shift(state, leaf, *parents, unit_prod_dest_states);
@@ -729,7 +729,7 @@ auto
 is_equal_row(const int i, const int j) -> bool
 {
     for (int col = 0; col < ParsingTblCols; col++) {
-        SymbolTblNode* n = ParsingTblColHdr[col];
+        std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
         auto [action_i, state_dest_i] = get_action(n->type, get_col(*n), i);
         auto [action_j, state_dest_j] = get_action(n->type, get_col(*n), j);
         if (action_i != action_j || state_dest_i != state_dest_j)
@@ -753,7 +753,7 @@ update_repeated_row(const Grammar& grammar,
     //           << new_state << std::endl;
 
     // for end marker column STR_END
-    SymbolTblNode* n = hash_tbl_find(STR_END);
+    std::shared_ptr<SymbolTableNode> n = hash_tbl_find(STR_END);
     auto [action, state_dest] = get_action(n->type, get_col(*n), row);
     if (state_dest == old_state)
         update_action(get_col(*hash_tbl_find(STR_END)), row, new_state);

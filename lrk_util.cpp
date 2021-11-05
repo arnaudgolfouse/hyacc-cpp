@@ -466,8 +466,9 @@ lrk_pt_dump_file(const LRkPT* t, std::ofstream& fp)
  *          otherwise, return the row before the insertion point.
  */
 auto
-LRkPT::find(int state, SymbolTblNode* token, bool* found) const noexcept
-  -> LRkPTRow*
+LRkPT::find(int state,
+            std::shared_ptr<SymbolTableNode> token,
+            bool* found) const noexcept -> LRkPTRow*
 {
 
     *found = false;
@@ -501,8 +502,10 @@ LRkPT::find(int state, SymbolTblNode* token, bool* found) const noexcept
  * @Return: the inserted new row.
  */
 static auto
-lrk_pt_add_row(LRkPT* t, LRkPTRow* r_prev, int state, SymbolTblNode* token)
-  -> LRkPTRow*
+lrk_pt_add_row(LRkPT* t,
+               LRkPTRow* r_prev,
+               int state,
+               std::shared_ptr<SymbolTableNode> token) -> LRkPTRow*
 {
     auto* r = new LRkPTRow;
     r->state = state;
@@ -532,8 +535,8 @@ lrk_pt_add_row(LRkPT* t, LRkPTRow* r_prev, int state, SymbolTblNode* token)
  */
 auto
 LRkPT::get_entry(int state,
-                 SymbolTblNode* token,
-                 const SymbolTblNode* col_token,
+                 std::shared_ptr<SymbolTableNode> token,
+                 const std::shared_ptr<const SymbolTableNode> col_token,
                  bool* exist) noexcept -> ConfigPairNode*
 {
     bool found = false;
@@ -558,8 +561,8 @@ LRkPT::get_entry(int state,
  */
 auto
 LRkPT::add_reduction(int state,
-                     SymbolTblNode* token,
-                     const SymbolTblNode* s,
+                     std::shared_ptr<SymbolTableNode> token,
+                     const std::shared_ptr<const SymbolTableNode> s,
                      Configuration* c,
                      Configuration* c_tail) noexcept -> bool
 {
@@ -861,8 +864,7 @@ lrk_thead_in_list(List* t, SymbolList new_list) -> bool
     }
 
     for (ObjectItem* o = t->head; o != nullptr; o = o->next) {
-        if (
-            is_same_symbol_list(new_list, static_cast<SymbolList>(o->object))) {
+        if (is_same_symbol_list(new_list, static_cast<SymbolList>(o->object))) {
             return true;
         }
     }
@@ -968,7 +970,7 @@ List::lrk_theads_rm_nt(int j)
     ObjectItem* o_prev = nullptr;
     ObjectItem* o = this->head;
     while (o != nullptr) {
-        if ( j_th_symbol_is_nt(static_cast<SymbolList>(o->object), j)) {
+        if (j_th_symbol_is_nt(static_cast<SymbolList>(o->object), j)) {
             this->count--;
             // remove o.
             if (o_prev == nullptr) {
@@ -1035,8 +1037,7 @@ List::lrk_theads_rm_theads(int k, List* t_heads)
     ObjectItem* o_prev = nullptr;
     ObjectItem* o = this->head;
     while (o != nullptr) {
-        if (
-              k_heads_are_t(static_cast<SymbolList>(o->object), k, &len) ||
+        if (k_heads_are_t(static_cast<SymbolList>(o->object), k, &len) ||
             (len > 0 && len < k)) {
             this->count--;
             if (len < k) {

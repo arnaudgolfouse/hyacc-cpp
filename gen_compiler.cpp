@@ -220,9 +220,9 @@ find_full_rule(const Grammar& grammar, int rule_count) -> Production*
 {
     Production* rule = nullptr;
     const SymbolNode* node = nullptr;
-    const SymbolTblNode* sym = nullptr;
+    std::shared_ptr<const SymbolTableNode> sym = nullptr;
 
-    for (int full_rule = rule_count; full_rule < grammar.rules.size();
+    for (size_t full_rule = rule_count; full_rule < grammar.rules.size();
          ++full_rule) {
 
         if ((rule = grammar.rules[full_rule]) && (node = rule->nLHS) &&
@@ -245,10 +245,10 @@ find_mid_prod_index(const Production* rule, const Production* mid_prod_rule)
   -> int
 {
     const SymbolNode* lnode = mid_prod_rule->nLHS;
-    const SymbolTblNode* lsym = lnode->snode;
+    std::shared_ptr<const SymbolTableNode> lsym = lnode->snode;
     const std::string_view l = *lsym->symbol;
     const SymbolNode* rnode = rule->nRHS_head;
-    const SymbolTblNode* rsym = nullptr;
+    std::shared_ptr<const SymbolTableNode> rsym = nullptr;
 
     for (int i = 0; rnode; ++i, rnode = rnode->next) {
         const std::string_view r = *rsym->symbol;
@@ -263,9 +263,10 @@ find_mid_prod_index(const Production* rule, const Production* mid_prod_rule)
 }
 
 static auto
-find_sym(const Production* rule, int dollar_number) -> const SymbolTblNode*
+find_sym(const Production* rule, int dollar_number)
+  -> std::shared_ptr<const SymbolTableNode>
 {
-    const SymbolTblNode* sym = nullptr;
+    std::shared_ptr<const SymbolTableNode> sym = nullptr;
     if (dollar_number == MAX_RULE_LENGTH)
         return sym;
 
@@ -476,7 +477,7 @@ process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
                         token_type = explicit_type;
                         explicit_type = std::nullopt;
                     } else {
-                        const SymbolTblNode* sym =
+                        std::shared_ptr<const SymbolTableNode> sym =
                           find_sym(rule, dollar_number);
                         token_type = sym->token_type;
                     }
@@ -626,7 +627,7 @@ copy_yaccpar_file_2(std::ofstream& fp, const std::string& filename)
 ///////////////////////////////////////////////////////
 
 auto
-get_index_in_tokens_array(SymbolTblNode* s) -> int
+get_index_in_tokens_array(std::shared_ptr<SymbolTableNode> s) -> int
 {
     SymbolNode* a = tokens;
     for (int i = 0; a != nullptr; a = a->next, i++) {
@@ -642,8 +643,8 @@ get_index_in_tokens_array(SymbolTblNode* s) -> int
  * Used in gen_compiler.c.
  */
 static auto
-get_non_terminal_index(const Grammar& grammar, const SymbolTblNode* snode)
-  -> int
+get_non_terminal_index(const Grammar& grammar,
+                       std::shared_ptr<const SymbolTableNode> snode) -> int
 {
     const SymbolNode* a = grammar.non_terminal_list;
     for (int i = 0; a != nullptr; a = a->next) {
@@ -865,7 +866,8 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
                     }
                 }
                 for (int col = 0; col < ParsingTblCols; col++) {
-                    const SymbolTblNode* n = ParsingTblColHdr[col];
+                    std::shared_ptr<const SymbolTableNode> n =
+                      ParsingTblColHdr[col];
                     if (is_goal_symbol(grammar, n) == false &&
                         is_parent_symbol(n) == false) {
                         auto [action, state_no] = get_action(n->type, col, row);
@@ -968,7 +970,7 @@ print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
                     }
                 }
                 for (int col = 0; col < ParsingTblCols; col++) {
-                    SymbolTblNode* n = ParsingTblColHdr[col];
+                    std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
                     if (is_goal_symbol(grammar, n) == false &&
                         is_parent_symbol(n) == false) {
                         auto [action, state] = get_action(n->type, col, row);
@@ -989,7 +991,7 @@ print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
                 }
             }
             for (int j = 0; j < ParsingTblCols; j++) {
-                SymbolTblNode* n = ParsingTblColHdr[j];
+                std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[j];
                 auto [action, state] = get_action(n->type, j, i);
                 print_parsing_tbl_col_entry(fp, action, n->value, count);
             }

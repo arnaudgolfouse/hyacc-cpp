@@ -58,7 +58,7 @@ std::atomic_size_t PARSING_TABLE_SIZE;
 std::vector<int> ParsingTable;
 int ParsingTblCols;
 int ParsingTblRows;
-std::vector<SymbolTblNode*> ParsingTblColHdr;
+std::vector<std::shared_ptr<SymbolTableNode>> ParsingTblColHdr;
 SymbolList F_ParsingTblColHdr;
 int F_ParsingTblCols;
 std::vector<int> states_reachable;
@@ -74,8 +74,6 @@ StateNoArray* states_inadequate;
 /* Declaration of functions. */
 static void
 init_parsing_table();
-static void
-combine_compatible_config(State* s, bool debug_comb_comp_config);
 static void
 destroy_state_collection(StateCollection* c);
 static void
@@ -140,7 +138,7 @@ operator<<(std::ostream& os, const StateList& state_list) -> std::ostream&
 {
     os << std::endl
        << "  parents_list(" << state_list.state_list.size() << "): ";
-    for (int i = 0; i < state_list.state_list.size(); i++) {
+    for (size_t i = 0; i < state_list.state_list.size(); i++) {
         if (i > 0)
             os << ", ";
         os << state_list.state_list[i]->state_no;
@@ -286,17 +284,6 @@ Grammar::write(std::ostream& os,
     os << std::endl;
 }
 
-ConflictNode::ConflictNode(int state,
-                           SymbolTblNode* lookahead,
-                           int r,
-                           int s) noexcept
-  : state(state)
-  , r(r)
-  , s(s)
-  , next(nullptr)
-  , lookahead(lookahead)
-{}
-
 auto
 StateArray::create() -> std::shared_ptr<StateArray>
 {
@@ -314,7 +301,7 @@ StateArray::expand(StateArray* a, size_t new_size)
 }
 
 void
-NewStates::inc_conflict_count(const int s, const int state) noexcept
+NewStates::inc_conflict_count(const int s, const size_t state) noexcept
 {
     if (s > 0) {
         this->conflicts_count.rs++;
@@ -327,7 +314,7 @@ NewStates::inc_conflict_count(const int s, const int state) noexcept
 
 auto
 NewStates::add_to_conflict_array(int state,
-                                 SymbolTblNode* lookahead,
+                                 std::shared_ptr<SymbolTableNode> lookahead,
                                  int action1,
                                  int action2) noexcept
   -> std::shared_ptr<ConflictNode>
@@ -399,7 +386,7 @@ YAlgorithm::init()
     }
 
     if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
-        this->config_queue = Queue(); // for getClosure().
+        this->config_queue->clear(); // for getClosure().
     }
 
     // for finding same/compatible states fast.
@@ -418,22 +405,6 @@ operator<<(std::ostream& os, const Context& context) -> std::ostream&
         os << *s->snode->symbol;
         while ((s = s->next) != nullptr) {
             os << ", " << *s->snode->symbol;
-        }
-    }
-
-    const Context* c = &context;
-    if (Options::get().use_lr_k) {
-        // specifically for LR(k). This can be combined with the
-        // above if block. Single this part out here is to keep
-        // the code easier to maintain for LR(1) and LR(k) separately.
-        for (c = c->next; c != nullptr; c = c->next) {
-            os << "; ";
-            if ((s = c->nContext) != nullptr) {
-                os << *s->snode->symbol;
-                while ((s = s->next) != nullptr) {
-                    os << ", " << *s->snode->symbol;
-                }
-            }
         }
     }
 
@@ -498,7 +469,6 @@ write_state_conflict_list(std::ostream& os,
 {
     if (Options::get().use_remove_unit_production) {
         state = get_actual_state(state);
-        // if (state == -1) return; // removed state.
     }
 
     if (state < 0)
@@ -557,7 +527,7 @@ NewStates::write_grammar_conflict_list2(std::ostream& os) const noexcept
 {
     uint32_t final_rs_count = 0;
     uint32_t final_rr_count = 0;
-    const auto& a = states_new_array;
+    const auto& a = this->states_new_array;
 
     if (this->conflicts_count.rs == 0 && this->conflicts_count.rr == 0)
         return;
@@ -591,11 +561,13 @@ NewStates::write_grammar_conflict_list2(std::ostream& os) const noexcept
         }
     }
 
-    int diff = this->conflicts_count.rs - final_rs_count;
+    int diff = static_cast<int>(this->conflicts_count.rs) -
+               static_cast<int>(final_rs_count);
     if (diff > 0)
         os << "  [" << diff << " shift/reduce conflict"
            << ((diff > 1) ? "s" : "") << " in removed states]" << std::endl;
-    diff = this->conflicts_count.rr - final_rr_count;
+    diff = static_cast<int>(this->conflicts_count.rr) -
+           static_cast<int>(final_rr_count);
     if (diff > 0)
         os << "  [" << diff << " reduce/reduce conflict"
            << ((diff > 1) ? "s" : "") << " in removed states]" << std::endl;
@@ -666,7 +638,7 @@ StateNode::destroy_state(State* s)
  * There is no need to sort context later.
  */
 auto
-add_symbol2_context(SymbolTblNode* snode, Context* c) -> bool
+add_symbol2_context(std::shared_ptr<SymbolTableNode> snode, Context* c) -> bool
 {
     SymbolNode *s = c->nContext, *s_prev = nullptr;
     for (; s != nullptr; s_prev = s, s = s->next) {
@@ -708,7 +680,7 @@ add_symbol2_context(SymbolTblNode* snode, Context* c) -> bool
  */
 auto
 insert_symbol_list_unique_inc(SymbolList list,
-                              SymbolTblNode* snode,
+                              std::shared_ptr<SymbolTableNode> snode,
                               bool* exist) -> SymbolNode*
 {
     *exist = false;
@@ -744,8 +716,9 @@ insert_symbol_list_unique_inc(SymbolList list,
  * Insert symbol to list tail if not exist, un-ordered.
  */
 static auto
-insert_unique_symbol_list(SymbolList list, SymbolTblNode* snode, bool* exist)
-  -> SymbolNode*
+insert_unique_symbol_list(SymbolList list,
+                          std::shared_ptr<SymbolTableNode> snode,
+                          bool* exist) -> SymbolNode*
 {
     *exist = false;
 
@@ -815,7 +788,7 @@ insert_alpha_to_heads(SymbolNode* s, SymbolNode* heads, SymbolNode* theads)
     }
 
     // all symbols are vanishable, since didn't return in the cycle.
-    SymbolTblNode* snode = hash_tbl_find("");
+    std::shared_ptr<SymbolTableNode> snode = hash_tbl_find("");
     theads->next = insert_symbol_list_unique_inc(theads->next, snode, &exist);
 }
 
@@ -1089,19 +1062,20 @@ is_existing_successor_config(const State* s, int rule_id, const Context* con)
     return false;
 }
 
+/// Add `con` to `s.config`.
 static void
 add_successor_config_to_state(const Grammar& grammar,
-                              State* s,
+                              State& s,
                               int rule_id,
-                              Context* con)
+                              const Context* con)
 {
     // marker = 0, isCoreConfig = 0.
     Configuration* c = create_config(grammar, rule_id, 0, 0);
-    c->owner = s;
+    c->owner = &s;
 
     copy_context(c->context, con);
 
-    s->config.push_back(c);
+    s.config.push_back(c);
 }
 
 auto
@@ -1235,7 +1209,7 @@ add_core_config2_state(const Grammar& grammar,
         if (cmp_val > 0)
             break; // found insertion point.
     }
-    s->config.insert(s->config.begin() + i, new_config);
+    s->config.insert(s->config.begin() + static_cast<ptrdiff_t>(i), new_config);
     s->core_config_count++;
 }
 
@@ -1248,14 +1222,15 @@ add_core_config2_state(const Grammar& grammar,
  * Returns the index of the compatible config in the state.
  */
 auto
-is_compatible_successor_config(const State* s, int rule_id) -> int
+is_compatible_successor_config(const State* s, const int rule_id)
+  -> std::optional<size_t>
 {
-    for (int i = 0; i < s->config.size(); i++) {
+    for (size_t i = 0; i < s->config.size(); i++) {
         const Configuration* c = s->config[i];
         if (c->marker == 0 && rule_id == c->ruleID)
             return i; // existing compatible config
     }
-    return -1;
+    return std::nullopt;
 }
 
 /*
@@ -1265,51 +1240,53 @@ is_compatible_successor_config(const State* s, int rule_id) -> int
 static void
 get_config_successors(const Grammar& grammar, Queue& config_queue, State* s)
 {
-    static Context tmp_context;
-    tmp_context.nContext = nullptr;
-
-    while (config_queue.count() > 0) {
-        Configuration* config = s->config[config_queue.pop()];
+    while (config_queue.size() > 0) {
+        Configuration* config = s->config[*config_queue.pop()];
 
         if (config->marker >= 0 &&
             config->marker < grammar.rules[config->ruleID]->RHS_count) {
-            const SymbolTblNode* scanned_symbol = get_scanned_symbol(config);
+            const SymbolTableNode& scanned_symbol = *get_scanned_symbol(config);
 
-            if (scanned_symbol->is_non_terminal()) {
-
-                tmp_context.clear(); // clear tmp_context
+            if (scanned_symbol.is_non_terminal()) {
+                Context tmp_context;
                 get_context(grammar, config, &tmp_context);
 
-                for (const RuleIDNode* r = scanned_symbol->ruleIDList;
+                for (const RuleIDNode* r = scanned_symbol.ruleIDList;
                      r != nullptr;
                      r = r->next) {
                     // Grammar.rules[r->ruleID] starts with this scanned
                     // symbol.
 
                     // If not an existing config, add to state s.
-                    const int index =
+                    const std::optional<size_t> index_opt =
                       is_compatible_successor_config(s, r->rule_id);
 
-                    if (index == -1) { // new config.
+                    if (!index_opt.has_value()) { // new config.
                         add_successor_config_to_state(
-                          grammar, s, r->rule_id, &tmp_context);
+                          grammar, *s, r->rule_id, &tmp_context);
+                        // `s->config.size() - 1 >= 0` here (see the first line
+                        // of the loop)
                         config_queue.push(s->config.size() - 1);
+                    } else {
+                        size_t index = index_opt.value();
+                        if (combine_context(s->config.at(index)->context,
+                                            &tmp_context)) {
+                            // compatible config
+                            // if this config has no successor, don't insert
+                            // to config_queue. This saves time. marker = 0
+                            // here, no need to check marker >= 0.
+                            if (is_final_configuration(grammar,
+                                                       s->config[index]))
+                                continue;
+                            if (get_scanned_symbol(s->config[index])
+                                  ->is_terminal())
+                                continue;
+                            if (config_queue.exist(index) == 1)
+                                continue;
 
-                    } else if (combine_context(
-                                 s->config[index]->context,
-                                 &tmp_context)) { // compatible config
-                        // if this config has no successor, don't insert
-                        // to config_queue. This saves time. marker = 0
-                        // here, no need to check marker >= 0.
-                        if (is_final_configuration(grammar, s->config[index]))
-                            continue;
-                        if (get_scanned_symbol(s->config[index])->is_terminal())
-                            continue;
-                        if (config_queue.exist(index) == 1)
-                            continue;
-
-                        // else, insert to config_queue.
-                        config_queue.push(index);
+                            // else, insert to config_queue.
+                            config_queue.push(index);
+                        }
                     }
                 }
             }
@@ -1328,20 +1305,19 @@ get_successor_for_config(const Grammar& grammar,
                          State* s,
                          const Configuration* config)
 {
-    const SymbolTblNode* scanned_symbol = nullptr;
     static Context tmp_context;
     tmp_context.nContext = nullptr;
 
     if (config->marker >= 0 &&
         config->marker < grammar.rules[config->ruleID]->RHS_count) {
-        scanned_symbol = get_scanned_symbol(config);
+        const SymbolTableNode& scanned_symbol = *get_scanned_symbol(config);
 
-        if (scanned_symbol->is_non_terminal()) {
+        if (scanned_symbol.is_non_terminal()) {
 
             tmp_context.clear(); // clear tmp_context
             get_context(grammar, config, &tmp_context);
 
-            for (const RuleIDNode* r = scanned_symbol->ruleIDList; r != nullptr;
+            for (const RuleIDNode* r = scanned_symbol.ruleIDList; r != nullptr;
                  r = r->next) {
                 // Grammar.rules[r->ruleID] starts with this scanned
                 // symbol.
@@ -1350,7 +1326,7 @@ get_successor_for_config(const Grammar& grammar,
                 if (is_existing_successor_config(s, r->rule_id, &tmp_context) ==
                     false) {
                     add_successor_config_to_state(
-                      grammar, s, r->rule_id, &tmp_context);
+                      grammar, *s, r->rule_id, &tmp_context);
                 }
 
             } // end for
@@ -1364,7 +1340,7 @@ get_successor_for_config(const Grammar& grammar,
  * Compatible configurations are those that have the same
  * production and marker, but different in contexts.
  */
-void
+static void
 combine_compatible_config(State* s,
                           bool debug_comb_comp_config,
                           std::ofstream& fp_v)
@@ -1419,7 +1395,7 @@ combine_compatible_config(State* s,
  * xx - no. of calls to getClosure,
  * yy - number of config in all states before combine,
  * zz - max config count in all states before combine.
- * yyy - number of config in all stetes after combine,
+ * yyy - number of config in all states after combine,
  * zzz - max config count in all states after combine.
  */
 static size_t xx = 0;
@@ -1452,12 +1428,12 @@ YAlgorithm::get_state_closure(State& state)
 {
     if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
         // config_queue->clear();
-        for (int i = 0; i < state.config.size(); i++) {
+        for (size_t i = 0; i < state.config.size(); i++) {
             config_queue->push(i);
         }
         get_config_successors(this->grammar, *this->config_queue, &state);
     } else {
-        for (Configuration* config : state.config) {
+        for (const Configuration* config : state.config) {
             get_successor_for_config(grammar, &state, config);
         }
 
@@ -1466,9 +1442,9 @@ YAlgorithm::get_state_closure(State& state)
         if (zz < state.config.size())
             zz = state.config.size();
 
-        if (Options::get().debug_comb_comp_config)
-            combine_compatible_config(&state,
-                                      Options::get().debug_comb_comp_config);
+        if (this->options.debug_comb_comp_config)
+            combine_compatible_config(
+              &state, this->options.debug_comb_comp_config, this->fp_v);
 
         yyy += state.config.size();
         if (zzz < state.config.size())
@@ -1541,7 +1517,7 @@ StateCollection::add_state2(State* new_state) -> State*
  * as here, or by marker which needs more calculation.
  */
 auto
-get_scanned_symbol(const Configuration* c) -> SymbolTblNode*
+get_scanned_symbol(const Configuration* c) -> std::shared_ptr<SymbolTableNode>
 {
     if (c->nMarker == nullptr)
         return nullptr;
@@ -1554,8 +1530,9 @@ get_scanned_symbol(const Configuration* c) -> SymbolTblNode*
  * transition following the given symbol.
  */
 auto
-find_state_for_scanned_symbol(const StateCollection* c,
-                              const SymbolTblNode* symbol) -> State*
+find_state_for_scanned_symbol(
+  const StateCollection* c,
+  const std::shared_ptr<const SymbolTableNode> symbol) -> State*
 {
     if (c == nullptr)
         return nullptr;
@@ -1576,15 +1553,14 @@ create_context() -> Context*
     auto* c = new Context;
     c->nContext = nullptr;
     c->context_count = 0;
-    c->next = nullptr; // used by LR(k) only.
     return c;
 }
 
 auto
 create_config(const Grammar& grammar,
-              int rule_id,
-              int marker,
-              int is_core_config) -> Configuration*
+              const int rule_id,
+              const int marker,
+              const uint is_core_config) -> Configuration*
 {
     auto* c = new Configuration;
     if (c == nullptr) {
@@ -1684,7 +1660,7 @@ has_common_core(const State* s1, const State* s2) -> bool
         return false;
     if (s1->core_config_count == 0)
         return false;
-    for (int i = 0; i < s1->core_config_count; i++) {
+    for (size_t i = 0; i < s1->core_config_count; i++) {
         if (is_same_config(s1->config[i], s2->config[i])) {
             // do nothing.
         } else if (is_common_config(s1->config[i], s2->config[i])) {
@@ -1727,9 +1703,9 @@ has_empty_intersection(const Context* c1, const Context* c2) -> bool
 auto
 is_compatible_state_a(const State* s1, const State* s2) -> bool
 {
-    int count = s1->core_config_count;
-    for (int i = 0; i < count; i++) {
-        for (int j = 0; j < count; j++) {
+    size_t count = s1->core_config_count;
+    for (size_t i = 0; i < count; i++) {
+        for (size_t j = 0; j < count; j++) {
             if (i != j) {
                 const Context* c1 = s1->config[i]->context;
                 const Context* c2 = s2->config[j]->context;
@@ -1749,9 +1725,9 @@ is_compatible_state_a(const State* s1, const State* s2) -> bool
 auto
 is_compatible_state_bc(const State* s) -> bool
 {
-    int count = s->core_config_count;
-    for (int i = 0; i < count - 1; i++) {
-        for (int j = i + 1; j < count; j++) {
+    size_t count = s->core_config_count;
+    for (size_t i = 0; i < count - 1; i++) {
+        for (size_t j = i + 1; j < count; j++) {
             const Context* c1 = s->config[i]->context;
             const Context* c2 = s->config[j]->context;
             if (has_empty_intersection(c1, c2)) {
@@ -1793,7 +1769,8 @@ void
 YAlgorithm::update_state_parsing_tbl_entry(const State& s)
 {
     for (const auto& config : s.config) {
-        const SymbolTblNode* scanned_symbol = get_scanned_symbol(config);
+        const std::shared_ptr<const SymbolTableNode> scanned_symbol =
+          get_scanned_symbol(config);
 
         // for final config and empty reduction.
         if (is_final_configuration(grammar, config) ||
@@ -1815,9 +1792,9 @@ YAlgorithm::update_state_parsing_tbl_entry(const State& s)
 auto
 find_similar_core_config(const State* t,
                          const Configuration* c,
-                         int* config_index) -> Configuration*
+                         size_t* config_index) -> Configuration*
 {
-    for (int i = 0; i < t->core_config_count; i++) {
+    for (size_t i = 0; i < t->core_config_count; i++) {
         Configuration* tmp = t->config[i];
 
         // don't compare context, it'll be compared in
@@ -1855,9 +1832,10 @@ YAlgorithm::propagate_context_change(const State& s)
     if (s.successor_list.empty())
         return;
 
-    int config_index = 0;
+    size_t config_index = 0;
     for (State* t : s.successor_list) {
-        const SymbolTblNode* trans_symbol = t->trans_symbol->snode;
+        const std::shared_ptr<const SymbolTableNode> trans_symbol =
+          t->trans_symbol->snode;
         bool is_changed = false;
 
         for (const auto& config : s.config) {
@@ -1893,8 +1871,8 @@ YAlgorithm::propagate_context_change(const State& s)
         if (is_changed) {
             if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
             } else {
-                combine_compatible_config(t,
-                                          this->options.debug_comb_comp_config);
+                combine_compatible_config(
+                  t, this->options.debug_comb_comp_config, this->fp_v);
             }
             this->update_state_parsing_tbl_entry(*t);
             this->propagate_context_change(*t);
@@ -1911,13 +1889,12 @@ auto
 YAlgorithm::combine_compatible_states(State& s_dest, const State& s_src) -> bool
 {
     bool is_changed = false;
-    for (int i = 0; i < s_dest.core_config_count; i++) {
+    for (size_t i = 0; i < s_dest.core_config_count; i++) {
         if (combine_context(s_dest.config[i]->context,
                             s_src.config[i]->context)) {
             is_changed = true;
 
             if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
-                // this->config_queue->clear();
                 this->config_queue->push(i);
                 get_config_successors(this->grammar, *config_queue, &s_dest);
             } else {
@@ -1932,8 +1909,8 @@ YAlgorithm::combine_compatible_states(State& s_dest, const State& s_src) -> bool
     if (is_changed) {
         if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
         } else {
-            combine_compatible_config(&s_dest,
-                                      Options::get().debug_comb_comp_config);
+            combine_compatible_config(
+              &s_dest, this->options.debug_comb_comp_config, this->fp_v);
         }
         this->update_state_parsing_tbl_entry(s_dest);
         this->propagate_context_change(s_dest);
@@ -1959,7 +1936,7 @@ is_same_state(const State& s1, const State& s2) -> bool
         return false;
     }
 
-    for (int i = 0; i < s1.core_config_count; i++) {
+    for (size_t i = 0; i < s1.core_config_count; i++) {
         if (!is_same_config(s1.config[i], s2.config[i]))
             return false;
     }
@@ -2015,9 +1992,9 @@ YAlgorithm::insert_reduction_to_parsing_table(const Configuration* c,
  * Add n to the successor list of s.
  */
 void
-add_successor(State* s, State* n)
+add_successor(State& s, State* n)
 {
-    s->successor_list.push_back(n);
+    s.successor_list.push_back(n);
     // std::cout << ":: state " <<
     //     s->state_no<< ", succesor is state " <<  n->state_no<< " on symbol
     //  " <<  n->trans_symbol << std::endl;
@@ -2025,7 +2002,7 @@ add_successor(State* s, State* n)
     if (Options::get().use_lalr) {
         // add s to the parents_list of n. To get originators in
         // lane-tracing.
-        n->parents_list->add(s);
+        n->parents_list->add(&s);
     }
 }
 
@@ -2090,7 +2067,7 @@ YAlgorithm::add_transition_states2_new(StateCollection* coll, State* src_state)
             this->new_states.insert_state_to_pm(s);
 
             // Add this new state as successor to src_state.
-            add_successor(src_state, s);
+            add_successor(*src_state, s);
 
             // insert shift.
             this->insert_action(
@@ -2101,7 +2078,7 @@ YAlgorithm::add_transition_states2_new(StateCollection* coll, State* src_state)
             this->insert_action(
               os->trans_symbol->snode, src_state->state_no, os->state_no);
 
-            add_successor(src_state, os);
+            add_successor(*src_state, os);
 
             State::destroy_state(s); // existing or compatible. No use.
 
@@ -2141,7 +2118,7 @@ YAlgorithm::state_transition(State& state)
         if (is_final_configuration(this->grammar, c)) {
             this->insert_reduction_to_parsing_table(c, state.state_no);
         } else { // do transit operation.
-            SymbolTblNode* scanned_symbol = get_scanned_symbol(c);
+            auto scanned_symbol = get_scanned_symbol(c);
             if (scanned_symbol->symbol->empty()) { // insert empty reduction.
                 this->insert_reduction_to_parsing_table(c, state.state_no);
                 continue;
@@ -2343,13 +2320,13 @@ get_action(symbol_type symbol_type, int col, int row) -> std::pair<char, int>
  * in lane_tracing.c.
  */
 void
-LR0::insert_action(SymbolTblNode* lookahead, int row, int state_dest)
+LR0::insert_action(std::shared_ptr<SymbolTableNode> lookahead,
+                   int row,
+                   int state_dest)
 {
     int reduce = 0, shift = 0; // for shift/reduce conflict.
     struct TerminalProperty *tp_s = nullptr, *tp_r = nullptr;
 
-    std::cout << "row = " << row << ", ParsingTblCols = " << ParsingTblCols
-              << ", get_col(*lookahead) = " << get_col(*lookahead) << std::endl;
     int cell = row * ParsingTblCols + get_col(*lookahead);
 
     if (ParsingTable.at(cell) == 0) {
@@ -2473,7 +2450,8 @@ LR0::insert_action(SymbolTblNode* lookahead, int row, int state_dest)
 }
 
 auto
-is_goal_symbol(const Grammar& grammar, const SymbolTblNode* snode) -> bool
+is_goal_symbol(const Grammar& grammar,
+               const std::shared_ptr<const SymbolTableNode> snode) -> bool
 {
     if (snode == grammar.goal_symbol->snode)
         return true;
@@ -2504,7 +2482,6 @@ void
 print_parsing_table(std::ostream& os, const Grammar& grammar)
 {
     int row_size = ParsingTblRows;
-    int col_size = ParsingTblCols;
 
     os << std::endl << "--Pars" << std::endl << "g Table--\n";
     os << "State\t";
@@ -2513,7 +2490,8 @@ print_parsing_table(std::ostream& os, const Grammar& grammar)
     for (int row = 0; row < row_size; row++) {
         os << row << "\t";
         for (int col = 0; col < ParsingTblCols; col++) {
-            const SymbolTblNode* n = ParsingTblColHdr.at(col);
+            const std::shared_ptr<const SymbolTableNode> n =
+              ParsingTblColHdr.at(col);
             if (!is_goal_symbol(grammar, n)) {
                 auto [action, state] = get_action(n->type, col, row);
                 os << action << state << "\t";
@@ -2574,11 +2552,11 @@ YAlgorithm::init_start_state()
 static void
 get_final_state_list(const Grammar& grammar)
 {
-    SymbolTblNode* n = nullptr;
+    std::shared_ptr<SymbolTableNode> n = nullptr;
 
     final_state_list.clear();
     final_state_list.reserve(ParsingTblRows);
-    for (size_t i = 0; i < ParsingTblRows; i++) {
+    for (int i = 0; i < ParsingTblRows; i++) {
         final_state_list.push_back(0);
     }
 
@@ -2692,7 +2670,8 @@ show_state_config_info(std::ostream& os,
 static void
 print_size()
 {
-    constexpr size_t PARSING_TBL_COL_HDR_ELEM_SIZE = sizeof(SymbolTblNode*);
+    constexpr size_t PARSING_TBL_COL_HDR_ELEM_SIZE =
+      sizeof(std::shared_ptr<SymbolTableNode>);
     std::cout << "size of Grammar: " << sizeof(Grammar) << std::endl
               << "size of StateCollection: " << sizeof(StateCollection)
               << std::endl
@@ -2817,7 +2796,8 @@ write_parsing_tbl_row_lalr(std::ostream& os, int state)
     // action. so don't have to put acc in a separate loop.
     for (int col = 0; col < ParsingTblCols; col++) {
         int v = ParsingTable.at(row_start + col);
-        const SymbolTblNode* s = ParsingTblColHdr.at(col);
+        const std::shared_ptr<const SymbolTableNode> s =
+          ParsingTblColHdr.at(col);
         if (v > 0) {
             if (options.use_remove_unit_production)
                 v = get_actual_state(v);
@@ -2851,7 +2831,8 @@ write_parsing_tbl_row_lalr(std::ostream& os, int state)
     } else {
         for (int col = 0; col < ParsingTblCols; col++) {
             int v = ParsingTable.at(row_start + col);
-            const SymbolTblNode* s = ParsingTblColHdr.at(col);
+            const std::shared_ptr<const SymbolTableNode> s =
+              ParsingTblColHdr.at(col);
             if (v < 0 && v != CONST_ACC) {
                 os << "  " << *s->symbol << " [" << s->value << "] reduce ("
                    << (-1) * v << ")" << std::endl;
@@ -2863,7 +2844,8 @@ write_parsing_tbl_row_lalr(std::ostream& os, int state)
     os << std::endl;
     for (int col = 0; col < ParsingTblCols; col++) {
         int v = ParsingTable.at(row_start + col);
-        const SymbolTblNode* s = ParsingTblColHdr.at(col);
+        const std::shared_ptr<const SymbolTableNode> s =
+          ParsingTblColHdr.at(col);
         if (v > 0) {
             if (options.use_remove_unit_production)
                 v = get_actual_state(v);
@@ -2897,7 +2879,8 @@ write_parsing_tbl_row(std::ostream& os, int state)
 
     for (int col = 0; col < ParsingTblCols; col++) {
         int v = ParsingTable.at(row_start + col);
-        const SymbolTblNode* s = ParsingTblColHdr.at(col);
+        const std::shared_ptr<const SymbolTableNode> s =
+          ParsingTblColHdr.at(col);
         if (v > 0) {
             if (options.use_remove_unit_production)
                 v = get_actual_state(v);
@@ -3027,11 +3010,12 @@ lr1(const FileNames& files, const Options& options, NewStates& new_states)
         fp_v << "/* Input file: " << hyacc_filename << " */" << std::endl;
     }
 
-    GetYaccGrammarOutput yacc_grammar_output = get_yacc_grammar(
-      hyacc_filename, fp_v, new_states.conflicts_count.expected_sr_conflict);
+    GetYaccGrammarOutput yacc_grammar_output =
+      GetYaccGrammarOutput::get_yacc_grammar(
+        hyacc_filename, fp_v, new_states.conflicts_count.expected_sr_conflict);
 
     YAlgorithm y_algorithm(
-      yacc_grammar_output.grammar, options, new_states, config_queue);
+      yacc_grammar_output.grammar, options, fp_v, new_states, config_queue);
 
     if (options.debug_hash_tbl) {
         hash_tbl_dump(fp_v);
@@ -3123,15 +3107,16 @@ lr0(const FileNames& files, const Options& options, NewStates& new_states)
         fp_v << "/* Input file: " << hyacc_filename << " */" << std::endl;
     }
 
-    GetYaccGrammarOutput yacc_grammar_output = get_yacc_grammar(
-      hyacc_filename, fp_v, new_states.conflicts_count.expected_sr_conflict);
+    GetYaccGrammarOutput yacc_grammar_output =
+      GetYaccGrammarOutput::get_yacc_grammar(
+        hyacc_filename, fp_v, new_states.conflicts_count.expected_sr_conflict);
 
     if (options.debug_hash_tbl) {
         hash_tbl_dump(fp_v);
     }
 
     LaneTracing lane_tracing_algorithm(
-      yacc_grammar_output.grammar, options, new_states, config_queue);
+      yacc_grammar_output.grammar, options, fp_v, new_states, config_queue);
     lane_tracing_algorithm.init();
     if (options.show_grammar) {
         lane_tracing_algorithm.grammar.write(

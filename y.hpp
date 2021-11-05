@@ -33,6 +33,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -52,7 +53,7 @@ constexpr size_t STATE_SUCCESSOR_INIT_MAX_COUNT = 8;
 /*
  * Max line length in yacc input file declaration section
  * starting with "%start" or "%token".
- * Used in gen_compiler.c and get_yacc_grammar.c.
+ * Used in gen_compiler.cpp and get_yacc_grammar.cpp.
  */
 constexpr size_t LINE_INIT_SIZE = 128;
 /*
@@ -164,14 +165,18 @@ struct TerminalProperty
 struct SymbolTableNode
 {
     std::shared_ptr<std::string> symbol;
-    int value; /* symbol value, for parsing table col header. */
-    symbol_type type;
-    bool vanishable;
-    TerminalProperty* TP;
-    int seq; /* sequence (column) number in parsing table. */
-    RuleIDNode* ruleIDList;
-    SymbolTableNode* next;
+    int value = 0; /* symbol value, for parsing table col header. */
+    symbol_type type = symbol_type::NEITHER;
+    bool vanishable = false;
+    TerminalProperty* TP = nullptr;
+    int seq = -1; /* sequence (column) number in parsing table. */
+    RuleIDNode* ruleIDList = nullptr;
+    std::shared_ptr<SymbolTableNode> next;
     std::optional<std::string> token_type;
+
+    explicit SymbolTableNode(const std::string_view symbol)
+      : symbol(std::make_shared<std::string>(symbol))
+    {}
 
     [[nodiscard]] constexpr inline auto is_terminal() const noexcept -> bool
     {
@@ -187,14 +192,20 @@ struct SymbolTableNode
     {
         return this->type == symbol_type::NONTERMINAL;
     }
+    void init_terminal_property()
+    {
+        this->TP = new TerminalProperty;
+        this->TP->precedence = 0;
+        this->TP->assoc = associativity::NONASSOC;
+        this->TP->is_quoted = false;
+    }
 };
-using SymbolTblNode = struct SymbolTableNode;
 
 /* entry for hash table array. */
 struct HashTblNode
 {
     int count;
-    SymbolTblNode* next;
+    std::shared_ptr<SymbolTableNode> next;
 };
 
 constexpr size_t HT_SIZE = 997; /* should be a prime. */
@@ -204,10 +215,10 @@ extern std::array<HashTblNode, HT_SIZE> HashTbl;
 using SymbolNode = struct SymNode;
 struct SymNode
 {
-    SymbolTblNode* snode;
+    std::shared_ptr<SymbolTableNode> snode;
     SymNode* next;
 
-    static auto create(SymbolTblNode* sn) -> SymbolNode*;
+    static auto create(std::shared_ptr<SymbolTableNode> sn) -> SymbolNode*;
 };
 
 using SymbolList = SymbolNode*;
@@ -228,50 +239,60 @@ using SymbolList = SymbolNode*;
  */
 constexpr bool USE_CONFIG_QUEUE_FOR_GET_CLOSURE = true;
 
-constexpr int QUEUE_ERR_CODE = -10000000;
-
-struct Queue
+class Queue
 {
-    explicit Queue() noexcept;
-    static void destroy(Queue* q) noexcept;
+  public:
+    explicit Queue()
+    {
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
+        this->array.reserve(Queue::QUEUE_INIT_SIZE);
+    }
+    ~Queue() = default;
+    Queue(const Queue& other) = delete;
+    Queue(Queue&& other) = delete;
+    auto operator=(const Queue& other) -> Queue& = delete;
+    auto operator=(Queue&& other) -> Queue& = delete;
+
     void clear() noexcept;
     void clear_all() noexcept;
-    /// Push at tail.
-    void push(int n);
+    /// Push at back.
+    void push(size_t n);
     /// Pop at front
-    auto pop() noexcept -> int;
-    [[nodiscard]] auto peek() const noexcept -> int;
-    /// Check if number n exists in the queue.
-    [[nodiscard]] auto exist(int n) const noexcept -> bool;
-    [[nodiscard]] constexpr inline auto count() const noexcept -> size_t
+    auto pop() noexcept -> std::optional<size_t>;
+    ///
+    [[nodiscard]] auto peek() const noexcept -> std::optional<size_t>;
+    /// Check if element n exists in the queue.
+    [[nodiscard]] auto exist(size_t elem) const noexcept -> bool;
+    [[nodiscard]] constexpr inline auto size() const noexcept -> size_t
     {
-        return this->size;
+        return this->array.size() - this->start;
     }
     void dump() const noexcept;
     /// Print the usage information of the queue.
     void info() const noexcept;
 
   private:
-    int* array;
-    size_t capacity;
-    size_t size;
-    size_t start;
+    std::vector<size_t> array;
+    size_t start = 0;
 
     /* These three are for collecting information purpose. */
-    size_t max_count;
-    size_t sum_count;
-    size_t call_count;
+    size_t max_count = 0;
+    size_t sum_count = 0;
+    size_t call_count = 0;
 
-    void expand();
-    [[nodiscard]] inline auto get_no_check(size_t i) const noexcept -> int
+    constexpr static size_t QUEUE_INIT_SIZE = 256; // hidden from outside
+    constexpr static bool DEBUG_QUEUE = false;
+
+    void shrink();
+    [[nodiscard]] inline auto get_no_check(size_t i) const noexcept -> size_t
     {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-        return this->array[(i + this->start) % this->capacity];
+        return this->array[i + this->start];
     }
-    [[nodiscard]] inline auto get_no_check(size_t i) noexcept -> int&
+    [[nodiscard]] inline auto get_no_check(size_t i) noexcept -> size_t&
     {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-        return this->array[(i + this->start) % this->capacity];
+        return this->array[i + this->start];
     }
 };
 
@@ -292,9 +313,8 @@ constexpr bool USE_REM_FINAL_STATE = true;
 /* Context of a configuration. */
 struct Context
 {
-    SymbolList nContext;
-    int context_count;
-    Context* next; // Used for LR(k) only.
+    SymbolList nContext = nullptr;
+    int context_count = 0;
 
     /*
      * Empty a context.
@@ -314,7 +334,8 @@ struct Production
     unsigned int isUnitProduction : 1; // 1 - true, 0 - false
     unsigned int hasCode : 1; // has associated code: 1 - true, 0 -false
     unsigned int padding : 30;
-    const SymbolTblNode* lastTerminal; // for precedence information.
+    std::shared_ptr<const SymbolTableNode>
+      lastTerminal; // for precedence information.
 
     /*
      * marker: mark the position in configuration.
@@ -376,16 +397,22 @@ using Conflict = struct ConflictNode;
 struct ConflictNode
 {
     int state;
-    SymbolTblNode* lookahead;
+    std::shared_ptr<SymbolTableNode> lookahead;
     int r;          // reduce, neg, and is always the smaller one.
     int s;          // reduce or shift, neg or pos.
     int decision{}; // final decision.
     std::shared_ptr<ConflictNode> next;
 
     explicit ConflictNode(int state,
-                          SymbolTblNode* lookahead,
+                          std::shared_ptr<SymbolTableNode> lookahead,
                           int r,
-                          int s) noexcept;
+                          int s) noexcept
+      : state(state)
+      , lookahead(lookahead)
+      , r(r)
+      , s(s)
+      , next(nullptr)
+    {}
 };
 
 struct ConflictsCount
@@ -526,9 +553,30 @@ struct Position
     uint32_t col{ 0 };
 };
 
+/*
+ * Define the state of yacc input file section 2.
+ */
+enum YACC_STATE
+{
+    LHS,
+    LHS_COMMENT,
+    COLON,
+    COLON_COMMENT,
+    RHS,
+    TERMINAL,
+    CODE,
+    CODE_SINGLE_QUOTE,
+    CODE_DOUBLE_QUOTE,
+    CODE_COMMENT,
+    CODE_COMMENT2,
+    COMMENT,
+    COMMENT2
+};
+
 /// Output of `get_yacc_grammar`.
 struct GetYaccGrammarOutput
 {
+  public:
     /// Final position.
     Position
       position{}; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -551,11 +599,56 @@ struct GetYaccGrammarOutput
     /// symbol should be a letter.
     void add_char_to_symbol(char c);
     [[nodiscard]] auto get_symbol() const noexcept -> std::string_view;
+    /// Clear `ysymbol`.
     void reset_symbol() noexcept;
+
+    static auto get_yacc_grammar(const std::string& infile,
+                                 std::ofstream& fp_v,
+                                 uint32_t& expected_sr_conflict)
+      -> GetYaccGrammarOutput;
 
   private:
     /// token symbol.
     std::string ysymbol{};
+
+    /// Output of `process_yacc_file_input_section1`.
+    struct Section1Output
+    {
+        SymbolNode* tokens_tail;
+        std::shared_ptr<SymbolTableNode> start_symbol;
+    };
+
+    /// Processes section 1 (declaration section) of yacc input file.
+    ///
+    /// Currently this only gets the "%start" line if there is one.
+    auto process_yacc_file_input_section1(std::ifstream& fp,
+                                          const uint32_t expected_sr_conflict)
+      -> Section1Output;
+    /// Processes section 2 (grammar section) of a yacc input file.
+    void process_yacc_file_input_section2(SymbolNode* tokens_tail,
+                                          std::ifstream& fp);
+
+    /// Outputs a new symbol and inserts it to the LHS or RHS
+    /// of a rule of the grammar.
+    ///
+    /// Note that a construct like "%prec UNARY" indicates the
+    /// precedence of this rule. Both "%prec" and "UNARY" are
+    /// not true terminals, and should not be inserted into the
+    /// terminal symbol list. The detail  of handling precedence
+    /// is to be implemented.
+    ///
+    /// If a new symbol is on the LHS, it's a non-terminal.
+    /// If it is on the RHS and not found in the symbol table,
+    /// and not quoted by '', then it's a non-terminal.
+    /// Note that all terminals not quoted by '' should already
+    /// be delcared in section 1.
+    ///
+    /// Empty string is not allowed.
+    auto output_nonterminal(SymbolNode* tokens_tail,
+                            YACC_STATE state,
+                            bool& is_prec,
+                            const YACC_STATE yacc_sec2_state)
+      -> std::shared_ptr<SymbolTableNode>;
 };
 
 /* for indexed access of states_new states */
@@ -586,13 +679,13 @@ struct NewStates
     StateCollection* states_new{ nullptr };
     ConflictsCount conflicts_count{};
 
-    void inc_conflict_count(int s, int state) noexcept;
+    void inc_conflict_count(int s, size_t state) noexcept;
     /// insert in increasing order by conflict's state no.
     ///
     /// @note no need to check size of conflict arrays,
     /// which is handled in expand_parsing_table().
     auto add_to_conflict_array(int state,
-                               SymbolTblNode* lookahead,
+                               std::shared_ptr<SymbolTableNode> lookahead,
                                int action1,
                                int action2) noexcept
       -> std::shared_ptr<ConflictNode>;
@@ -616,7 +709,9 @@ class LR0
     void update_parsing_table() noexcept;
     void output_parsing_table_lalr();
     void generate_lr0_parsing_machine(Queue& config_queue);
-    void insert_action(SymbolTblNode* lookahead, int row, int state_dest);
+    void insert_action(std::shared_ptr<SymbolTableNode> lookahead,
+                       int row,
+                       int state_dest);
 
     const Grammar&
       grammar; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -642,10 +737,12 @@ class YAlgorithm : public LR0
   public:
     YAlgorithm(const Grammar& grammar,
                const Options& options,
+               std::ofstream& fp_v,
                NewStates& new_states,
                std::optional<Queue>& config_queue) noexcept
       : LR0(grammar, options, new_states)
       , config_queue(config_queue)
+      , fp_v(fp_v)
     {}
     /// In `y.cpp`
     void init();
@@ -668,6 +765,8 @@ class YAlgorithm : public LR0
     auto search_state_hash_tbl(State& s, bool* is_compatible) -> State*;
 
   private:
+    std::ofstream& fp_v;
+
     /// In `y.cpp`
     void init_start_state();
     void update_state_parsing_tbl_entry(const State& s);
@@ -681,7 +780,7 @@ class YAlgorithm : public LR0
     /// In `upe.cpp`
     void remove_unit_production_step1and2(
       const std::vector<std::shared_ptr<struct MRTreeNode>>& mr_leaves);
-    void insert_action_of_symbol(SymbolTblNode* symbol,
+    void insert_action_of_symbol(std::shared_ptr<SymbolTableNode> symbol,
                                  int new_state,
                                  size_t old_state_index,
                                  std::vector<int>& old_states);
@@ -702,7 +801,7 @@ extern int ParsingTblRows;
  * For parsing table column header names.
  * Value = terminal_count + non_terminal_count + 1 columns.
  */
-extern std::vector<SymbolTblNode*> ParsingTblColHdr;
+extern std::vector<std::shared_ptr<SymbolTableNode>> ParsingTblColHdr;
 /*
  * For final parsing table.
  */
@@ -741,11 +840,12 @@ extern auto
 create_config(const Grammar& grammar,
               int rule_id,
               int marker,
-              int is_core_config) -> Configuration*;
+              uint is_core_config) -> Configuration*;
 extern auto
 create_state() -> State*;
 extern auto
-is_goal_symbol(const Grammar& grammar, const SymbolTblNode* snode) -> bool;
+is_goal_symbol(const Grammar& grammar,
+               std::shared_ptr<const SymbolTableNode> snode) -> bool;
 extern auto
 get_actual_state(int virtual_state) -> int;
 /// Given a state and a transition symbol, find the
@@ -763,9 +863,9 @@ get_actual_state(int virtual_state) -> int;
 /// ```
 extern auto
 get_action(symbol_type symbol_type, int col, int row) -> std::pair<char, int>;
-// extern bool isVanishSymbol(SymbolTblNode * n);
+// extern bool isVanishSymbol(SymbolTableNode * n);
 extern auto
-is_parent_symbol(const SymbolTblNode* s) -> bool;
+is_parent_symbol(std::shared_ptr<const SymbolTableNode> s) -> bool;
 extern auto
 is_reachable_state(int state) -> bool;
 extern auto
@@ -778,9 +878,10 @@ is_final_configuration(const Grammar& grammar, const Configuration* c) -> bool;
 extern auto
 is_empty_production(const Grammar& grammar, const Configuration* c) -> bool;
 extern auto
-add_symbol2_context(SymbolTblNode* snode, Context* c) -> bool;
+add_symbol2_context(std::shared_ptr<SymbolTableNode> snode, Context* c) -> bool;
 extern auto
-is_compatible_successor_config(const State* s, int rule_id) -> int;
+is_compatible_successor_config(const State* s, int rule_id)
+  -> std::optional<size_t>;
 extern void
 copy_config(Configuration* c_dest, const Configuration* c_src);
 extern void
@@ -788,7 +889,7 @@ add_core_config2_state(const Grammar& grammar,
                        State* s,
                        Configuration* new_config);
 extern void
-add_successor(State* s, State* n);
+add_successor(State& s, State* n);
 extern void
 expand_parsing_table(StateArray& states_new_array);
 extern auto
@@ -798,11 +899,13 @@ show_theads(SymbolList alpha, SymbolList theads);
 extern auto
 find_similar_core_config(const State* t,
                          const Configuration* c,
-                         int* config_index) -> Configuration*;
+                         size_t* config_index) -> Configuration*;
 extern void
 copy_context(Context* dest, const Context* src);
 extern void
-mandatory_update_action(SymbolTblNode* lookahead, int row, int state_dest);
+mandatory_update_action(std::shared_ptr<SymbolTableNode> lookahead,
+                        int row,
+                        int state_dest);
 extern void
 free_context(Context* c);
 extern void
@@ -813,7 +916,7 @@ extern void
 print_parsing_table_note(std::ostream& os);
 extern auto
 insert_symbol_list_unique_inc(SymbolList list,
-                              SymbolTblNode* snode,
+                              std::shared_ptr<SymbolTableNode> snode,
                               bool* exist) -> SymbolNode*;
 extern void
 print_parsing_table(std::ostream& os,
@@ -835,7 +938,7 @@ write_parsing_table_col_header(std::ostream& os, const Grammar& grammar);
  * The column is arranged this way:
  * STR_END, terminals, non-terminals.
  *
- * Used in y.c and upe.c.
+ * Used in y.cpp and upe.cpp.
  */
 inline auto
 get_col(const SymbolTableNode& n) -> int
@@ -844,10 +947,10 @@ get_col(const SymbolTableNode& n) -> int
 }
 
 /*
- * Given a SymbolTblNode, returns whether it is vanishable.
+ * Given a SymbolTableNode, returns whether it is vanishable.
  */
 constexpr inline auto
-is_vanish_symbol(const SymbolTblNode& n) -> bool
+is_vanish_symbol(const SymbolTableNode& n) -> bool
 {
     return n.vanishable;
 }
@@ -856,7 +959,7 @@ is_vanish_symbol(const SymbolTblNode& n) -> bool
  * Update the destination state of a entry in the parsing table.
  * Used by updateRepeatedRow(), remove_unit_production_step3() and
  * remove_unit_production_step1and2().
- * Type of symbol is SymbolTblNode *.
+ * Type of symbol is SymbolTableNode *.
  * Just copy the value of state_dest.
  *
  * Used in y.c and upe.c.
@@ -876,12 +979,6 @@ extern void
 get_actual_state_no();
 extern void
 print_condensed_final_parsing_table(const Grammar& grammar);
-
-/* Defined in get_yacc_grammar.c */
-extern auto
-get_yacc_grammar(const std::string& infile,
-                 std::ofstream& fp_v,
-                 uint32_t& expected_sr_conflict) -> GetYaccGrammarOutput;
 
 /* Defined in version.c */
 extern void
@@ -910,17 +1007,19 @@ generate_compiler(GetYaccGrammarOutput& yacc_grammar_output,
 extern void
 hash_tbl_init();
 extern auto
-hash_tbl_insert(std::string_view symbol) -> SymbolTblNode*;
+hash_tbl_insert(std::string_view symbol) -> std::shared_ptr<SymbolTableNode>;
 extern auto
-hash_tbl_find(std::string_view symbol) -> SymbolTblNode*;
+hash_tbl_find(std::string_view symbol) -> std::shared_ptr<SymbolTableNode>;
 extern void
 hash_tbl_dump(std::ostream& os);
 extern void
 hash_tbl_destroy();
 extern auto
-find_in_symbol_list(SymbolList a, const SymbolTblNode* s) -> SymbolNode*;
+find_in_symbol_list(SymbolList a, std::shared_ptr<const SymbolTableNode> s)
+  -> SymbolNode*;
 extern auto
-find_in_inc_symbol_list(SymbolList a, SymbolTblNode* s) -> SymbolNode*;
+find_in_inc_symbol_list(SymbolList a, std::shared_ptr<SymbolTableNode> s)
+  -> SymbolNode*;
 extern auto
 clone_symbol_list(const SymbolList a) -> SymbolList;
 extern void
@@ -932,14 +1031,16 @@ create_rule_id_node(size_t rule_id) -> RuleIDNode*;
 extern void
 write_symbol_list(SymbolList a, const std::string_view name);
 extern auto
-remove_from_symbol_list(SymbolList a, SymbolTblNode* s, bool* exist)
-  -> SymbolList;
+remove_from_symbol_list(SymbolList a,
+                        std::shared_ptr<SymbolTableNode> s,
+                        bool* exist) -> SymbolList;
 extern auto
 get_symbol_list_len(SymbolList a) -> int;
 extern auto
 combine_inc_symbol_list(SymbolList a, SymbolList b) -> SymbolNode*;
 extern auto
-insert_inc_symbol_list(SymbolList a, SymbolTblNode* n) -> SymbolNode*;
+insert_inc_symbol_list(SymbolList a, std::shared_ptr<SymbolTableNode> n)
+  -> SymbolNode*;
 
 /* functions in state_hash_table.c */
 extern void
@@ -955,33 +1056,13 @@ extern void
 state_hash_tbl_dump(std::ostream& os);
 
 /*
- * For use by get_yacc_grammar.c and gen_compiler.c
+ * For use by get_yacc_grammar.cpp and gen_compiler.cpp
  */
 extern SymbolList tokens;
 extern int tokens_ct;
 
 extern void
 write_tokens();
-
-/*
- * Define the state of yacc input file section 2.
- */
-enum YACC_STATE
-{
-    LHS,
-    LHS_COMMENT,
-    COLON,
-    COLON_COMMENT,
-    RHS,
-    TERMINAL,
-    CODE,
-    CODE_SINGLE_QUOTE,
-    CODE_DOUBLE_QUOTE,
-    CODE_COMMENT,
-    CODE_COMMENT2,
-    COMMENT,
-    COMMENT2
-};
 
 extern const std::string_view STR_ACCEPT;
 extern const std::string_view STR_PLACE_HOLDER;
@@ -999,12 +1080,14 @@ gen_graphviz_input2(const Grammar& grammar,
 
 /* functions in lr0.c */
 extern auto
-get_scanned_symbol(const Configuration* c) -> SymbolTblNode*; // in y.c
+get_scanned_symbol(const Configuration* c)
+  -> std::shared_ptr<SymbolTableNode>; // in y.c
 extern auto
 create_state_collection() -> StateCollection*;
 extern auto
 find_state_for_scanned_symbol(const StateCollection* c,
-                              const SymbolTblNode* symbol) -> State*;
+                              std::shared_ptr<const SymbolTableNode> symbol)
+  -> State*;
 
 /* list of inadequate states for lane-tracing. */
 

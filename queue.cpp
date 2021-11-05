@@ -31,52 +31,15 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <stdexcept>
-
-constexpr size_t QUEUE_INIT_SIZE = 256; // hidden from outside
-constexpr bool DEBUG_QUEUE = false;
-
-Queue::Queue() noexcept
-{
-    this->capacity = QUEUE_INIT_SIZE;
-    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
-    this->array = new int[this->capacity];
-    this->size = this->start = 0;
-    this->max_count = this->sum_count = this->call_count = 0;
-}
-
-void
-Queue::expand()
-{
-    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
-    auto* new_array = new int[this->capacity * 2];
-    size_t this_i = this->start;
-    for (size_t i = 0; i < this->size; i++, this_i++) {
-        if (this_i == this->capacity) {
-            this_i = 0;
-        }
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-        new_array[i] = this->array[this_i];
-    }
-    delete[] this->array;
-    this->array = new_array;
-    this->start = 0;
-    this->capacity *= 2;
-}
-
-void
-Queue::destroy(Queue* q) noexcept
-{
-    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
-    delete[] q->array;
-    delete q;
-}
+#include <vector>
 
 void
 Queue::clear() noexcept
 {
-    this->size = 0;
     this->start = 0;
+    this->array.clear();
 }
 
 void
@@ -89,63 +52,52 @@ Queue::clear_all() noexcept
 }
 
 void
-Queue::push(int n)
+Queue::push(size_t n)
 {
-    if (n == QUEUE_ERR_CODE) {
-        throw std::runtime_error(
-          "Queue error: push a number that equals QUEUE_ERR_CODE");
-    }
-    if (this->size == this->capacity) {
-        this->expand();
-    }
-    this->get_no_check(this->size) = n;
-    this->size += 1;
+    this->array.push_back(n);
 
-    // std::cout << "push " << n << " (size=" << this->size << "): ";
+    // std::cout << "push " << n << " (size=" << this->m_size << "): ";
     // this->dump();
     // std::cout << std::endl;
 
     if constexpr (DEBUG_QUEUE) {
-        if (this->max_count < this->size)
-            this->max_count = this->size;
+        if (this->max_count < this->size())
+            this->max_count = this->size();
         this->call_count++;
-        this->sum_count += this->size;
+        this->sum_count += this->size();
     }
 }
 
 auto
-Queue::pop() noexcept -> int
+Queue::pop() noexcept -> std::optional<size_t>
 {
-    if (this->size == 0)
-        return QUEUE_ERR_CODE;
+    if (this->size() == 0)
+        return std::nullopt;
 
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    int item = this->array[this->start];
+    size_t item = this->array[this->start];
     this->start += 1;
-    if (this->start == this->capacity) {
-        this->start = 0;
+    if ((this->size() < this->array.size() / 2) &&
+        (this->array.size() >= Queue::QUEUE_INIT_SIZE)) {
+        this->shrink();
     }
-    this->size -= 1;
-    // std::cout << "pop " << item << " (size=" << this->size << "): ";
-    // this->dump();
-    // std::cout << std::endl;
     return item;
 }
 
 auto
-Queue::peek() const noexcept -> int
+Queue::peek() const noexcept -> std::optional<size_t>
 {
-    if (this->size == 0)
-        return QUEUE_ERR_CODE;
+    if (this->size() == 0)
+        return std::nullopt;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     return this->array[this->start];
 }
 
 auto
-Queue::exist(const int n) const noexcept -> bool
+Queue::exist(const size_t n) const noexcept -> bool
 {
-    for (size_t i = 0; i < this->size; i++) {
-        const int item = this->get_no_check(i);
+    for (size_t i = 0; i < this->size(); i++) {
+        const size_t item = this->get_no_check(i);
         if (item == n)
             return true;
     }
@@ -155,7 +107,7 @@ Queue::exist(const int n) const noexcept -> bool
 void
 Queue::dump() const noexcept
 {
-    for (size_t i = 0; i < this->size; i++) {
+    for (size_t i = 0; i < this->size(); i++) {
         std::cout << "[" << i << "] " << this->get_no_check(i) << " ";
     }
     std::cout << std::endl;
@@ -172,4 +124,16 @@ Queue::info() const noexcept
                        static_cast<double>(this->call_count)
                   << std::endl;
     }
+}
+
+void
+Queue::shrink()
+{
+    std::vector<size_t> new_array;
+    new_array.reserve(this->size());
+    for (size_t i = this->start; i < this->array.size(); i++) {
+        new_array.push_back(this->get_no_check(i));
+    }
+    this->array = new_array;
+    this->start = 0;
 }

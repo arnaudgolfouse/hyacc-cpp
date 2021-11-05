@@ -95,7 +95,7 @@ find_gv_node_in_list(GvNode* list, int target_state) -> GvNode*
  * find label in label list.
  */
 static void
-insert_label_to_list(GvNode* n, SymbolTblNode* snode)
+insert_label_to_list(GvNode* n, std::shared_ptr<SymbolTableNode> snode)
 {
     if (nullptr == n || nullptr == snode)
         return; // should not happen.
@@ -124,8 +124,9 @@ insert_label_to_list(GvNode* n, SymbolTblNode* snode)
  *   create a new node and insert it to list.
  */
 static auto
-add_gv_node_to_list(GvNode* list, int target_state, SymbolTblNode* snode)
-  -> GvNode*
+add_gv_node_to_list(GvNode* list,
+                    int target_state,
+                    std::shared_ptr<SymbolTableNode> snode) -> GvNode*
 {
     GvNode* n = find_gv_node_in_list(list, target_state);
     if (nullptr == n) { // targetState NOT found. Add to list.
@@ -275,7 +276,7 @@ gen_graphviz_input(const Grammar& grammar, const std::string& y_gviz)
         GvNode* s_list = nullptr;
 
         for (int col = 0; col < ParsingTblCols; col++) {
-            SymbolTblNode* n = ParsingTblColHdr[col];
+            std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
             if (!is_goal_symbol(grammar, n)) {
                 auto [action, state] = get_action(n->type, col, row);
                 /*std::cout  <<  action <<  state<< "\t"; */
@@ -329,7 +330,7 @@ gen_graphviz_input2(const Grammar& grammar, const std::string& y_gviz)
         GvNode* s_list = nullptr;
         if (is_reachable_state(row)) {
             for (int col = 0; col < ParsingTblCols; col++) {
-                SymbolTblNode* n = ParsingTblColHdr[col];
+                std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
                 if (!is_goal_symbol(grammar, n) && !is_parent_symbol(n)) {
                     auto [action, state] = get_action(n->type, col, row);
                     if (action == 's' || action == 'g')

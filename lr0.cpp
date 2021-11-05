@@ -32,13 +32,14 @@
 static void
 propagate_originator_change(State* s);
 
+/// Add a new `Configuration` to `s.config`.
 static void
-add_successor_config_to_state_lr0(const Grammar& grammar, State* s, int rule_id)
+add_successor_config_to_state_lr0(const Grammar& grammar, State& s, int rule_id)
 {
     // marker = 0, isCoreConfig = 0.
     Configuration* c = create_config(grammar, rule_id, 0, 0);
-    c->owner = s;
-    s->config.push_back(c);
+    c->owner = &s;
+    s.config.push_back(c);
 }
 
 /*
@@ -48,12 +49,13 @@ add_successor_config_to_state_lr0(const Grammar& grammar, State* s, int rule_id)
 static void
 get_config_successors_lr0(const Grammar& grammar, Queue& config_queue, State* s)
 {
-    while (config_queue.count() > 0) {
-        Configuration* config = s->config[config_queue.pop()];
+    while (config_queue.size() > 0) {
+        Configuration* config = s->config[*config_queue.pop()];
 
         if (config->marker >= 0 &&
             config->marker < grammar.rules[config->ruleID]->RHS_count) {
-            SymbolTblNode* scanned_symbol = get_scanned_symbol(config);
+            std::shared_ptr<SymbolTableNode> scanned_symbol =
+              get_scanned_symbol(config);
 
             if (scanned_symbol->is_non_terminal()) {
 
@@ -62,14 +64,15 @@ get_config_successors_lr0(const Grammar& grammar, Queue& config_queue, State* s)
                     // Grammar.rules[r->ruleID] starts with this scanned symbol.
 
                     // If not an existing config, add to state s.
-                    int index = is_compatible_successor_config(s, r->rule_id);
+                    std::optional<size_t> index =
+                      is_compatible_successor_config(s, r->rule_id);
 
-                    if (index == -1) { // new config.
+                    if (!index.has_value()) { // new config.
                         add_successor_config_to_state_lr0(
-                          grammar, s, r->rule_id);
-                        config_queue.push(static_cast<int>(s->config.size()) -
-                                          1);
-                        index = static_cast<int>(s->config.size()) - 1;
+                          grammar, *s, r->rule_id);
+                        // s->config is non-empty here (see beginning of the
+                        // loop)
+                        config_queue.push(s->config.size() - 1);
                     } // else is an existing old config, do nothing.
 
                 } // end for
@@ -82,7 +85,7 @@ static void
 get_closure_lr0(const Grammar& grammar, Queue& config_queue, State* s)
 {
     // config_queue->clear();
-    for (int i = 0; i < s->config.size(); i++) {
+    for (size_t i = 0; i < s->config.size(); i++) {
         config_queue.push(i);
     }
     get_config_successors_lr0(grammar, config_queue, s);
@@ -102,14 +105,15 @@ LR0::insert_reduction_to_parsing_table_lr0(const Configuration* c, int state_no)
         this->insert_action(hash_tbl_find(STR_END), state_no, CONST_ACC);
     } else { // reduct, action = "r";
         for (int col = 0; col < max_col; col++) {
-            SymbolTblNode* n = ParsingTblColHdr[col];
+            std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
             this->insert_action(n, state_no, (-1) * c->ruleID);
         }
     }
 }
 
 // for (const auto& config : s->config) {
-//     const SymbolTblNode* scanned_symbol = get_scanned_symbol(config);
+//     const  std::shared_ptr<SymbolTableNode> scanned_symbol =
+//     get_scanned_symbol(config);
 
 //     // for final config and empty reduction.
 //     if (is_final_configuration(grammar, config) ||
@@ -141,7 +145,7 @@ LR0::insert_reduction_to_parsing_table_lalr(const Configuration* c,
             }
         } else {
             for (int col = 0; col < max_col; col++) {
-                SymbolTblNode* n = ParsingTblColHdr[col];
+                std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
                 this->insert_action(n, state_no, (-1) * c->ruleID);
             }
         }
@@ -174,10 +178,10 @@ add_transition_states2_new_lr0(NewStates& new_states,
             new_states.insert_state_to_pm(s);
 
             // Add this new state as successor to src_state.
-            add_successor(src_state, s);
+            add_successor(*src_state, s);
 
         } else { // same with an existing state.
-            add_successor(src_state, os);
+            add_successor(*src_state, os);
             State::destroy_state(s); // existing or compatible. No use.
         }
 
@@ -206,7 +210,8 @@ LR0::transition_lr0(State* s) noexcept
         if (is_final_configuration(this->grammar, c)) {
             // do nothing.
         } else { // do transit operation.
-            SymbolTblNode* scanned_symbol = get_scanned_symbol(c);
+            std::shared_ptr<SymbolTableNode> scanned_symbol =
+              get_scanned_symbol(c);
             if (scanned_symbol->symbol->empty()) { // empty reduction.
                 continue;
             }

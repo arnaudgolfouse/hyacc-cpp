@@ -33,6 +33,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -56,7 +57,7 @@ create_rule_id_node(size_t rule_id) -> RuleIDNode*
 }
 
 static void
-write_rule_id_list(const SymbolTblNode& n)
+write_rule_id_list(const SymbolTableNode& n)
 {
     RuleIDNode* a = n.ruleIDList;
     std::cout << *n.symbol << ": ";
@@ -103,7 +104,7 @@ destroy_rule_id_list(RuleIDNode* r)
  * Create a symbol node, used by Production, Context etc.
  */
 auto
-SymbolNode::create(SymbolTblNode* sn) -> SymbolNode*
+SymbolNode::create(std::shared_ptr<SymbolTableNode> sn) -> SymbolNode*
 {
     if (sn == nullptr)
         throw std::runtime_error("SymbolNode::create error: sn is nullptr\n");
@@ -127,9 +128,6 @@ free_symbol_node(SymbolNode* n)
 void
 free_symbol_node_list(SymbolNode* a)
 {
-    if (a == nullptr)
-        return;
-
     while (a != nullptr) {
         SymbolNode* b = a->next;
         delete a;
@@ -138,7 +136,9 @@ free_symbol_node_list(SymbolNode* a)
 }
 
 auto
-find_in_symbol_list(SymbolList a, const SymbolTblNode* s) -> SymbolNode*
+find_in_symbol_list(SymbolList a,
+                    const std::shared_ptr<const SymbolTableNode> s)
+  -> SymbolNode*
 {
     for (SymbolNode* b = a; b != nullptr; b = b->next) {
         if (b->snode == s)
@@ -181,8 +181,9 @@ clone_symbol_list(const SymbolList a) -> SymbolList
  * @return: the new list.
  */
 auto
-remove_from_symbol_list(SymbolList a, SymbolTblNode* s, bool* exist)
-  -> SymbolList
+remove_from_symbol_list(SymbolList a,
+                        std::shared_ptr<SymbolTableNode> s,
+                        bool* exist) -> SymbolList
 {
     SymbolNode* b = nullptr;
     *exist = true;
@@ -212,7 +213,8 @@ remove_from_symbol_list(SymbolList a, SymbolTblNode* s, bool* exist)
  * Find in a sorted (INCREMENTAL) list.
  */
 auto
-find_in_inc_symbol_list(SymbolList a, SymbolTblNode* s) -> SymbolNode*
+find_in_inc_symbol_list(SymbolList a, std::shared_ptr<SymbolTableNode> s)
+  -> SymbolNode*
 {
     for (SymbolNode* b = a; b != nullptr; b = b->next) {
         if (b->snode == s)
@@ -230,7 +232,8 @@ find_in_inc_symbol_list(SymbolList a, SymbolTblNode* s) -> SymbolNode*
  * @Return: the result list.
  */
 auto
-insert_inc_symbol_list(SymbolList a, SymbolTblNode* n) -> SymbolNode*
+insert_inc_symbol_list(SymbolList a, std::shared_ptr<SymbolTableNode> n)
+  -> SymbolNode*
 {
     SymbolNode *b = nullptr, *b_prev = nullptr;
     if (n == nullptr)
@@ -330,35 +333,15 @@ write_symbol_list(SymbolList a, const std::string_view name)
 }
 
 /*******************************************
- * Function for SymbolTblNode.
+ * Function for SymbolTableNode.
  *******************************************/
-
-/*
- * create a symbol table node, used by hash table HashTbl.
- */
-auto
-create_symbol_tbl_node(const std::string_view symbol) -> SymbolTblNode*
-{
-    auto* n = new SymbolTblNode;
-    if (n == nullptr)
-        throw std::runtime_error(
-          "create_symbol_tbl_node error: out of memory\n");
-    n->symbol = std::make_shared<std::string>(symbol);
-    n->next = nullptr;
-    n->type = symbol_type::NEITHER;
-    n->vanishable = false; // default value: FALSE
-    n->seq = -1;
-    n->ruleIDList = nullptr;
-    n->TP = nullptr; // terminal property.
-    n->value = 0;
-    return n;
-}
 
 /*
  * Empty string and EOF '$' are _NEITHER type.
  */
 static auto
-get_symbol_type(const SymbolTblNode* n) -> const std::string_view
+get_symbol_type(const std::shared_ptr<const SymbolTableNode> n)
+  -> const std::string_view
 {
     if (n->type == symbol_type::TERMINAL)
         return "T";
@@ -425,20 +408,20 @@ hash_value(const std::string_view symbol) -> int
  * this symbol.
  */
 auto
-hash_tbl_insert(const std::string_view symbol) -> SymbolTblNode*
+hash_tbl_insert(const std::string_view symbol)
+  -> std::shared_ptr<SymbolTableNode>
 {
-    if constexpr (DEBUG_HASHTBL) {
-        // std::cout << "hash insert " << symbol << " at " << where <<
-        // std::endl;
-    }
     const int v = hash_value(symbol);
+    if constexpr (DEBUG_HASHTBL) {
+        std::cout << "hash insert " << symbol << " at " << v << std::endl;
+    }
 
     if (HashTbl[v].next == nullptr) {
-        HashTbl[v].next = create_symbol_tbl_node(symbol);
+        HashTbl[v].next = std::make_shared<SymbolTableNode>(symbol);
         HashTbl[v].count++;
         return HashTbl[v].next;
     }
-    SymbolTblNode* n = HashTbl[v].next;
+    std::shared_ptr<SymbolTableNode> n = HashTbl[v].next;
     for (; n->next != nullptr; n = n->next) {
         if (*n->symbol == symbol) {
             if constexpr (DEBUG_HASHTBL) {
@@ -455,7 +438,7 @@ hash_tbl_insert(const std::string_view symbol) -> SymbolTblNode*
         }
         return n;
     }
-    n->next = create_symbol_tbl_node(symbol);
+    n->next = std::make_shared<SymbolTableNode>(symbol);
     HashTbl[v].count++;
     return n->next;
 }
@@ -465,11 +448,12 @@ hash_tbl_insert(const std::string_view symbol) -> SymbolTblNode*
  * If symbol does not exist, return nullptr.
  */
 auto
-hash_tbl_find(const std::string_view symbol) -> SymbolTblNode*
+hash_tbl_find(const std::string_view symbol) -> std::shared_ptr<SymbolTableNode>
 {
     int v = hash_value(symbol);
 
-    for (SymbolTblNode* n = HashTbl.at(v).next; n != nullptr; n = n->next) {
+    for (std::shared_ptr<SymbolTableNode> n = HashTbl.at(v).next; n != nullptr;
+         n = n->next) {
         if (*n->symbol == symbol) {
             if constexpr (DEBUG_HASHTBL) {
                 std::cout << "node for " << symbol << " is found" << std::endl;
@@ -488,30 +472,31 @@ hash_tbl_find(const std::string_view symbol) -> SymbolTblNode*
 void
 hash_tbl_destroy()
 {
-    SymbolTblNode* nnext = nullptr;
+    std::shared_ptr<SymbolTableNode> nnext = nullptr;
 
     // std::cout << "--destroy hash table--" << std::endl;
     for (auto& elem : HashTbl) {
         if (elem.count > 0) {
-            for (SymbolTblNode* n = elem.next; n != nullptr; n = nnext) {
+            for (std::shared_ptr<SymbolTableNode> n = elem.next; n != nullptr;
+                 n = nnext) {
                 nnext = n->next;
                 // std::cout << "freeing node for " << *n->symbol << std::endl;
                 destroy_rule_id_list(n->ruleIDList);
-                delete n;
             }
         }
     }
 }
 
 static void
-symbol_tbl_node_dump(std::ostream& os, const SymbolTblNode* n)
+symbol_tbl_node_dump(std::ostream& os,
+                     const std::shared_ptr<const SymbolTableNode> n)
 {
     os << *n->symbol << " [type=" << get_symbol_type(n)
-       << ",vanish=" << (n->vanishable ? "T" : "F") << ",seq=" << n->seq
-       << ",val=" << n->value;
+       << ",vanish=" << (n->vanishable ? "true" : "false") << ", seq=" << n->seq
+       << ", val=" << n->value;
     if (n->type == symbol_type::TERMINAL && n->TP != nullptr) {
-        os << ",prec=" << n->TP->precedence
-           << ",assoc=" << get_assoc_name(n->TP->assoc);
+        os << ", prec=" << n->TP->precedence
+           << ", assoc=" << get_assoc_name(n->TP->assoc);
     }
     os << "]";
 }
@@ -527,7 +512,7 @@ hash_tbl_dump(std::ostream& os)
         if (elem.count > 0) {
             list_count++;
             os << "HashTbl[" << i << "] (count=" << elem.count << "): ";
-            const SymbolTblNode* n = elem.next;
+            std::shared_ptr<const SymbolTableNode> n = elem.next;
             for (; n->next != nullptr; n = n->next) {
                 symbol_tbl_node_dump(os, n);
                 os << ", ";
