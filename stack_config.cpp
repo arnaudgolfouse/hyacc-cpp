@@ -29,32 +29,7 @@
 
 #include "stack_config.hpp"
 #include "y.hpp"
-#include <cstddef>
 #include <iostream>
-
-auto
-Stack::create() -> Stack*
-{
-    return Stack::create2(STACK_INIT_SIZE);
-}
-
-auto
-Stack::create2(const size_t size) -> Stack*
-{
-    Stack* s = new Stack{};
-    if (s == nullptr) {
-        std::cout << "stack_create: out of memory" << std::endl;
-        return nullptr;
-    }
-    s->array.reserve(size);
-    return s;
-}
-
-void
-Stack::destroy(Stack* s)
-{
-    delete s;
-}
 
 void
 Stack::dump(const Grammar& grammar) const noexcept
@@ -78,5 +53,5 @@ Stack::dump(const Grammar& grammar) const noexcept
             stdout_write_config(grammar, c);
         }
     }
-    putchar('\n');
+    std::cout << std::endl;
 }

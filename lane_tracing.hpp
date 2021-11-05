@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "stack_config.hpp"
 #include "y.hpp"
 #include <cstddef>
 #include <cstdint>
@@ -196,8 +197,6 @@ struct LRkPtEntry
     LRkPtEntry* next;
 };
 
-extern LRkPtEntry* LRk_PT; // extension parsing table for LR(k).
-
 /*
  * Functions in lane_tracing.c
  */
@@ -340,6 +339,9 @@ class LaneTracing : public YAlgorithm
     [[nodiscard]] auto lane_tracing() -> std::optional<LRkPTArray>;
 
   private:
+    Stack lane;
+    Stack stack;
+
     void phase1();
     void phase2();
     void gpm(State* new_state);
@@ -348,7 +350,7 @@ class LaneTracing : public YAlgorithm
     void phase2_regeneration(laneHead* lh_list);
     void phase2_regeneration2();
     void set_transitors_pass_thru_on(const Configuration& cur_config,
-                                     Configuration* o) const;
+                                     Configuration* o) const noexcept(false);
     void inherit_propagate(int state_no,
                            int parent_state_no,
                            LtCluster* container,
@@ -366,20 +368,35 @@ class LaneTracing : public YAlgorithm
                                   LlistContextSet* e_ctxt,
                                   size_t e_parent_state_no,
                                   bool copy) const -> int;
-    auto get_the_context(const Configuration* o) const -> SymbolNode*;
+    auto get_the_context(const Configuration* o) const noexcept(false)
+      -> SymbolNode*;
     auto trace_back(const Configuration* c0,
                     Configuration* c,
-                    laneHead* lh_list) const -> laneHead*;
+                    laneHead* lh_list) const noexcept(false) -> laneHead*;
     [[nodiscard]] auto get_state_conflict_lane_head(int state_no,
                                                     laneHead* lh_list) const
+      noexcept(false) -> laneHead*;
+    [[nodiscard]] auto get_conflict_lane_head() const noexcept(false)
       -> laneHead*;
-    [[nodiscard]] auto get_conflict_lane_head() const -> laneHead*;
-    void get_inadequate_state_reduce_config_context(const State* s) const;
+    void get_inadequate_state_reduce_config_context(const State* s);
     void resolve_lalr1_conflicts();
+    void do_loop() noexcept(false);
+    void check_lane_top();
+    void pop_lane();
+    void check_stack_top();
+    void dump_stacks() const;
+    void stack_operation(int* fail_ct, Configuration* o);
+    void context_adding_routine(SymbolList context_generated,
+                                Configuration* o,
+                                int cur_config_index,
+                                int* fail_ct);
+    /* used by both originator list and transitor list */
+    void lane_tracing_reduction(Configuration* c) noexcept(false);
 
     // In `lrk.cpp`
     [[nodiscard]] auto lane_tracing_lrk() -> std::optional<LRkPTArray>;
-    void edge_pushing(LRkPTArray& lrk_pt_array, int state_no) const;
+    void edge_pushing(LRkPTArray& lrk_pt_array, int state_no);
+    void lrk_config_lane_tracing(Configuration* c) noexcept;
 };
 
 // in the lane_tracing of edge_pushing.

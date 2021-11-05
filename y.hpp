@@ -444,8 +444,6 @@ struct StateNode
     unsigned int padding : 28;
 
     static void destroy_state(State* s);
-    void get_closure(const struct Grammar& grammar,
-                     std::optional<Queue>& config_queue);
 };
 
 /*
@@ -513,7 +511,9 @@ struct Grammar
      * Write the given grammar, including its terminals,
      * non-terminals, goal symbol and rules.
      */
-    void write(std::ostream& os, bool before_rm_unit_prod) const;
+    void write(std::ostream& os,
+               bool before_rm_unit_prod,
+               bool use_remove_unit_production) const noexcept;
     [[nodiscard]] auto is_unit_production(size_t rule_no) const -> bool;
 };
 
@@ -530,9 +530,11 @@ struct Position
 struct GetYaccGrammarOutput
 {
     /// Final position.
-    Position position{};
+    Position
+      position{}; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
     /// Parsed grammar.
-    Grammar grammar;
+    Grammar
+      grammar; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
 
     constexpr static size_t SYMBOL_MAX_SIZE = 512;
 
@@ -622,6 +624,8 @@ class LR0
       options; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
     NewStates&
       new_states; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+    size_t n_state_opt1 = 0;
+
   private:
     void transition_lr0(State* s) noexcept;
     void output_parsing_table() noexcept;
@@ -643,18 +647,28 @@ class YAlgorithm : public LR0
       : LR0(grammar, options, new_states)
       , config_queue(config_queue)
     {}
+    /// In `y.cpp`
+    void init();
+    void generate_parsing_machine();
     /// In `upe.cpp`
     void remove_unit_production();
-    void init();
+    void further_optimization();
+    void show_stat(std::ostream& os) const noexcept;
 
   protected:
-    std::optional<Queue>&
-      config_queue; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+    std::optional<Queue>& config_queue;
+    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+    size_t n_state_opt12 = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+    size_t n_state_opt123 = 0;
 
+    void get_state_closure(State& state);
     void state_transition(State& state);
     auto search_state_hash_tbl(State& s, bool* is_compatible) -> State*;
 
   private:
+    /// In `y.cpp`
     void init_start_state();
     void update_state_parsing_tbl_entry(const State& s);
     void insert_reduction_to_parsing_table(const Configuration* c,
@@ -663,7 +677,6 @@ class YAlgorithm : public LR0
     auto combine_compatible_states(State& s_dest, const State& s_src) -> bool;
     auto add_transition_states2_new(StateCollection* coll, State* src_state)
       -> bool;
-    void generate_parsing_machine();
 
     /// In `upe.cpp`
     void remove_unit_production_step1and2(
@@ -675,10 +688,6 @@ class YAlgorithm : public LR0
     void insert_actions_of_combined_states(int new_state,
                                            int src_state,
                                            std::vector<int>& old_states);
-
-    friend auto lr1(const FileNames& files,
-                    const Options& options,
-                    NewStates& new_states) -> int;
 };
 
 /* Variables for parsing table. */
@@ -716,9 +725,6 @@ extern std::vector<int> actual_state_no;
 extern int n_symbol;
 extern size_t n_rule;
 extern size_t n_rule_opt;
-extern size_t n_state_opt1;
-extern size_t n_state_opt12;
-extern size_t n_state_opt123;
 
 /* defined in hyacc_path.c, used in gen_compiler.c */
 extern std::string HYACC_PATH;
@@ -866,8 +872,6 @@ extern void
 write_actual_state_array(std::ostream& os);
 extern void
 print_final_parsing_table(const Grammar& grammar);
-extern void
-further_optimization(const Grammar& grammar);
 extern void
 get_actual_state_no();
 extern void
@@ -1028,9 +1032,6 @@ extern void
 stdout_write_config(const Grammar& grammar, const Configuration* c);
 extern auto
 is_inadequate_state(int state_no) -> bool;
-/* used by both originator list and transitor list */
-extern void
-lane_tracing_reduction(const Grammar& grammar, Configuration* c);
 
 // these are used in lane_tracing.c and lrk.c only.
 extern void

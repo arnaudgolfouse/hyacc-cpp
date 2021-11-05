@@ -30,28 +30,21 @@
  */
 
 #include "y.hpp"
-#include <cstddef>
 #include <iostream>
 #include <vector>
-
-constexpr bool DEBUG_STACK = false;
-constexpr size_t STACK_INIT_SIZE = 256;
-constexpr bool USE_WARNING = false;
 
 struct Stack
 {
     std::vector<Configuration*> array;
 
-    static auto create() -> Stack*;
-    static auto create2(size_t init_capacity) -> Stack*;
-    static void destroy(Stack* s);
+    explicit Stack() { this->array.reserve(Stack::INIT_SIZE); }
 
     void dump(const Grammar& grammar) const noexcept;
     inline void push(Configuration* n) { this->array.push_back(n); }
     inline auto pop() -> Configuration*
     {
         if (this->array.empty()) {
-            if (USE_WARNING)
+            if (Stack::USE_WARNING)
                 std::cout << "stack_pop warning: underflow, return nullptr"
                           << std::endl;
             return nullptr;
@@ -63,7 +56,7 @@ struct Stack
     inline auto top() -> Configuration*
     {
         if (this->array.empty()) {
-            if (USE_WARNING)
+            if (Stack::USE_WARNING)
                 std::cout << "stack_pop warning: underflow, return nullptr"
                           << std::endl;
             return nullptr;
@@ -75,4 +68,8 @@ struct Stack
     {
         return this->array.size();
     }
+
+  private:
+    constexpr static size_t INIT_SIZE = 256;
+    constexpr static bool USE_WARNING = false;
 };

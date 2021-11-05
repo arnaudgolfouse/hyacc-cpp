@@ -48,14 +48,10 @@ constexpr bool DEBUG_GET_ORIGINATOR = false;
 
 constexpr bool DEBUG_ORIGIN = false;
 
-LRkPtEntry* LRk_PT = nullptr;
-
 /*
  * Variables used for lane tracing. Start.
  */
 
-static Stack* LANE;
-static Stack* STACK;
 static int TRACE_FURTHER;
 static int TEST_FAILED;
 
@@ -82,10 +78,6 @@ SymbolList EDGE_PUSHING_CONTEXT_GENERATED;
 
 static void
 get_originators(const Grammar& grammar, Configuration* c0, Configuration* c);
-static void
-do_loop(const Grammar& grammar);
-static void
-check_lane_top(const Grammar& grammar);
 static auto
 find_successor_state_no(int state_no,
                         const StateArray& states_new_array,
@@ -394,7 +386,9 @@ llist_int2_dump(LlistInt2* list)
 // LlistInt2 functions, END.
 
 static auto
-lt_tbl_entry_create(State* from, State* to, const StateArray& states_new_array)
+lt_tbl_entry_create(State* from,
+                    State* to,
+                    const StateArray& states_new_array) noexcept(false)
   -> LtTblEntry*
 {
     auto* e = new LtTblEntry;
@@ -533,7 +527,7 @@ lt_tbl_entry_find(State* from, const StateArray& states_new_array)
  * If not found, then insert it.
  */
 static auto
-llist_context_set_get(LtTblEntry* e) -> LlistContextSet*
+llist_context_set_get(LtTblEntry* e) noexcept(false) -> LlistContextSet*
 {
 
     if (e == nullptr) {
@@ -583,7 +577,7 @@ llist_context_set_get(LtTblEntry* e) -> LlistContextSet*
 static void
 lt_tbl_entry_add_context(State* from,
                          SymbolList ctxt,
-                         const StateArray& states_new_array)
+                         const StateArray& states_new_array) noexcept(false)
 {
     if (ctxt == nullptr)
         return;
@@ -1149,8 +1143,7 @@ LaneTracing::inherit_propagate(int state_no,
     State* s = this->new_states.states_new_array->state_list[state_no];
     State* s_p = this->new_states.states_new_array->state_list[parent_state_no];
     if (inherit_parent_context(grammar, s, s_p)) {
-        s->get_closure(grammar,
-                       config_queue); /* needed only if context changed.*/
+        this->get_state_closure(*s); /* needed only if context changed.*/
         this->lt_phase2_propagate_context_change(state_no, container, e);
     }
 }
@@ -1162,8 +1155,7 @@ LaneTracing::clear_inherit_regenerate(int state_no, int parent_state_no)
     State* s_p = this->new_states.states_new_array->state_list[parent_state_no];
     clear_state_context(s);
     if (inherit_parent_context(this->grammar, s, s_p)) {
-        s->get_closure(this->grammar,
-                       this->config_queue); /* needed only if context changed.*/
+        this->get_state_closure(*s); /* needed only if context changed.*/
     }
 }
 
@@ -1184,7 +1176,7 @@ LaneTracing::clear_regenerate(int state_no)
           SymbolNode::create(hash_tbl_find(STR_END));
         s->config[0]->context->context_count = 1;
     }
-    s->get_closure(this->grammar, this->config_queue);
+    this->get_state_closure(*s);
 }
 
 /*
@@ -1267,7 +1259,7 @@ inherit_parent_context(const Grammar& grammar, State* s, State* parent) -> bool
     }
 
     if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-        if (0 && s->state_no == 39) {
+        if (false && s->state_no == 39) {
             std::cout << "after: " << std::endl;
             my_write_state(grammar, *s);
         }
@@ -1583,7 +1575,7 @@ add_context_to_lane_head(laneHead* h, SymbolTblNode* n)
  * lh_list is in INC order of state's state_no;
  */
 static auto
-add_lane_head_list(laneHead* lh_list, State* s) -> laneHead*
+add_lane_head_list(laneHead* lh_list, State* s) noexcept(false) -> laneHead*
 {
     if (s == nullptr) {
         throw std::runtime_error(
@@ -1888,7 +1880,7 @@ my_write_config_originators(const Configuration& c)
  * get context for reduce productions in conflict states.
  */
 void
-LaneTracing::get_inadequate_state_reduce_config_context(const State* s) const
+LaneTracing::get_inadequate_state_reduce_config_context(const State* s)
 {
     if constexpr (DEBUG_PHASE_1) {
         std::cout << "state " << s->state_no << " [" << s->config.size()
@@ -1899,7 +1891,7 @@ LaneTracing::get_inadequate_state_reduce_config_context(const State* s) const
     for (const auto& config : s->config) {
         Configuration* c = config;
         if (is_final_configuration(grammar, c)) {
-            lane_tracing_reduction(grammar, c);
+            this->lane_tracing_reduction(c);
             if constexpr (DEBUG_PHASE_1) {
                 std::cout << ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
                           << std::endl;
@@ -2111,9 +2103,7 @@ LaneTracing::gpm(State* new_state)
                                << new_state->state_no << std::endl;
         }
 
-        new_state->get_closure(
-          this->grammar,
-          this->config_queue); // get closure of this state.
+        this->get_state_closure(*new_state); // get closure of this state.
 
         // get successor states and add them to states_new.
         this->state_transition(*new_state);
@@ -2122,7 +2112,7 @@ LaneTracing::gpm(State* new_state)
     }
 
     ParsingTblRows = this->new_states.states_new->state_count;
-    n_state_opt1 = this->new_states.states_new->state_count;
+    this->n_state_opt1 = this->new_states.states_new->state_count;
 
     std::cout << "LT-PGM end: states count: "
               << this->new_states.states_new->state_count << std::endl;
@@ -2267,7 +2257,7 @@ add_unique_queue(State* s, laneHead* lh_list) -> laneHead*
  * T will be destroyed, so its context lists can be moved to S.
  */
 static void
-regenerate_state_context(State& s, const State& t)
+regenerate_state_context(State& s, const State& t) noexcept(false)
 {
     if (t.core_config_count != s.core_config_count) {
         throw std::runtime_error("regenerate error: inequal config_count");
@@ -2378,8 +2368,7 @@ LaneTracing::phase2_regeneration(laneHead* lh_list)
     // 1) handle the head states and PASS_THRU states.
     for (; h != nullptr; h = h->next) {
         State& s = *h->s;
-        s.get_closure(grammar,
-                      config_queue); // get_closure() is defined in y.c
+        this->get_state_closure(s);
         this->update_state_reduce_action(s);
 
         if constexpr (DEBUG_PHASE_2_REGENERATE) {
@@ -2474,7 +2463,8 @@ write_the_symbol_list(SymbolList a)
 }
 
 auto
-LaneTracing::get_the_context(const Configuration* o) const -> SymbolNode*
+LaneTracing::get_the_context(const Configuration* o) const noexcept(false)
+  -> SymbolNode*
 {
     if (o == nullptr)
         return nullptr;
@@ -2528,7 +2518,7 @@ LaneTracing::get_the_context(const Configuration* o) const -> SymbolNode*
 auto
 LaneTracing::trace_back(const Configuration* c0,
                         Configuration* c,
-                        laneHead* lh_list) const -> laneHead*
+                        laneHead* lh_list) const noexcept(false) -> laneHead*
 {
     c->LANE_CON = 1; // set as config on conflicting lane.
 
@@ -2692,7 +2682,7 @@ trace_back_lrk_clear(const Configuration* c0, Configuration* c)
  */
 auto
 LaneTracing::get_state_conflict_lane_head(int state_no, laneHead* lh_list) const
-  -> laneHead*
+  noexcept(false) -> laneHead*
 {
     const State* s = this->new_states.states_new_array->state_list[state_no];
     for (const auto& con : s->config) {
@@ -2721,7 +2711,7 @@ LaneTracing::get_state_conflict_lane_head(int state_no, laneHead* lh_list) const
  * and their associated conflicting contexts.
  */
 auto
-LaneTracing::get_conflict_lane_head() const -> laneHead*
+LaneTracing::get_conflict_lane_head() const noexcept(false) -> laneHead*
 {
     laneHead* lane_head_list = nullptr;
 
@@ -2826,13 +2816,13 @@ LaneTracing::lane_tracing() -> std::optional<LRkPTArray>
 
 /* Functions for lane tracing */
 
-static void
-dump_stacks(const Grammar& grammar)
+void
+LaneTracing::dump_stacks() const
 {
     std::cout << "__STACK__" << std::endl;
-    STACK->dump(grammar);
+    this->stack.dump(grammar);
     std::cout << "__LANE__" << std::endl;
-    LANE->dump(grammar);
+    this->lane.dump(grammar);
 }
 
 /*
@@ -2957,8 +2947,8 @@ get_contexts_generated(SymbolList list, bool* null_possible) -> SymbolList
     return sn;
 }
 
-static void
-stack_operation(const Grammar& grammar, int* fail_ct, Configuration* o)
+void
+LaneTracing::stack_operation(int* fail_ct, Configuration* o)
 {
     Configuration* tmp = nullptr;
 
@@ -2970,68 +2960,70 @@ stack_operation(const Grammar& grammar, int* fail_ct, Configuration* o)
 
     switch (*fail_ct) {
         case 1:
-            LANE->push(o);
+            this->lane.push(o);
             o->IN_LANE = FLAG_ON;
             TEST_FAILED = FLAG_ON;
             break;
         case 2:
-            tmp = LANE->pop();
-            LANE->push(LT_MARKER);
-            LANE->push(tmp);
+            tmp = this->lane.pop();
+            this->lane.push(LT_MARKER);
+            this->lane.push(tmp);
 
-            STACK->push(LT_MARKER);
-            STACK->push(o);
+            this->stack.push(LT_MARKER);
+            this->stack.push(o);
             break;
         default: // fail_ct >= 3
-            STACK->push(o);
+            this->stack.push(o);
             break;
     }
 
     if constexpr (DEBUG_PHASE_1) {
-        dump_stacks(grammar);
+        this->dump_stacks();
     }
 }
 
 static void
-move_markers(Configuration* o)
+move_markers(Stack& lane, Configuration* o)
 {
     int r = 0;
-    int ct = static_cast<int>(LANE->count()) - 1;
+    int ct = static_cast<int>(lane.count()) - 1;
 
     for (; ct >= 0; ct--) {
-        const Configuration* c = LANE->array[ct];
+        const Configuration* c = lane.array[ct];
         if (c == o)
             break;
 
         if (c == LT_MARKER) {
-            LANE->array[ct] = LT_ZERO;
+            lane.array[ct] = LT_ZERO;
             r++;
         }
     }
 
     if (TEST_FAILED == FLAG_OFF) {
         for (; r > 0; r--)
-            LANE->push(LT_MARKER);
+            lane.push(LT_MARKER);
     } else {
-        Configuration* c = LANE->pop();
+        Configuration* c = lane.pop();
         for (; r > 0; r--)
-            LANE->push(LT_MARKER);
-        LANE->push(c);
+            lane.push(LT_MARKER);
+        lane.push(c);
     }
 }
 
 /*
  * For each symbol s in CONTEXT_GENERATED, do this:
  *   remove s from CONTEXT_GENERATED;
- *   for each config c in the LANE stack top-down
+ *   for each config c in the this->lane stack top-down
  *     if (s is in c) { break; }
  *     else { add s to c; }
  *
- * NOTE: here it accesses the LANE stack internal member
+ * NOTE: here it accesses the this->lane stack internal member
  *       array directly.
  */
 static void
-context_adding(SymbolList context_generated, int cur_config_index)
+context_adding(const Stack& lane,
+               SymbolList context_generated,
+               size_t cur_config_index)
 {
     if constexpr (DEBUG_PHASE_1) {
         std::cout << "CONTEXT ADDING ROUTINE: " << std::endl;
@@ -3041,8 +3033,10 @@ context_adding(SymbolList context_generated, int cur_config_index)
     SymbolNode* n = context_generated;
 
     while (n != nullptr) {
-        for (int ct = cur_config_index; ct >= 0; ct--) {
-            Configuration* c = LANE->array[ct];
+        // :( doesn't work
+        // NOLINTNEXTLINE(modernize-loop-convert)
+        for (auto it = lane.array.rbegin(); it != lane.array.rend(); it++) {
+            Configuration* c = *it;
             if (c != LT_ZERO && c != LT_MARKER) {
                 if constexpr (DEBUG_PHASE_1) {
                     std::cout << "add context to " << c->owner->state_no << "."
@@ -3063,14 +3057,13 @@ context_adding(SymbolList context_generated, int cur_config_index)
     }
 }
 
-static void
-context_adding_routine(const Grammar& grammar,
-                       SymbolList context_generated,
-                       Configuration* o,
-                       int cur_config_index,
-                       int* fail_ct)
+void
+LaneTracing::context_adding_routine(SymbolList context_generated,
+                                    Configuration* o,
+                                    int cur_config_index,
+                                    int* fail_ct)
 {
-    context_adding(context_generated, cur_config_index);
+    context_adding(this->lane, context_generated, cur_config_index);
 
     if (TRACE_FURTHER == FLAG_ON) {
 
@@ -3079,7 +3072,7 @@ context_adding_routine(const Grammar& grammar,
         }
 
         TRACE_FURTHER = FLAG_OFF;
-        stack_operation(grammar, fail_ct, o);
+        this->stack_operation(fail_ct, o);
     }
 
     if constexpr (DEBUG_PHASE_1) {
@@ -3094,14 +3087,14 @@ context_adding_routine(const Grammar& grammar,
  * Pre-assumption: c is a reduction.
  */
 void
-lane_tracing_reduction(const Grammar& grammar, Configuration* c)
+LaneTracing::lane_tracing_reduction(Configuration* c) noexcept(false)
 {
     if (c == nullptr)
         return;
 
     if constexpr (DEBUG_PHASE_1) {
         std::cout << "work on reduce config: ";
-        stdout_write_config(grammar, c);
+        stdout_write_config(this->grammar, c);
     }
 
     if (c->COMPLETE == 1u) {
@@ -3111,10 +3104,10 @@ lane_tracing_reduction(const Grammar& grammar, Configuration* c)
         return; // already evaluated.
     }
 
-    LANE = Stack::create();
-    STACK = Stack::create();
+    this->lane = Stack();
+    this->stack = Stack();
 
-    LANE->push(c);
+    this->lane.push(c);
     c->IN_LANE = FLAG_ON;
     TRACE_FURTHER = FLAG_OFF;
     TEST_FAILED = FLAG_OFF;
@@ -3123,7 +3116,7 @@ lane_tracing_reduction(const Grammar& grammar, Configuration* c)
         std::cout << "DO_LOOP:" << std::endl;
     }
 
-    do_loop(grammar);
+    this->do_loop();
 }
 
 /*
@@ -3131,13 +3124,15 @@ lane_tracing_reduction(const Grammar& grammar, Configuration* c)
  * For debug use only.
  */
 static void
-dump_lane_start_states(Configuration* o, SymbolList gamma_theads)
+dump_lane_start_states(const Stack& lane,
+                       Configuration* o,
+                       SymbolList gamma_theads)
 {
     if (nullptr == gamma_theads)
         return;
 
-    std::cout << "START " << LANE->array[0]->owner->state_no << "."
-              << LANE->array[0]->ruleID << ": " << o->owner->state_no << "."
+    std::cout << "START " << lane.array[0]->owner->state_no << "."
+              << lane.array[0]->ruleID << ": " << o->owner->state_no << "."
               << o->ruleID << " generates contexts";
     if (gamma_theads == nullptr) {
         std::cout << ":" << std::endl;
@@ -3195,7 +3190,7 @@ is_on_transitor_chain(Configuration* c, Configuration* o) -> bool
  */
 void
 LaneTracing::set_transitors_pass_thru_on(const Configuration& cur_config,
-                                         Configuration* o) const
+                                         Configuration* o) const noexcept(false)
 {
     // find the next transitor for originator o.
     for (Configuration* c : cur_config.transitors->list) {
@@ -3322,11 +3317,11 @@ get_originators(const Grammar& grammar, Configuration* c0, Configuration* c)
 
 ///!!!!!!!!!!!!!!!!!!!!!!!!!!! END.
 
-static void
-do_loop(const Grammar& grammar)
+void
+LaneTracing::do_loop() noexcept(false)
 {
-    Configuration* cur_config = LANE->top();
-    const size_t cur_config_index = LANE->count() - 1;
+    Configuration* cur_config = this->lane.top();
+    const size_t cur_config_index = this->lane.count() - 1;
 
     if (cur_config == LT_MARKER || cur_config == LT_ZERO ||
         cur_config == nullptr) { // should never happen.
@@ -3337,13 +3332,13 @@ do_loop(const Grammar& grammar)
         std::cout << "==call get_originators(cur_config) in do_loop()=="
                   << std::endl;
     }
-    get_originators(grammar, cur_config, cur_config);
+    get_originators(this->grammar, cur_config, cur_config);
 
     int fail_ct = 0;
 
     if constexpr (DEBUG_PHASE_1) {
-        std::cout << "++++++++++TOP of LANE is: ";
-        stdout_write_config(grammar, cur_config);
+        std::cout << "++++++++++TOP of this->lane is: ";
+        stdout_write_config(this->grammar, cur_config);
     }
 
     for (ConfigurationNode* o : cur_config->originators->list) {
@@ -3361,7 +3356,7 @@ do_loop(const Grammar& grammar)
             gamma = scanned_symbol->next;
 
         if constexpr (DEBUG_PHASE_1) {
-            stdout_write_config(grammar, o);
+            stdout_write_config(this->grammar, o);
             std::cout << "gamma: "
                       << (gamma == nullptr ? "nullptr"
                                            : gamma->snode->symbol->c_str())
@@ -3373,7 +3368,7 @@ do_loop(const Grammar& grammar)
             if constexpr (DEBUG_PHASE_1) {
                 std::cout << "gamma not nullptr, get theads." << std::endl;
             }
-            gamma_theads = get_theads(grammar, gamma); // get Heads.
+            gamma_theads = get_theads(this->grammar, gamma); // get Heads.
             if constexpr (DEBUG_PHASE_1) {
                 my_show_t_heads(gamma, gamma_theads);
             }
@@ -3394,7 +3389,7 @@ do_loop(const Grammar& grammar)
         }
 
         if constexpr (DEBUG_PHASE_1) {
-            dump_lane_start_states(o, gamma_theads);
+            dump_lane_start_states(this->lane, o, gamma_theads);
         }
 
         if (test_a(gamma_theads)) {
@@ -3432,7 +3427,7 @@ do_loop(const Grammar& grammar)
                         }
                         GRAMMAR_AMBIGUOUS = true;
                         /// exit(1); //////////////// exit prematurely.
-                        move_markers(o);
+                        move_markers(this->lane, o);
                     } else {
                         if constexpr (DEBUG_PHASE_1) {
                             std::cout << "IN_LANE OFF. set TRACE_FURTHER ON"
@@ -3451,10 +3446,11 @@ do_loop(const Grammar& grammar)
                 if constexpr (DEBUG_PHASE_1) {
                     std::cout << "Found lane_end: " << o->owner->state_no << "."
                               << o->ruleID << std::endl;
-                    std::cout
-                      << "conflict config: " << LANE->array[0]->owner->state_no
-                      << "." << LANE->array[0]->ruleID << ", lane head state "
-                      << o->owner->state_no << ", contexts: ";
+                    std::cout << "conflict config: "
+                              << this->lane.array.at(0)->owner->state_no << "."
+                              << this->lane.array.at(0)->ruleID
+                              << ", lane head state " << o->owner->state_no
+                              << ", contexts: ";
                     write_symbol_list(gamma_theads, "contexts");
                 }
                 // if is in edge_pushing, ignore the context adding routine.
@@ -3463,8 +3459,8 @@ do_loop(const Grammar& grammar)
                 }
             }
             // CONTEXT adding routine.
-            context_adding_routine(
-              grammar, contexts_generated, o, cur_config_index, &fail_ct);
+            this->context_adding_routine(
+              contexts_generated, o, cur_config_index, &fail_ct);
 
         } else {
             if constexpr (DEBUG_PHASE_1) {
@@ -3478,8 +3474,8 @@ do_loop(const Grammar& grammar)
 
                 contexts_generated = combine_context_list(contexts_generated,
                                                           o->context->nContext);
-                context_adding_routine(
-                  grammar, contexts_generated, o, cur_config_index, &fail_ct);
+                this->context_adding_routine(
+                  contexts_generated, o, cur_config_index, &fail_ct);
             } else {
                 if constexpr (DEBUG_PHASE_1) {
                     std::cout << "testB false" << std::endl;
@@ -3490,21 +3486,18 @@ do_loop(const Grammar& grammar)
                         std::cout << "test_c true" << std::endl;
                     }
 
-                    move_markers(o);
+                    move_markers(this->lane, o);
 
                     contexts_generated = combine_context_list(
                       contexts_generated, o->context->nContext);
-                    context_adding_routine(grammar,
-                                           contexts_generated,
-                                           o,
-                                           cur_config_index,
-                                           &fail_ct);
+                    this->context_adding_routine(
+                      contexts_generated, o, cur_config_index, &fail_ct);
                 } else {
                     if constexpr (DEBUG_PHASE_1) {
                         std::cout << "test_c false" << std::endl;
                     }
 
-                    stack_operation(grammar, &fail_ct, o);
+                    this->stack_operation(&fail_ct, o);
                 }
             }
         } // end of else (test_a false).
@@ -3521,36 +3514,35 @@ do_loop(const Grammar& grammar)
         }
 
         TEST_FAILED = FLAG_OFF;
-        do_loop(grammar);
+        this->do_loop();
     } else {
-        check_lane_top(grammar);
+        this->check_lane_top();
     }
 }
 
-static void
-pop_lane(const Grammar& grammar)
+void
+LaneTracing::pop_lane()
 {
-
     if constexpr (DEBUG_PHASE_1) {
         std::cout << "POP_LANE" << std::endl;
     }
 
-    LANE->pop();
-    check_lane_top(grammar);
+    this->lane.pop();
+    this->check_lane_top();
 }
 
-static void
-check_stack_top(const Grammar& grammar)
+void
+LaneTracing::check_stack_top()
 {
-    Configuration* top = STACK->top();
+    Configuration* top = this->stack.top();
 
     if (top == LT_MARKER) {
         if constexpr (DEBUG_PHASE_1) {
             std::cout << "__check_stack_top true" << std::endl;
         }
 
-        STACK->pop();
-        pop_lane(grammar);
+        this->stack.pop();
+        this->pop_lane();
 
     } else {
         if constexpr (DEBUG_PHASE_1) {
@@ -3562,17 +3554,17 @@ check_stack_top(const Grammar& grammar)
                 std::cout << "__top COMPLETE ON" << std::endl;
             }
 
-            STACK->pop();
-            check_stack_top(grammar);
+            this->stack.pop();
+            this->check_stack_top();
         } else {
             if constexpr (DEBUG_PHASE_1) {
                 std::cout << "__top COMPLETE OFF" << std::endl;
             }
 
-            STACK->pop();
-            LANE->push(top);
+            this->stack.pop();
+            this->lane.push(top);
             top->IN_LANE = FLAG_ON;
-            do_loop(grammar);
+            this->do_loop();
         }
     }
 }
@@ -3610,16 +3602,16 @@ propogate_context_sets(const Grammar& grammar, Configuration* c)
 }
 
 void
-check_lane_top(const Grammar& grammar)
+LaneTracing::check_lane_top()
 {
-    Configuration* lane_top = LANE->top();
+    Configuration* lane_top = this->lane.top();
 
     if (lane_top == LT_MARKER) {
         if constexpr (DEBUG_PHASE_1) {
             std::cout << "check lane top true" << std::endl;
         }
 
-        check_stack_top(grammar);
+        this->check_stack_top();
     } else {
         if constexpr (DEBUG_PHASE_1) {
             std::cout << "check lane top false" << std::endl;
@@ -3630,23 +3622,23 @@ check_lane_top(const Grammar& grammar)
                 std::cout << "lane top is ZERO." << std::endl;
             }
 
-            pop_lane(grammar);
+            this->pop_lane();
         } else {
             lane_top->IN_LANE = FLAG_OFF;
             lane_top->COMPLETE = FLAG_ON;
 
             /// 12-19-2008.
             if (IN_EDGE_PUSHING_LANE_TRACING == false) {
-                propogate_context_sets(grammar, lane_top);
+                propogate_context_sets(this->grammar, lane_top);
             }
-            if (LANE->count() == 1) { // the starting reduction
-                                      /////////// END PROGRAMING ///////////////
+            if (this->lane.count() == 1) { // the starting reduction
+                /////////// END PROGRAMING ///////////////
                 if constexpr (DEBUG_PHASE_1) {
                     std::cout << "=====REDUCTION LANE TRACING ENDS====="
                               << std::endl;
                 }
             } else {
-                pop_lane(grammar);
+                this->pop_lane();
             }
         }
     }

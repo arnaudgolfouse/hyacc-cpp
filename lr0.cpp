@@ -331,7 +331,7 @@ void
 LR0::update_parsing_table() noexcept
 {
     ParsingTblRows = this->new_states.states_new->state_count;
-    n_state_opt1 = this->new_states.states_new->state_count;
+    this->n_state_opt1 = this->new_states.states_new->state_count;
 
     // this fills the conflict list, so is need for lalr processing.
     this->output_parsing_table();

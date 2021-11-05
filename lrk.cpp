@@ -246,12 +246,12 @@ insert_lrk_pt(LRkPTArray& lrk_pt_array,
     return set_c2;
 }
 
-static void
-lrk_config_lane_tracing(const Grammar& grammar, Configuration* c)
+void
+LaneTracing::lrk_config_lane_tracing(Configuration* c) noexcept
 {
     EDGE_PUSHING_CONTEXT_GENERATED = nullptr;
     IN_EDGE_PUSHING_LANE_TRACING = true;
-    lane_tracing_reduction(grammar, c);
+    this->lane_tracing_reduction(c);
 
     // pretend that c is a reduce configuration.
     c->LANE_END = 0;
@@ -331,7 +331,7 @@ fill_set_c2(LRkPTArray& lrk_pt_array,
  * @Input: inadequate state no.: state_no.
  */
 void
-LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, int state_no) const
+LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, int state_no)
 {
     CfgCtxt* cc = nullptr;
     State* s = this->new_states.states_new_array->state_list[state_no];
@@ -419,7 +419,7 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, int state_no) const
                         ConfigPairNode* tmp =
                           lane_head_tail_pairs; // store the old list.
                         lane_head_tail_pairs = nullptr;
-                        lrk_config_lane_tracing(this->grammar, c);
+                        this->lrk_config_lane_tracing(c);
                         for (ConfigPairNode* n = lane_head_tail_pairs;
                              n != nullptr;
                              n = n->next) {
@@ -513,8 +513,7 @@ LaneTracing::lane_tracing_lrk() -> std::optional<LRkPTArray>
 {
     if (0 == states_inadequate->count_unresolved)
         return std::nullopt;
-    LRk_PT = nullptr; // parsing table extension.
-    MAX_K++;          // increment K for LR(k).
+    MAX_K++; // increment K for LR(k).
     LRkPTArray lrk_pt_array{};
 
     std::cout << "\n------------- lane_tracing_LR_k ------------- "

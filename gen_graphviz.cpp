@@ -41,16 +41,19 @@ struct GvNode
     SymbolNode* labels;
     SymbolNode* labels_tail;
     GvNode* next;
+
+    explicit GvNode(int target_state)
+      : target_state(target_state)
+      , labels(nullptr)
+      , labels_tail(nullptr)
+      , next(nullptr)
+    {}
 };
 
 static auto
 create_gv_node(int target_state) -> GvNode*
 {
-    auto* gvn = new GvNode;
-    gvn->target_state = target_state;
-    gvn->labels = nullptr;
-    gvn->labels_tail = nullptr;
-    gvn->next = nullptr;
+    auto* gvn = new GvNode(target_state);
     return gvn;
 }
 

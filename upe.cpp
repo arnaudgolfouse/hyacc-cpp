@@ -631,7 +631,7 @@ remove_unit_production_step5(const Grammar& grammar, const MRLeaves& mr_leaves)
 void
 YAlgorithm::remove_unit_production_step1and2(const MRLeaves& mr_leaves)
 {
-    bool debug_remove_up_step_1_2 = Options::get().debug_remove_up_step_1_2;
+    bool debug_remove_up_step_1_2 = this->options.debug_remove_up_step_1_2;
     // as discussed in the function comments of getUnitProdShift(),
     // unitProdDestStates array is bounded by number of non_terminals + 1.
     std::vector<int> unit_prod_dest_states;
@@ -711,7 +711,7 @@ YAlgorithm::remove_unit_production()
     remove_unit_production_step4(this->grammar);
     remove_unit_production_step5(this->grammar, mr_leaves);
 
-    n_state_opt12 = states_reachable.size() + 1;
+    this->n_state_opt12 = states_reachable.size() + 1;
 }
 
 /////////////////////////////////////////////////////
@@ -816,10 +816,8 @@ remove_reachable_state(int i)
  * It's O(n^2) anyway.
  */
 void
-further_optimization(const Grammar& grammar)
+YAlgorithm::further_optimization()
 {
-    // n_state_opt12 = states_reachable_count + 1;
-
     for (int k = 0; k < states_reachable.size() - 1; k++) {
         int i = states_reachable[k];
         int j = states_reachable[k + 1];
@@ -840,12 +838,14 @@ further_optimization(const Grammar& grammar)
         } while (true);
     }
 
-    n_state_opt123 = states_reachable.size() + 1;
+    this->n_state_opt123 = states_reachable.size() + 1;
 
-    if (Options::get().show_parsing_tbl && (n_state_opt12 > n_state_opt123)) {
-        grammar.fp_v << "After further optimization, ";
-        grammar.fp_v << "total states reduced from " << n_state_opt12 << " to "
-                     << n_state_opt123 << std::endl;
+    if (this->options.show_parsing_tbl &&
+        (this->n_state_opt12 > this->n_state_opt123)) {
+        this->grammar.fp_v << "After further optimization, ";
+        this->grammar.fp_v << "total states reduced from "
+                           << this->n_state_opt12 << " to "
+                           << this->n_state_opt123 << std::endl;
     }
 }
 

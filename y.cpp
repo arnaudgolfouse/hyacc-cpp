@@ -66,9 +66,6 @@ std::vector<int> actual_state_no;
 int n_symbol;
 size_t n_rule;
 size_t n_rule_opt;
-size_t n_state_opt1;
-size_t n_state_opt12;
-size_t n_state_opt123;
 std::vector<int> final_state_list;
 SymbolList tokens;
 int tokens_ct;
@@ -271,7 +268,9 @@ Grammar::write_vanish_symbols(std::ostream& os) const
 }
 
 void
-Grammar::write(std::ostream& os, bool before_rm_unit_prod) const
+Grammar::write(std::ostream& os,
+               const bool before_rm_unit_prod,
+               const bool use_remove_unit_production) const noexcept
 {
     os << std::endl << "--Grammar--\n";
     this->write_terminals(os);
@@ -279,7 +278,7 @@ Grammar::write(std::ostream& os, bool before_rm_unit_prod) const
     this->write_vanish_symbols(os);
     os << "Goal symbol: " << *this->goal_symbol->snode->symbol << std::endl;
 
-    if (before_rm_unit_prod || !Options::get().use_remove_unit_production) {
+    if (before_rm_unit_prod || !use_remove_unit_production) {
         this->write_rules(os);
     } else { // after remove unit production.
         this->write_rules_no_unit_prod(os);
@@ -1449,31 +1448,31 @@ static size_t zzz = 0;
  *         empty, then use the context of current config.
  */
 void
-State::get_closure(const Grammar& grammar, std::optional<Queue>& config_queue)
+YAlgorithm::get_state_closure(State& state)
 {
     if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
         // config_queue->clear();
-        for (int i = 0; i < this->config.size(); i++) {
+        for (int i = 0; i < state.config.size(); i++) {
             config_queue->push(i);
         }
-        get_config_successors(grammar, *config_queue, this);
+        get_config_successors(this->grammar, *this->config_queue, &state);
     } else {
-        for (Configuration* config : this->config) {
-            get_successor_for_config(grammar, this, config);
+        for (Configuration* config : state.config) {
+            get_successor_for_config(grammar, &state, config);
         }
 
         xx++;
-        yy += this->config.size();
-        if (zz < this->config.size())
-            zz = this->config.size();
+        yy += state.config.size();
+        if (zz < state.config.size())
+            zz = state.config.size();
 
         if (Options::get().debug_comb_comp_config)
-            combine_compatible_config(this,
+            combine_compatible_config(&state,
                                       Options::get().debug_comb_comp_config);
 
-        yyy += this->config.size();
-        if (zzz < this->config.size())
-            zzz = this->config.size();
+        yyy += state.config.size();
+        if (zzz < state.config.size())
+            zzz = state.config.size();
     }
 }
 
@@ -2232,8 +2231,7 @@ YAlgorithm::generate_parsing_machine()
                          << std::endl;
         }
 
-        new_state->get_closure(grammar,
-                               config_queue); // get closure of this state.
+        this->get_state_closure(*new_state); // get closure of this state.
 
         // get successor states and add them to states_new.
         this->state_transition(*new_state);
@@ -2242,7 +2240,7 @@ YAlgorithm::generate_parsing_machine()
     }
 
     ParsingTblRows = this->new_states.states_new->state_count;
-    n_state_opt1 = this->new_states.states_new->state_count;
+    this->n_state_opt1 = this->new_states.states_new->state_count;
 }
 
 static void
@@ -2739,59 +2737,58 @@ show_conflict_count(const ConflictsCount& conflicts_count)
 
 /* Show statistics of the grammar and it's parsing machine.
  */
-static void
-show_stat(std::ostream& os,
-          const Grammar& grammar,
-          const NewStates& new_states,
-          const std::optional<Queue>& config_queue)
+void
+YAlgorithm::show_stat(std::ostream& os) const noexcept
 {
-    auto& options = Options::get();
-    if (!options.use_verbose)
+    if (!this->options.use_verbose)
         return;
 
-    write_state_transition_list(os, grammar, new_states);
-    if (options.show_state_config_count)
-        show_state_config_info(os, *new_states.states_new, config_queue);
-    if (options.show_actual_state_array)
-        write_actual_state_array(grammar.fp_v);
+    write_state_transition_list(os, this->grammar, this->new_states);
+    if (this->options.show_state_config_count)
+        show_state_config_info(
+          os, *this->new_states.states_new, this->config_queue);
+    if (this->options.show_actual_state_array)
+        write_actual_state_array(this->grammar.fp_v);
 
     os << std::endl;
     // *fp_v << "--statistics--" << std::endl ;
     // *fp_v << "[Note: A first rule '$accept ->
     //  start_symbol' is added]" << std::endl << "\n" ;*fp_v << "Symbols
     //  count: " <<  n_symbol<< std::endl ;
-    os << grammar.terminal_count << " terminals, " << grammar.non_terminal_count
-       << " nonterminals" << std::endl;
+    os << this->grammar.terminal_count << " terminals, "
+       << this->grammar.non_terminal_count << " nonterminals" << std::endl;
     os << n_rule << " grammar rules" << std::endl;
     if (options.use_remove_unit_production) {
         os << n_rule_opt << " grammar rules after remove unit ";
     }
-    if (options.use_combine_compatible_states) {
-        if (options.use_lr0) {
-            os << n_state_opt1 << " states without optimization" << std::endl;
-        } else {
-            os << n_state_opt1 << " states after combine compatible states"
+    if (this->options.use_combine_compatible_states) {
+        if (this->options.use_lr0) {
+            os << this->n_state_opt1 << " states without optimization"
                << std::endl;
+        } else {
+            os << this->n_state_opt1
+               << " states after combine compatible states" << std::endl;
         }
         if (options.use_remove_unit_production) {
-            os << n_state_opt12 << " states after remove unit productions"
+            os << this->n_state_opt12 << " states after remove unit productions"
                << std::endl;
             if (options.use_remove_repeated_states)
-                os << n_state_opt123 << " states after remove repeated ";
+                os << this->n_state_opt123 << " states after remove repeated ";
         }
     } else {
-        os << n_state_opt1 << " states without optimization" << std::endl;
+        os << this->n_state_opt1 << " states without optimization" << std::endl;
     }
 
     // conflicts summary.
-    os << new_states.conflicts_count.rs << " shift/reduce conflict"
-       << ((new_states.conflicts_count.rs > 1) ? "s" : "") << ", "
-       << new_states.conflicts_count.rr << " reduce/reduce conflict"
-       << ((new_states.conflicts_count.rr > 1) ? "s" : "") << std::endl;
-    if (options.use_remove_unit_production &&
-        new_states.conflicts_count.ss > 0) {
-        os << new_states.conflicts_count.ss << " shift/shift conflict"
-           << ((new_states.conflicts_count.ss > 1) ? "s" : "") << std::endl
+    os << this->new_states.conflicts_count.rs << " shift/reduce conflict"
+       << ((this->new_states.conflicts_count.rs > 1) ? "s" : "") << ", "
+       << this->new_states.conflicts_count.rr << " reduce/reduce conflict"
+       << ((this->new_states.conflicts_count.rr > 1) ? "s" : "") << std::endl;
+    if (this->options.use_remove_unit_production &&
+        this->new_states.conflicts_count.ss > 0) {
+        os << this->new_states.conflicts_count.ss << " shift/shift conflict"
+           << ((this->new_states.conflicts_count.ss > 1) ? "s" : "")
+           << std::endl
            << "\n";
     }
 
@@ -3042,7 +3039,8 @@ lr1(const FileNames& files, const Options& options, NewStates& new_states)
 
     y_algorithm.init();
     if (options.show_grammar) {
-        y_algorithm.grammar.write(fp_v, true);
+        y_algorithm.grammar.write(
+          fp_v, true, options.use_remove_unit_production);
     }
 
     y_algorithm.generate_parsing_machine();
@@ -3070,7 +3068,7 @@ lr1(const FileNames& files, const Options& options, NewStates& new_states)
         if (options.show_parsing_tbl)
             print_final_parsing_table(y_algorithm.grammar);
         if (options.use_remove_repeated_states) {
-            further_optimization(y_algorithm.grammar);
+            y_algorithm.further_optimization();
             if (options.show_parsing_tbl) {
                 fp_v << std::endl << "AFTER REMOVING REPEATED STATES:\n";
                 print_final_parsing_table(y_algorithm.grammar);
@@ -3085,7 +3083,8 @@ lr1(const FileNames& files, const Options& options, NewStates& new_states)
                  << "--Grammar after remov" << std::endl
                  << "g " << std::endl
                  << "it ";
-            y_algorithm.grammar.write(fp_v, false);
+            y_algorithm.grammar.write(
+              fp_v, false, options.use_remove_unit_production);
         }
         if (options.use_graphviz) {
             gen_graphviz_input2(y_algorithm.grammar, files.y_gviz);
@@ -3097,7 +3096,7 @@ lr1(const FileNames& files, const Options& options, NewStates& new_states)
         generate_compiler(
           yacc_grammar_output, lrk_pt_array, hyacc_filename, files);
 
-    show_stat(fp_v, y_algorithm.grammar, new_states, config_queue);
+    y_algorithm.show_stat(fp_v);
     show_conflict_count(new_states.conflicts_count);
 
     if (options.use_verbose)
@@ -3106,9 +3105,9 @@ lr1(const FileNames& files, const Options& options, NewStates& new_states)
 }
 
 static auto
-lr0(const FileNames& files, NewStates& new_states) -> int
+lr0(const FileNames& files, const Options& options, NewStates& new_states)
+  -> int
 {
-    const auto& options = Options::get();
     std::optional<Queue> config_queue = std::nullopt;
     /// USE_COMBINE_COMPATIBLE_STATES = false; ///
     hash_tbl_init();
@@ -3135,7 +3134,8 @@ lr0(const FileNames& files, NewStates& new_states) -> int
       yacc_grammar_output.grammar, options, new_states, config_queue);
     lane_tracing_algorithm.init();
     if (options.show_grammar) {
-        lane_tracing_algorithm.grammar.write(fp_v, true);
+        lane_tracing_algorithm.grammar.write(
+          fp_v, true, options.use_remove_unit_production);
     }
 
     lane_tracing_algorithm.generate_lr0_parsing_machine(*config_queue);
@@ -3169,7 +3169,7 @@ lr0(const FileNames& files, NewStates& new_states) -> int
         if (options.show_parsing_tbl)
             print_final_parsing_table(lane_tracing_algorithm.grammar);
         if (options.use_remove_repeated_states) {
-            further_optimization(lane_tracing_algorithm.grammar);
+            lane_tracing_algorithm.further_optimization();
             if (options.show_parsing_tbl) {
                 fp_v << std::endl << "AFTER REMOVING REPEATED STATES:\n";
                 print_final_parsing_table(lane_tracing_algorithm.grammar);
@@ -3184,7 +3184,8 @@ lr0(const FileNames& files, NewStates& new_states) -> int
                  << "--Grammar after remov" << std::endl
                  << "g " << std::endl
                  << "it ";
-            lane_tracing_algorithm.grammar.write(fp_v, false);
+            lane_tracing_algorithm.grammar.write(
+              fp_v, false, options.use_remove_unit_production);
         }
         if (options.use_graphviz) {
             gen_graphviz_input2(lane_tracing_algorithm.grammar, files.y_gviz);
@@ -3196,7 +3197,7 @@ lr0(const FileNames& files, NewStates& new_states) -> int
         generate_compiler(
           yacc_grammar_output, lrk_pt_array, hyacc_filename, files);
 
-    show_stat(fp_v, lane_tracing_algorithm.grammar, new_states, config_queue);
+    lane_tracing_algorithm.show_stat(fp_v);
     show_conflict_count(new_states.conflicts_count);
 
     if (options.use_lr_k) {
@@ -3232,7 +3233,7 @@ main(int argc, const char* argv[]) -> int
 
         NewStates new_states{};
         if (options.use_lr0) {
-            lr0(files, new_states);
+            lr0(files, options, new_states);
         } else {
             lr1(files, options, new_states);
         }
