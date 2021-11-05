@@ -42,10 +42,8 @@ SRC = y.cpp get_yacc_grammar.cpp gen_compiler.cpp get_options.cpp \
       version.cpp hyacc_path.cpp symbol_table.cpp state_hash_table.cpp \
       queue.cpp gen_graphviz.cpp lr0.cpp lane_tracing.cpp stack_config.cpp \
       mrt.cpp upe.cpp lrk.cpp lrk_util.cpp
-OBJS = y.o get_yacc_grammar.o gen_compiler.o get_options.o \
-       version.o hyacc_path.o symbol_table.o state_hash_table.o \
-       queue.o gen_graphviz.o lr0.o lane_tracing.o \
-       stack_config.o mrt.o upe.o lrk.o lrk_util.o
+BUILD_DIR = build
+OBJS = $(SRC:%.cpp=$(BUILD_DIR)/%.o)
 PACK_SRC = $(SRC) $(SRC_HEADER) inst.cpp makefile \
            hyaccpar hyaccmanpage hyaccmanpage.html \
            hyacc.1 GPL_license readme.pdf
@@ -56,33 +54,27 @@ PACK_NAME = hyacc_$(DATE).tar
 FFLAG = -std=c++20
 
 
-$(TARGET) : $(OBJS) $(SRC_HEADER) 
+$(TARGET) : $(OBJS)
 	@echo please wait ...
-	$(CC) $(FFLAG) -o $(TARGET) $(OBJS) 
-	@echo compiled successfully 
-
-#
-# all - the old default.
-#
-all : $(SRC) $(SRC_HEADER)
-	@echo please wait ...
-	$(CC) $(FFLAG) -o $(TARGET) $(SRC)
+	$(CC) $(FFLAG) $(OBJS) -o $(TARGET)
 	@echo compiled successfully
 
-release : $(SRC) $(SRC_HEADER) 
+release : FFLAG += -O2
+debug : $(OBJS)
 	@echo please wait ...
 	@make create_path_file
-	$(CC) $(FFLAG) -o $(TARGET) $(SRC)  
+	$(CC) $(FFLAG) $(OBJS) -o $(TARGET)
 	@echo release version is successfully built
 
-debug : $(SRC) $(SRC_HEADER)
+debug : FFLAG += -g -Wall -Wextra
+debug : $(OBJS)
 	@echo please wait ...
 	@make create_path_file
-	$(CC) $(FFLAG) -g -o $(TARGET) $(SRC)
+	$(CC) $(FFLAG) $(OBJS) -o $(TARGET)
 	@echo debug version is successfully built
 
 clean :
-	rm -f ./$(TARGET) ./$(OBJS)
+	rm -rf ./$(TARGET) ./$(BUILD_DIR)
 	@echo target is cleaned
 
 cscope.out : $(SRC) hyaccpar hyaccpark
@@ -124,55 +116,8 @@ dist:
 # for object files.
 #
 
-gen_compiler.o : gen_compiler.cpp y.hpp
-	$(CC) $(FFLAG) gen_compiler.cpp
+mkdir_build_dir:
+	mkdir -p build
 
-gen_graphviz.o : gen_graphviz.cpp y.hpp
-	$(CC) $(FFLAG) gen_graphviz.cpp
-
-get_options.o : get_options.cpp y.hpp
-	$(CC) $(FFLAG) get_options.cpp
-
-get_yacc_grammar.o : get_yacc_grammar.cpp y.hpp
-	$(CC) $(FFLAG) get_yacc_grammar.cpp
-
-hyacc_path.o : hyacc_path.cpp y.hpp
-	$(CC) $(FFLAG) hyacc_path.cpp
-
-lane_tracing.o : lane_tracing.cpp lane_tracing.hpp y.hpp stack_config.hpp
-	$(CC) $(FFLAG) lane_tracing.cpp 
-
-lr0.o : lr0.cpp y.hpp
-	$(CC) $(FFLAG) lr0.cpp
-
-lrk.o : lrk.cpp y.hpp lane_tracing.hpp
-	$(CC) $(FFLAG) lrk.cpp
-
-lrk_util.o : lrk_util.cpp y.hpp lane_tracing.hpp
-	$(CC) $(FFLAG) lrk_util.cpp
-
-mrt.o : mrt.cpp mrt.hpp y.hpp
-	$(CC) $(FFLAG) mrt.cpp
-
-queue.o : queue.cpp y.hpp
-	$(CC) $(FFLAG) queue.cpp
-
-stack_config.o : stack_config.cpp y.hpp
-	$(CC) $(FFLAG) stack_config.cpp
-
-state_hash_table.o : state_hash_table.cpp y.hpp
-	$(CC) $(FFLAG) state_hash_table.cpp
-
-symbol_table.o : symbol_table.cpp y.hpp
-	$(CC) $(FFLAG) symbol_table.cpp
-
-upe.o : upe.cpp y.hpp mrt.hpp
-	$(CC) $(FFLAG) upe.cpp
-
-version.o : version.cpp y.hpp
-	$(CC) $(FFLAG) version.cpp
-
-y.o : y.cpp y.hpp lane_tracing.hpp
-	$(CC) $(FFLAG) y.cpp
-
-
+$(BUILD_DIR)/%.o : %.cpp $(SRC_HEADER) mkdir_build_dir
+	$(CC) $(FFLAG) -c "$*.cpp" -o "build/$*.o"
