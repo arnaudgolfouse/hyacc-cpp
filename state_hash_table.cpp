@@ -53,140 +53,95 @@
 #include <array>
 #include <fstream>
 #include <iomanip>
+#include <memory>
 #include <ostream>
-
-struct StateTableNode
-{
-    State* state;
-    StateTableNode* next;
-};
-using StateTblNode = struct StateTableNode;
-
-struct StateHashTblNode
-{
-    int count;
-    StateTblNode* next;
-};
-
-constexpr size_t SHT_SIZE = 997; /* State hash table size */
-std::array<StateHashTblNode, SHT_SIZE> StateHashTbl;
-
-auto
-create_state_node(State* s) -> StateTblNode*
-{
-    auto* n = new StateTblNode;
-    n->state = s;
-    n->next = nullptr;
-    return n;
-}
+#include <unordered_set>
+#include <utility>
 
 void
-destroy_state_node(StateTblNode* n)
+StateHashTable::init() noexcept
 {
-    delete n;
-}
-
-void
-init_state_hash_tbl()
-{
-    for (int i = 0; i < SHT_SIZE; i++) {
-        StateHashTbl[i].count = 0;
-        StateHashTbl[i].next = nullptr;
+    for (auto& cell : this->data) {
+        cell.clear();
     }
 }
 
 /// The result is garanteed to be strictly less than `SHT_SIZE`.
-static auto
-get_state_hash_val(const State& s) -> size_t
+auto
+StateHashTable::get_value(const State& s) noexcept -> size_t
 {
-    constexpr int MAGIC_1 = 97;
-    constexpr int MAGIC_2 = 7;
+    // Magic hashing numbers
+    constexpr size_t MAGIC_1 = 97;
+    constexpr size_t MAGIC_2 = 7;
     size_t sum = 0;
     for (size_t i = 0; i < s.core_config_count; i++) {
-        sum = (sum + s.config[i]->ruleID * MAGIC_1 +
-               s.config[i]->marker * MAGIC_2 + i) %
-              static_cast<int>(SHT_SIZE);
+        sum = (sum + static_cast<size_t>(s.config[i]->ruleID) * MAGIC_1 +
+               static_cast<size_t>(s.config[i]->marker) * MAGIC_2 + i) %
+              SHT_SIZE;
     }
     return sum;
 }
 
-extern bool in_lanetracing;
-
-/*
- * Search the state hash table for state s.
- * If not found, insert it and return nullptr.
- * else, return the found state.
- */
+/// @brief Search the state hash table for the state `s`.
+///
+/// @param s state to search
+/// @param y_algorithm `YAlgorithm` structure, used if states need to be
+/// combined.
+///
+/// If not found, insert it and return nullptr and false. else, return the found
+/// state and true.
+///
+/// # Combine states
+/// If the `use_combine_compatible_states` option is activated, this will also
+/// search for a state that can be combined with `s`. If it is found, the two
+/// states are combined, and this function additionally returns `true`.
+///
+/// # Safety
+/// `s` must be valid.
 auto
-YAlgorithm::search_state_hash_tbl(State& s, bool* is_compatible) -> State*
+StateHashTable::search(const std::shared_ptr<State>& s,
+                       YAlgorithm& y_algorithm) noexcept
+  -> std::pair<std::shared_ptr<State>, bool>
 {
-    const size_t v = get_state_hash_val(s);
-    auto& cell = StateHashTbl.at(v);
-    StateTblNode* n = cell.next;
-    StateTblNode* n_prev = nullptr;
+    const size_t v = StateHashTable::get_value(*s);
+    auto& bucket = this->data.at(v);
 
-    *is_compatible = false; // default to 0 - false.
-
-    if (n == nullptr) {
-        cell.next = create_state_node(&s);
-        cell.count = 1;
-        return nullptr;
-    }
-
-    while (n != nullptr) {
-        n_prev = n;
-        if (is_same_state(*n->state, s)) {
-            return n->state;
+    for (const auto& state : bucket) {
+        if (is_same_state(*state, *s)) {
+            return { state, false };
         }
-        if (this->options.use_combine_compatible_states) {
-            if (is_compatible_states(n->state, &s)) {
-                this->combine_compatible_states(*n->state, s);
-                *is_compatible = true;
-                return n->state;
+        if (y_algorithm.options.use_combine_compatible_states) {
+            if (is_compatible_states(state.get(), s.get())) {
+                y_algorithm.combine_compatible_states(state, *s);
+                return { state, true };
             }
         }
-        n = n->next;
     }
-    // n == nullptr, s does not exist. insert at end.
-    n_prev->next = create_state_node(&s);
-    cell.count++;
 
-    return nullptr;
+    bucket.emplace_back(s);
+    return { nullptr, false };
 }
 
-/*
- * Search the state hash table for state s.
- * If not found, insert it and return nullptr.
- * else, return the found state.
- *
- * Is similar to searchStateHashTbl, but does not use
- * weak compatibility.
- */
+/// Search the state hash table for state s.
+/// If not found, insert it and return nullptr.
+/// else, return the found state.
+///
+/// Is similar to `StateHashTable::search`, but does not use
+/// weak compatibility.
 auto
-search_same_state_hash_tbl(State& s) -> State*
+StateHashTable::search_same_state(std::shared_ptr<State> s)
+  -> std::shared_ptr<State>
 {
-    const size_t v = get_state_hash_val(s);
-    auto& cell = StateHashTbl.at(v);
-    StateTblNode* n = cell.next;
-    StateTblNode* n_prev = nullptr;
+    const size_t v = StateHashTable::get_value(*s);
+    auto& bucket = this->data.at(v);
 
-    if (n == nullptr) {
-        cell.next = create_state_node(&s);
-        cell.count = 1;
-        return nullptr;
-    }
-
-    while (n != nullptr) {
-        n_prev = n;
-        if (is_same_state(*n->state, s)) {
-            return n->state;
+    for (const auto& state : bucket) {
+        if (is_same_state(*state, *s)) {
+            return state;
         }
-        n = n->next;
     }
-    // n == nullptr, s does not exist. insert at end.
-    n_prev->next = create_state_node(&s);
-    cell.count++;
 
+    bucket.emplace_back(s);
     return nullptr;
 }
 
@@ -196,37 +151,39 @@ search_same_state_hash_tbl(State& s) -> State*
  *   number of used hash table cells / hash table size.
  */
 void
-state_hash_tbl_dump(std::ostream& os)
+StateHashTable::dump(std::ostream& os) const noexcept
 {
-    int states_count = 0, list_count = 0;
-    StateTblNode* n = nullptr;
+    size_t states_count = 0, list_count = 0;
 
     os << std::endl << "--state hash table--\n";
     os << "-----------------------" << std::endl;
     os << "cell |   count  | state" << std::endl;
     os << "-----------------------" << std::endl;
-    for (int i = 0; i < SHT_SIZE; i++) {
-        if (StateHashTbl.at(i).count == 0)
+    size_t i = 0;
+    for (const auto& bucket : this->data) {
+        if (bucket.empty())
             continue;
 
         list_count++;
-        states_count += StateHashTbl.at(i).count;
+        states_count += bucket.size();
 
-        os << "[" << i << "] (count=" << StateHashTbl.at(i).count << ") : ";
-        if ((n = StateHashTbl.at(i).next) != nullptr) {
-            os << n->state->state_no;
-
-            n = n->next;
-            while (n != nullptr) {
-                os << ", " << n->state->state_no;
-                n = n->next;
+        os << "[" << i << "] (count=" << bucket.size() << ") : ";
+        bool first_element = true;
+        for (const auto& element : bucket) {
+            if (first_element) {
+                first_element = false;
+            } else {
+                os << ", ";
             }
+            os << element->state_no;
         }
         os << std::endl;
+        i++;
     }
 
     os << states_count << " states, " << list_count << " lists, in average "
-       << std::setprecision(2) << ((double)states_count) / list_count
+       << std::setprecision(2)
+       << static_cast<double>(states_count) / static_cast<double>(list_count)
        << " states/list." << std::endl;
     os << "load factor: " << std::setprecision(2)
        << ((double)states_count) / SHT_SIZE

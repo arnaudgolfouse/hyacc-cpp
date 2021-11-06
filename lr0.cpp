@@ -28,18 +28,18 @@
 
 #include "y.hpp"
 #include <fstream>
-
-static void
-propagate_originator_change(State* s);
+#include <memory>
 
 /// Add a new `Configuration` to `s.config`.
 static void
-add_successor_config_to_state_lr0(const Grammar& grammar, State& s, int rule_id)
+add_successor_config_to_state_lr0(const Grammar& grammar,
+                                  std::shared_ptr<State> s,
+                                  size_t rule_id)
 {
     // marker = 0, isCoreConfig = 0.
-    Configuration* c = create_config(grammar, rule_id, 0, 0);
-    c->owner = &s;
-    s.config.push_back(c);
+    Configuration* c = create_config(grammar, static_cast<int>(rule_id), 0, 0);
+    c->owner = s;
+    s->config.push_back(c);
 }
 
 /*
@@ -47,7 +47,9 @@ add_successor_config_to_state_lr0(const Grammar& grammar, State& s, int rule_id)
  * the configurations to be processed.
  */
 static void
-get_config_successors_lr0(const Grammar& grammar, Queue& config_queue, State* s)
+get_config_successors_lr0(const Grammar& grammar,
+                          Queue& config_queue,
+                          std::shared_ptr<State> s)
 {
     while (config_queue.size() > 0) {
         Configuration* config = s->config[*config_queue.pop()];
@@ -69,7 +71,7 @@ get_config_successors_lr0(const Grammar& grammar, Queue& config_queue, State* s)
 
                     if (!index.has_value()) { // new config.
                         add_successor_config_to_state_lr0(
-                          grammar, *s, r->rule_id);
+                          grammar, s, r->rule_id);
                         // s->config is non-empty here (see beginning of the
                         // loop)
                         config_queue.push(s->config.size() - 1);
@@ -82,7 +84,9 @@ get_config_successors_lr0(const Grammar& grammar, Queue& config_queue, State* s)
 }
 
 static void
-get_closure_lr0(const Grammar& grammar, Queue& config_queue, State* s)
+get_closure_lr0(const Grammar& grammar,
+                Queue& config_queue,
+                std::shared_ptr<State> s)
 {
     // config_queue->clear();
     for (size_t i = 0; i < s->config.size(); i++) {
@@ -163,26 +167,24 @@ LR0::insert_reduction_to_parsing_table_lalr(const Configuration* c,
  * since configurations don't have contexts. So such
  * states are always the "same", but not compatible.
  */
-static void
-add_transition_states2_new_lr0(NewStates& new_states,
-                               StateCollection* coll,
-                               State* src_state)
+void
+LR0::add_transition_states2_new_lr0(StateCollection* coll,
+                                    std::shared_ptr<State> src_state)
 {
-    State *os = nullptr, *next = nullptr, *s = nullptr;
-    s = coll->states_head;
+    std::shared_ptr<State> next = nullptr;
+    std::shared_ptr<State> s = coll->states_head;
 
     while (s != nullptr) {
         next = s->next;
         // search_same_state_hash_tbl() checks for SAME (not compatible) states.
-        if ((os = search_same_state_hash_tbl(*s)) == nullptr) {
+        std::shared_ptr<State> os = this->state_hash_table.search_same_state(s);
+        if (os == nullptr) {
             new_states.insert_state_to_pm(s);
 
             // Add this new state as successor to src_state.
-            add_successor(*src_state, s);
-
+            add_successor(src_state, s);
         } else { // same with an existing state.
-            add_successor(*src_state, os);
-            State::destroy_state(s); // existing or compatible. No use.
+            add_successor(src_state, os);
         }
 
         s = next;
@@ -202,7 +204,7 @@ add_transition_states2_new_lr0(NewStates& new_states,
  * and add transition to parsing table as well.
  */
 void
-LR0::transition_lr0(State* s) noexcept
+LR0::transition_lr0(std::shared_ptr<State> s) noexcept
 {
     StateCollection* coll = create_state_collection();
 
@@ -215,10 +217,10 @@ LR0::transition_lr0(State* s) noexcept
             if (scanned_symbol->symbol->empty()) { // empty reduction.
                 continue;
             }
-            State* new_state =
+            std::shared_ptr<State> new_state =
               find_state_for_scanned_symbol(coll, scanned_symbol);
             if (new_state == nullptr) {
-                new_state = create_state();
+                new_state = std::make_shared<State>();
                 // record which symbol this state is a successor by.
                 new_state->trans_symbol = SymbolNode::create(scanned_symbol);
                 coll->add_state2(new_state);
@@ -238,7 +240,7 @@ LR0::transition_lr0(State* s) noexcept
     } // end for
 
     if (coll->state_count > 0) {
-        add_transition_states2_new_lr0(this->new_states, coll, s);
+        this->add_transition_states2_new_lr0(coll, s);
     }
 }
 
@@ -248,7 +250,7 @@ LR0::transition_lr0(State* s) noexcept
  * a cell is already a/s/g, don't fill this r.
  */
 void
-LR0::output_parsing_table_row(const State* s)
+LR0::output_parsing_table_row(const std::shared_ptr<const State> s)
 {
     // insert a/r actions.
     for (const auto& c : s->config) {
@@ -259,13 +261,13 @@ LR0::output_parsing_table_row(const State* s)
     }
 
     // insert s/g actions.
-    for (State* t : s->successor_list) {
+    for (auto& t : s->successor_list) {
         this->insert_action(t->trans_symbol->snode, s->state_no, t->state_no);
     }
 }
 
 void
-LR0::output_parsing_table_row_lalr(const State* s)
+LR0::output_parsing_table_row_lalr(const std::shared_ptr<const State> s)
 {
     // insert a/r actions.
     for (const auto& c : s->config) {
@@ -278,7 +280,7 @@ LR0::output_parsing_table_row_lalr(const State* s)
     }
 
     // insert s/g actions.
-    for (State* t : s->successor_list) {
+    for (auto& t : s->successor_list) {
         this->insert_action(t->trans_symbol->snode, s->state_no, t->state_no);
     }
 }
@@ -305,8 +307,9 @@ LR0::output_parsing_table() noexcept
         ParsingTable.at(i) = 0;
     }
 
-    for (int i = 0; i < rows; i++) {
-        State* s = this->new_states.states_new_array->state_list[i];
+    for (size_t i = 0; i < rows; i++) {
+        const std::shared_ptr<State> s =
+          this->new_states.states_new_array->state_list[i];
         this->output_parsing_table_row(s);
     }
 }
@@ -326,8 +329,9 @@ LR0::output_parsing_table_lalr()
         ParsingTable.at(i) = 0;
     }
 
-    for (int i = 0; i < rows; i++) {
-        State* s = this->new_states.states_new_array->state_list[i];
+    for (size_t i = 0; i < rows; i++) {
+        const std::shared_ptr<State> s =
+          this->new_states.states_new_array->state_list[i];
         this->output_parsing_table_row_lalr(s);
     }
 }
@@ -345,7 +349,7 @@ LR0::update_parsing_table() noexcept
 void
 LR0::generate_lr0_parsing_machine(Queue& config_queue)
 {
-    State* new_state = this->new_states.states_new->states_head;
+    std::shared_ptr<State> new_state = this->new_states.states_new->states_head;
 
     if (this->options.debug_gen_parsing_machine) {
         this->grammar.fp_v << std::endl

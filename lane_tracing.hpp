@@ -136,7 +136,10 @@ extern LtCluster* all_clusters;
 using laneHead = struct laneHeadState;
 struct laneHeadState
 {
-    State* s;            // conflicting lane head state.
+    /// conflicting lane head state.
+    ///
+    /// Should never contain `nullptr`.
+    std::shared_ptr<State> s;
     SymbolList contexts; // list of conflicting contexts.
     laneHead* next;
 };
@@ -354,12 +357,16 @@ class LaneTracing : public YAlgorithm
 
     void phase1();
     void phase2();
-    void gpm(State* new_state);
-    void lt_tbl_entry_add(State* from, State* to);
-    auto lt_tbl_entry_find_insert(State* from) -> LtTblEntry*;
-    auto lt_tbl_entry_find(State* from) -> LtTblEntry*;
-    void lt_tbl_entry_add_context(State* from, SymbolList ctxt) noexcept(false);
-    auto add_split_state(State& y, State& s, size_t successor_index) -> bool;
+    void gpm(std::shared_ptr<State> new_state);
+    void lt_tbl_entry_add(int from_state,
+                          const std::shared_ptr<const State>& to);
+    auto lt_tbl_entry_find_insert(int from_state) -> LtTblEntry*;
+    auto lt_tbl_entry_find(int from_state) -> LtTblEntry*;
+    void lt_tbl_entry_add_context(int from_state,
+                                  SymbolList ctxt) noexcept(false);
+    auto add_split_state(std::shared_ptr<State> y,
+                         State& s,
+                         size_t successor_index) -> bool;
     void update_state_reduce_action(State& s);
     void phase2_regeneration(laneHead* lh_list);
     void phase2_regeneration2();

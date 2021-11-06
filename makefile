@@ -42,7 +42,7 @@ SRC = y.cpp get_yacc_grammar.cpp gen_compiler.cpp get_options.cpp \
       version.cpp hyacc_path.cpp symbol_table.cpp state_hash_table.cpp \
       queue.cpp gen_graphviz.cpp lr0.cpp lane_tracing.cpp stack_config.cpp \
       mrt.cpp upe.cpp lrk.cpp lrk_util.cpp
-BUILD_DIR = build
+BUILD_DIR = artifacts_dir
 OBJS = $(SRC:%.cpp=$(BUILD_DIR)/%.o)
 PACK_SRC = $(SRC) $(SRC_HEADER) inst.cpp makefile \
            hyaccpar hyaccmanpage hyaccmanpage.html \
@@ -116,8 +116,8 @@ dist:
 # for object files.
 #
 
-mkdir_build_dir:
-	mkdir -p build
+create_build_dir:
+	mkdir -p $(BUILD_DIR)
 
-$(BUILD_DIR)/%.o : %.cpp $(SRC_HEADER) mkdir_build_dir
-	$(CC) $(FFLAG) -c "$*.cpp" -o "build/$*.o"
+$(BUILD_DIR)/%.o : %.cpp $(SRC_HEADER)
+	$(CC) $(FFLAG) -c "$*.cpp" -o "$(BUILD_DIR)/$*.o"

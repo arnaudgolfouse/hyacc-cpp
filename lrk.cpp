@@ -332,7 +332,8 @@ void
 LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, int state_no)
 {
     CfgCtxt* cc = nullptr;
-    State* s = this->new_states.states_new_array->state_list[state_no];
+    std::shared_ptr<const State> s =
+      this->new_states.states_new_array->state_list[state_no];
     if (s == nullptr)
         return;
 

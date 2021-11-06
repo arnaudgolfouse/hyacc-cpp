@@ -34,6 +34,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <list>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -43,6 +44,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+class YAlgorithm; // forward-declaration
 
 constexpr size_t SYMBOL_INIT_SIZE = 128; /* Init size of a symbol string. */
 constexpr size_t GRAMMAR_RULE_INIT_MAX_COUNT =
@@ -372,7 +375,7 @@ struct ConfigurationNode
     SymbolNode* nMarker; // point to scanned symbol.
     int marker;          // redundant to nMarker, but make processing easier.
     Context* context;
-    struct StateNode* owner;
+    std::shared_ptr<struct StateNode> owner;
 
     unsigned int isCoreConfig : 1; /* 1 - true, 0 - false. */
     /* flags for lane_tracing. */
@@ -430,7 +433,7 @@ struct ConflictsCount
 using State = struct StateNode;
 struct StateList
 {
-    std::vector<StateNode*> state_list;
+    std::vector<std::shared_ptr<StateNode>> state_list;
 
     static auto create() -> std::shared_ptr<StateList>;
     static void expand(StateList* l);
@@ -440,18 +443,16 @@ struct StateList
     auto clone() -> std::shared_ptr<StateList>;
     // static void destroy(StateList* l);
 
-    /*
-     * Add if not exist yet.
-     * @Return: true is added, false if not added.
-     */
-    auto add(State* s) -> bool;
+    /// Add if not exist yet.
+    /// @return: true is added, false if not added.
+    auto add(std::shared_ptr<State>) -> bool;
     friend auto operator<<(std::ostream& os, const StateList& dt)
       -> std::ostream&;
 };
 
 struct StateNode
 {
-    std::vector<Configuration*> config;
+    std::vector<Configuration*> config{};
     size_t core_config_count;
 
     int state_no;
@@ -459,18 +460,17 @@ struct StateNode
 
     std::shared_ptr<StateList> parents_list;
 
-    std::vector<StateNode*> successor_list;
+    std::vector<std::shared_ptr<StateNode>> successor_list;
 
-    StateNode* next;
+    std::shared_ptr<StateNode> next;
 
     /* for lane-tracing */
     unsigned int ON_LANE : 1;
     unsigned int COMPLETE : 1;
     unsigned int PASS_THRU : 1;   /* for phase 2 */
     unsigned int REGENERATED : 1; /* for phase 2 regeneration */
-    unsigned int padding : 28;
 
-    static void destroy_state(State* s);
+    explicit StateNode();
 };
 
 /*
@@ -478,11 +478,11 @@ struct StateNode
  */
 struct StateCollection
 {
-    State* states_head;
-    State* states_tail;
+    std::shared_ptr<State> states_head;
+    std::shared_ptr<State> states_tail;
     int state_count;
 
-    auto add_state2(State* new_state) -> State*;
+    auto add_state2(std::shared_ptr<State> new_state) -> std::shared_ptr<State>;
 };
 
 /*
@@ -655,7 +655,7 @@ struct GetYaccGrammarOutput
 struct StateArray
 {
   public:
-    std::vector<State*> state_list = {};
+    std::vector<std::shared_ptr<State>> state_list = {};
 
     // each cell is for a state, index is state_no.
     std::vector<std::shared_ptr<Conflict>> conflict_list = {};
@@ -670,7 +670,10 @@ struct StateArray
 
     static auto create() -> std::shared_ptr<StateArray>;
     static void expand(StateArray* array, size_t new_size);
-    inline void add_state(State* s) noexcept { this->state_list.push_back(s); }
+    inline void add_state(std::shared_ptr<State> s) noexcept
+    {
+        this->state_list.push_back(s);
+    }
 };
 
 struct NewStates
@@ -692,7 +695,34 @@ struct NewStates
     void write_grammar_conflict_list(std::ostream& os) const noexcept;
     /// Used when USE_REMOVE_UNIT_PROD is used.
     void write_grammar_conflict_list2(std::ostream& os) const noexcept;
-    void insert_state_to_pm(State* s) noexcept;
+    void insert_state_to_pm(std::shared_ptr<State> s) noexcept;
+};
+
+class StateHashTable
+{
+  private:
+    constexpr static size_t SHT_SIZE = 997;
+    using Bucket = std::list<std::shared_ptr<State>>;
+
+    std::array<Bucket, SHT_SIZE> data;
+
+    [[nodiscard]] static auto get_value(const State& s) noexcept -> size_t;
+
+  public:
+    explicit StateHashTable() = default;
+    ~StateHashTable() = default;
+    StateHashTable(const StateHashTable&) = delete;
+    StateHashTable(StateHashTable&&) = delete;
+    auto operator=(const StateHashTable&) -> StateHashTable& = delete;
+    auto operator=(StateHashTable&&) -> StateHashTable& = delete;
+
+    void init() noexcept;
+    [[nodiscard]] auto search_same_state(std::shared_ptr<State> s)
+      -> std::shared_ptr<State>;
+    [[nodiscard]] auto search(const std::shared_ptr<State>& s,
+                              YAlgorithm& y_algorithm) noexcept
+      -> std::pair<std::shared_ptr<State>, bool>;
+    void dump(std::ostream& os) const noexcept;
 };
 
 /// Runs the LR(0) algorithm.
@@ -719,17 +749,24 @@ class LR0
       options; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
     NewStates&
       new_states; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+                  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     size_t n_state_opt1 = 0;
 
+  protected:
+    StateHashTable
+      state_hash_table{}; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+
   private:
-    void transition_lr0(State* s) noexcept;
+    void add_transition_states2_new_lr0(StateCollection* coll,
+                                        std::shared_ptr<State> src_state);
+    void transition_lr0(std::shared_ptr<State> s) noexcept;
     void output_parsing_table() noexcept;
     void insert_reduction_to_parsing_table_lr0(const Configuration* c,
                                                int state_no);
-    void output_parsing_table_row(const State* s);
+    void output_parsing_table_row(std::shared_ptr<const State> s);
     void insert_reduction_to_parsing_table_lalr(const Configuration* c,
                                                 int state_no);
-    void output_parsing_table_row_lalr(const State* s);
+    void output_parsing_table_row_lalr(std::shared_ptr<const State>);
 };
 
 class YAlgorithm : public LR0
@@ -751,6 +788,8 @@ class YAlgorithm : public LR0
     void remove_unit_production();
     void further_optimization();
     void show_stat(std::ostream& os) const noexcept;
+    auto combine_compatible_states(std::shared_ptr<State> s_dest,
+                                   const State& s_src) -> bool;
 
   protected:
     // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -760,9 +799,8 @@ class YAlgorithm : public LR0
     // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     size_t n_state_opt123 = 0;
 
-    void get_state_closure(State& state);
-    void state_transition(State& state);
-    auto search_state_hash_tbl(State& s, bool* is_compatible) -> State*;
+    void get_state_closure(std::shared_ptr<State> state);
+    void state_transition(std::shared_ptr<State> state);
 
   private:
     std::ofstream& fp_v;
@@ -773,9 +811,8 @@ class YAlgorithm : public LR0
     void insert_reduction_to_parsing_table(const Configuration* c,
                                            int state_no);
     void propagate_context_change(const State& s);
-    auto combine_compatible_states(State& s_dest, const State& s_src) -> bool;
-    auto add_transition_states2_new(StateCollection* coll, State* src_state)
-      -> bool;
+    auto add_transition_states2_new(StateCollection* coll,
+                                    std::shared_ptr<State> rc_state) -> bool;
 
     /// In `upe.cpp`
     void remove_unit_production_step1and2(
@@ -787,6 +824,7 @@ class YAlgorithm : public LR0
     void insert_actions_of_combined_states(int new_state,
                                            int src_state,
                                            std::vector<int>& old_states);
+    void show_state_config_info(std::ostream& os) const noexcept;
 };
 
 /* Variables for parsing table. */
@@ -842,8 +880,6 @@ create_config(const Grammar& grammar,
               int marker,
               uint is_core_config) -> Configuration*;
 extern auto
-create_state() -> State*;
-extern auto
 is_goal_symbol(const Grammar& grammar,
                std::shared_ptr<const SymbolTableNode> snode) -> bool;
 extern auto
@@ -880,16 +916,16 @@ is_empty_production(const Grammar& grammar, const Configuration* c) -> bool;
 extern auto
 add_symbol2_context(std::shared_ptr<SymbolTableNode> snode, Context* c) -> bool;
 extern auto
-is_compatible_successor_config(const State* s, int rule_id)
-  -> std::optional<size_t>;
+is_compatible_successor_config(const std::shared_ptr<const State>& s,
+                               int rule_id) -> std::optional<size_t>;
 extern void
 copy_config(Configuration* c_dest, const Configuration* c_src);
 extern void
 add_core_config2_state(const Grammar& grammar,
-                       State* s,
+                       std::shared_ptr<State>,
                        Configuration* new_config);
 extern void
-add_successor(State& s, State* n);
+add_successor(std::shared_ptr<State>& s, std::shared_ptr<State> n);
 extern void
 expand_parsing_table(StateArray& states_new_array);
 extern auto
@@ -897,7 +933,7 @@ get_theads(const Grammar& grammar, SymbolNode*) -> SymbolNode*;
 extern void
 show_theads(SymbolList alpha, SymbolList theads);
 extern auto
-find_similar_core_config(const State* t,
+find_similar_core_config(const std::shared_ptr<const State>& t,
                          const Configuration* c,
                          size_t* config_index) -> Configuration*;
 extern void
@@ -923,7 +959,7 @@ print_parsing_table(std::ostream& os,
                     const Grammar& grammar); // for DEBUG use.
 
 extern auto
-has_common_core(State* s1, State* s2) -> bool;
+has_common_core(std::shared_ptr<State> s1, std::shared_ptr<State> s2) -> bool;
 extern auto
 combine_context(Context* c_dest, const Context* c_src) -> bool;
 extern void
@@ -1042,19 +1078,6 @@ extern auto
 insert_inc_symbol_list(SymbolList a, std::shared_ptr<SymbolTableNode> n)
   -> SymbolNode*;
 
-/* functions in state_hash_table.c */
-extern void
-init_state_hash_tbl();
-extern auto
-search_state_hash_tbl(const Grammar& grammar,
-                      std::optional<Queue>& config_queue,
-                      State& s,
-                      bool* is_compatible) -> State*;
-extern auto
-search_same_state_hash_tbl(State& s) -> State*;
-extern void
-state_hash_tbl_dump(std::ostream& os);
-
 /*
  * For use by get_yacc_grammar.cpp and gen_compiler.cpp
  */
@@ -1087,7 +1110,7 @@ create_state_collection() -> StateCollection*;
 extern auto
 find_state_for_scanned_symbol(const StateCollection* c,
                               std::shared_ptr<const SymbolTableNode> symbol)
-  -> State*;
+  -> std::shared_ptr<State>;
 
 /* list of inadequate states for lane-tracing. */
 
@@ -1127,8 +1150,3 @@ extern auto
 get_contexts_generated(SymbolList list, bool* null_possible) -> SymbolList;
 extern auto
 combine_context_list(SymbolList list, SymbolList new_list) -> SymbolNode*;
-
-/*
- * When this is true, transition occurs only on conflicting contexts.
- */
-extern bool in_lanetracing;
