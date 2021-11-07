@@ -77,10 +77,6 @@ init_parsing_table();
 static void
 destroy_state_collection(StateCollection* c);
 static void
-free_production(Production* p);
-static void
-clear_production(Production* p);
-static void
 free_config(Configuration* c);
 static auto
 is_compatible_config(const Configuration* c1, const Configuration* c2) -> bool;
@@ -932,31 +928,6 @@ free_context(Context* c)
         return;
     c->clear();
     delete c;
-}
-
-void
-clear_production(Production* p)
-{
-    if (p == nullptr)
-        return;
-    if (p->nLHS != nullptr)
-        delete p->nLHS;
-    if (p->nRHS_head != nullptr) {
-        SymbolNode* a = p->nRHS_head;
-        p->nRHS_head = nullptr;
-        while (a != nullptr) {
-            SymbolNode* b = a->next;
-            free_symbol_node(a);
-            a = b;
-        }
-    }
-}
-
-void
-free_production(Production* p)
-{
-    clear_production(p);
-    delete p;
 }
 
 void
@@ -3000,7 +2971,7 @@ lr1(const FileNames& files, const Options& options, NewStates& new_states)
         print_parsing_table(fp_v, y_algorithm.grammar);
 
     if (options.use_graphviz && !options.use_remove_unit_production) {
-        gen_graphviz_input(y_algorithm.grammar, files.y_gviz);
+        gen_graphviz_input(y_algorithm.grammar, files.y_gviz, options);
     } /*O0,O1*/
 
     if (options.use_remove_unit_production) {
@@ -3038,7 +3009,7 @@ lr1(const FileNames& files, const Options& options, NewStates& new_states)
               fp_v, false, options.use_remove_unit_production);
         }
         if (options.use_graphviz) {
-            gen_graphviz_input2(y_algorithm.grammar, files.y_gviz);
+            gen_graphviz_input2(y_algorithm.grammar, files.y_gviz, options);
         } /*O2,O3*/
     }
     get_final_state_list(y_algorithm.grammar);
@@ -3102,7 +3073,8 @@ lr0(const FileNames& files, const Options& options, NewStates& new_states)
         print_parsing_table(fp_v, lane_tracing_algorithm.grammar);
 
     if (options.use_graphviz && !options.use_remove_unit_production) {
-        gen_graphviz_input(lane_tracing_algorithm.grammar, files.y_gviz);
+        gen_graphviz_input(
+          lane_tracing_algorithm.grammar, files.y_gviz, options);
     } /*O0,O1*/
 
     if (options.use_remove_unit_production) {
@@ -3140,7 +3112,8 @@ lr0(const FileNames& files, const Options& options, NewStates& new_states)
               fp_v, false, options.use_remove_unit_production);
         }
         if (options.use_graphviz) {
-            gen_graphviz_input2(lane_tracing_algorithm.grammar, files.y_gviz);
+            gen_graphviz_input2(
+              lane_tracing_algorithm.grammar, files.y_gviz, options);
         } /*O2,O3*/
     }
     get_final_state_list(lane_tracing_algorithm.grammar);

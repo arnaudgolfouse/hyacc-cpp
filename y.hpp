@@ -286,7 +286,7 @@ class Queue
     constexpr static size_t QUEUE_INIT_SIZE = 256; // hidden from outside
     constexpr static bool DEBUG_QUEUE = false;
 
-    void shrink();
+    void set_start_to_0();
     [[nodiscard]] inline auto get_no_check(size_t i) const noexcept -> size_t
     {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
@@ -1096,10 +1096,12 @@ extern const std::string_view STR_ERROR;
 /* function in gen_graphviz.c */
 extern void
 gen_graphviz_input(const Grammar& grammar,
-                   const std::string& y_gviz); /* For O0, O1 */
+                   const std::string& y_gviz,
+                   const Options& options); /* For O0, O1 */
 extern void
 gen_graphviz_input2(const Grammar& grammar,
-                    const std::string& y_gviz); /* For O2, O3 */
+                    const std::string& y_gviz,
+                    const Options& options); /* For O2, O3 */
 
 /* functions in lr0.c */
 extern auto
