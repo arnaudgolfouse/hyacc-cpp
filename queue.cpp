@@ -131,9 +131,11 @@ void
 Queue::set_start_to_0()
 {
     if (this->start != 0) {
-        for (size_t i = 0; i < this->size(); i++) {
+        const size_t size = this->size();
+        for (size_t i = 0; i < size; i++) {
             this->array[i] = this->array[i + this->start];
         }
+        this->array.resize(size);
         this->start = 0;
     }
 }

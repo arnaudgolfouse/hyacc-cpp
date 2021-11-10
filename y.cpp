@@ -1249,7 +1249,7 @@ YAlgorithm::get_state_closure(std::shared_ptr<State> state)
     if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
         // config_queue->clear();
         for (size_t i = 0; i < state->config.size(); i++) {
-            config_queue->push(i);
+            this->config_queue->push(i);
         }
         get_config_successors(this->grammar, *this->config_queue, state);
     } else {
