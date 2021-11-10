@@ -39,21 +39,20 @@
 /** For (conflict_config, lane_end_config) pairs. */
 ConfigPairList lane_head_tail_pairs;
 
-static void
-print_int(void* object)
+inline void
+print_int(const int& object)
 {
-    std::cout << *static_cast<int*>(object) << std::endl;
+    std::cout << object << std::endl;
 }
-static void
-print_string(void* object)
+inline void
+print_string(char const* const& object)
 {
-    std::cout << static_cast<const char*>(object) << std::endl;
+    std::cout << object << std::endl;
 }
-void
-print_symbol_list(void* object)
+inline void
+print_symbol_list(const SymbolList& object)
 {
-    auto* n = static_cast<SymbolNode*>(object);
-    write_symbol_list(n, "");
+    write_symbol_list(object, "");
 }
 static void
 print_cfg_ctxt(void* object)
@@ -63,70 +62,15 @@ print_cfg_ctxt(void* object)
 
     auto* cc = static_cast<CfgCtxt*>(object);
     auto* c = cc->c;
-    auto* n = cc->ctxt;
+    const SymbolList& n = cc->ctxt;
 
     if (c == nullptr) {
         std::cout << "c is nullptr" << std::endl;
         return;
     }
-    if (n == nullptr) {
-        std::cout << "n is nullptr" << std::endl;
-        return;
-    }
 
     std::cout << c->owner->state_no << "." << c->ruleID << ": ";
     write_symbol_list(n, "");
-}
-
-static void
-test_int()
-{
-    Set* s = nullptr;
-    int i = 1, j = 2, k = 3;
-
-    std::cout << "test_int" << std::endl;
-    s = set_insert(s, (void*)&i);
-
-    set_dump(s, &print_int);
-    s = set_insert(s, (void*)&j);
-    s = set_insert(s, (void*)&k);
-    s = set_delete(s, (void*)&i);
-    s = set_delete(s, (void*)&j);
-    set_dump(s, &print_int);
-}
-
-static void
-test_str()
-{
-    Set* s = nullptr;
-    const char* s1 = "s1";
-    const char* s2 = "s2";
-    const char* s3 = "s3";
-    std::cout << "test_str" << std::endl;
-
-    s = set_insert(s, (void*)s1);
-    s = set_insert(s, (void*)s2);
-    s = set_insert(s, (void*)s3);
-    s = set_delete(s, (void*)s3);
-    set_dump(s, &print_string);
-}
-
-static void
-test_lrk_theads(const Grammar& grammar)
-{
-    std::cout << "test_lrk_theads(), on G_thead." << std::endl;
-    SymbolList alpha = SymbolNode::create(hash_tbl_find("X"));
-    SymbolNode* t = alpha;
-    t->next = SymbolNode::create(hash_tbl_find("Y"));
-    t = t->next;
-    t->next = SymbolNode::create(hash_tbl_find("Z"));
-    t = t->next;
-    t->next = SymbolNode::create(hash_tbl_find("U"));
-    t = t->next;
-
-    std::shared_ptr<List> th = lrk_theads(grammar, alpha, 2);
-    th->dump(&print_symbol_list);
-    exit(0);
 }
 
 static void
@@ -139,29 +83,6 @@ dump_conflict_list(const Conflict* c)
     }
 }
 
-// return the length of the symbollist.
-auto
-get_lrk_theads_len(SymbolList s) -> int
-{
-    int len = 0;
-    for (SymbolNode* t = s; t != nullptr; t = t->next) {
-        len++;
-    }
-    return len;
-}
-
-// return the last symbol node.
-auto
-get_last_symbol(SymbolList s) -> SymbolNode*
-{
-    SymbolNode* t = nullptr;
-    if (nullptr == s)
-        return nullptr;
-    for (t = s; t->next != nullptr; t = t->next) {
-    }
-    return t;
-}
-
 static auto
 get_start_config_from_tail(Configuration* c) -> Configuration*
 {
@@ -171,30 +92,20 @@ get_start_config_from_tail(Configuration* c) -> Configuration*
     return n->start;
 }
 
-//
-// If configuration cc->c is not in set, insert cc to set.
-// Otherwise, compare cc->ctxt symbol list and add in new symbols
-// to the object in set.
-//
-static auto
-insert_cfg_ctxt_to_set(CfgCtxt* cc, Set* st) -> Set*
+/// If configuration cc->c is not in set, insert cc to set.
+/// Otherwise, compare cc->ctxt symbol list and add in new symbols
+/// to the object in set.
+static void
+insert_cfg_ctxt_to_set(const std::shared_ptr<CfgCtxt> cc,
+                       Set<std::shared_ptr<CfgCtxt>>& st)
 {
-    if (st == nullptr) {
-        st = set_insert(st, (void*)cc);
-        return st;
-    }
-
-    for (ObjectItem* o = st; o != nullptr; o = o->next) {
-        auto* s = static_cast<CfgCtxt*>(o->object);
+    for (auto& s : st.inner) {
         if (s->c == cc->c) {
-            s->ctxt = combine_inc_symbol_list(s->ctxt, cc->ctxt);
-            return st;
+            combine_inc_symbol_list(s->ctxt, cc->ctxt);
         }
     }
-
     // now o is nullptr
-    st = set_insert(st, (void*)cc);
-    return st;
+    st.insert(cc);
 }
 
 /// Note that dummy is set_c2. Use it as global variable instead of passed in
@@ -203,14 +114,14 @@ insert_cfg_ctxt_to_set(CfgCtxt* cc, Set* st) -> Set*
 /// Insert c->ruleID to entry col at LR(MAX_K) table row (state_no, token).
 /// for each token in token_list (context list).
 /// @param lrk_pt_array LR(k) parsing table array.
-static auto
+static void
 insert_lrk_pt(LRkPTArray& lrk_pt_array,
-              int state_no,
-              SymbolNode* token_list,
-              std::shared_ptr<SymbolTableNode> col,
+              const int state_no,
+              const SymbolList token_list,
+              const std::shared_ptr<SymbolTableNode> col,
               Configuration* c,
               Configuration* c_tail,
-              Set* set_c2) -> Set*
+              Set<std::shared_ptr<CfgCtxt>>& set_c2)
 {
     LRkPT* pt = lrk_pt_array.get(MAX_K); // LR(k) parsing table where k = MAX_K.
     bool exist = false;
@@ -221,33 +132,31 @@ insert_lrk_pt(LRkPTArray& lrk_pt_array,
         lrk_pt_array.add(pt);
     }
 
-    for (SymbolNode* token = token_list; token != nullptr;
-         token = token->next) {
-        ConfigPairNode* c0 = pt->get_entry(state_no, token->snode, col, &exist);
+    for (const SymbolNode& token : token_list) {
+        ConfigPairNode* c0 = pt->get_entry(state_no, token.snode, col, &exist);
         if (exist == false || c0 == nullptr) { // no conflict.
-            pt->add_reduction(state_no, token->snode, col, c, c_tail);
+            pt->add_reduction(state_no, token.snode, col, c, c_tail);
         } else { // exist is true, and c0 != nullptr.
-            CfgCtxt* cc = CfgCtxt::create(c, SymbolNode::create(col), c_tail);
-            set_c2 = insert_cfg_ctxt_to_set(cc, set_c2);
+            SymbolList list;
+            list.emplace_back(col);
+            auto cc = std::make_shared<CfgCtxt>(c, list, c_tail);
+            insert_cfg_ctxt_to_set(cc, set_c2);
             if (reinterpret_cast<uintptr_t>(c0->end) == CONST_CONFLICT_SYMBOL) {
                 // do nothing.
             } else {
-                cc =
-                  CfgCtxt::create(c0->start, SymbolNode::create(col), c0->end);
-                set_c2 = insert_cfg_ctxt_to_set(cc, set_c2);
+                cc = std::make_shared<CfgCtxt>(c0->start, list, c0->end);
+                insert_cfg_ctxt_to_set(cc, set_c2);
                 // set this entry to CONST_CONFLICT_SYMBOL.
-                pt->add_reduction(state_no, token->snode, col, c, c_tail);
+                pt->add_reduction(state_no, token.snode, col, c, c_tail);
             }
         }
     }
-
-    return set_c2;
 }
 
 void
 LaneTracing::lrk_config_lane_tracing(Configuration* c) noexcept
 {
-    EDGE_PUSHING_CONTEXT_GENERATED = nullptr;
+    EDGE_PUSHING_CONTEXT_GENERATED.clear();
     IN_EDGE_PUSHING_LANE_TRACING = true;
     this->lane_tracing_reduction(c);
 
@@ -272,19 +181,18 @@ static auto
 get_config_conflict_context(Configuration* c,
                             const StateArray& states_new_array) -> SymbolList
 {
-    SymbolNode* ret_list = nullptr;
+    SymbolList ret_list{};
 
-    if (nullptr == c)
+    if (c == nullptr)
         return ret_list;
 
-    std::shared_ptr<Conflict> n =
-      states_new_array.conflict_list[c->owner->state_no];
+    std::shared_ptr<const Conflict> n =
+      states_new_array[c->owner->state_no].conflict;
     for (; n != nullptr; n = n->next) {
         if (n->r < 0 && n->s < 0) { // is r/r conflict.
-            for (SymbolList contxt = c->context->nContext; contxt != nullptr;
-                 contxt = contxt->next) {
-                if (n->lookahead == contxt->snode) {
-                    ret_list = insert_inc_symbol_list(ret_list, n->lookahead);
+            for (const auto& contxt : c->context->context) {
+                if (n->lookahead == contxt.snode) {
+                    insert_inc_symbol_list(ret_list, n->lookahead);
                 }
             }
         }
@@ -296,33 +204,25 @@ get_config_conflict_context(Configuration* c,
     return ret_list;
 }
 
-static auto
+static void
 fill_set_c2(LRkPTArray& lrk_pt_array,
             ConfigPairNode* n,
             const Configuration* c,
             Configuration* c_tail,
-            int k1,
-            Set* set_c2,
-            int state_no,
-            CfgCtxt* cc) -> Set*
+            const int k1,
+            Set<std::shared_ptr<CfgCtxt>>& set_c2,
+            const int state_no,
+            const CfgCtxt* cc)
 {
     // n->start is the next level lane head.
     n->start->z = c->z + k1 - 1;
     std::cout << "next level lane head: " << n->start->owner->state_no << "."
               << n->start->ruleID << ". z = " << c->z << " + " << k1
               << " - 1 = " << n->start->z << std::endl;
-    SymbolNode* sn = EDGE_PUSHING_CONTEXT_GENERATED;
-    for (; sn != nullptr; sn = sn->next) {
-        set_c2 = insert_lrk_pt(lrk_pt_array,
-                               state_no,
-                               cc->ctxt,
-                               sn->snode,
-                               n->start,
-                               c_tail,
-                               set_c2);
+    for (const auto& sn : EDGE_PUSHING_CONTEXT_GENERATED) {
+        insert_lrk_pt(
+          lrk_pt_array, state_no, cc->ctxt, sn.snode, n->start, c_tail, set_c2);
     }
-
-    return set_c2;
 }
 
 /*
@@ -331,16 +231,16 @@ fill_set_c2(LRkPTArray& lrk_pt_array,
 void
 LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, int state_no)
 {
-    CfgCtxt* cc = nullptr;
+    std::shared_ptr<CfgCtxt> cc = nullptr;
     std::shared_ptr<const State> s =
-      this->new_states.states_new_array->state_list[state_no];
+      this->new_states.states_new_array[state_no].state;
     if (s == nullptr)
         return;
 
     std::cout << "\nedge_pushing on state " << state_no << std::endl;
 
-    Set* set_c = nullptr;
-    Set* set_c2 = nullptr;
+    Set<std::shared_ptr<CfgCtxt>> set_c{};
+    Set<std::shared_ptr<CfgCtxt>> set_c2{};
     int k = 1;
     // note, need to get conflict symbols for each final config also.
 
@@ -349,22 +249,21 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, int state_no)
         if (is_final_configuration(this->grammar, c)) {
             // check if this final config's context contains conflict symbol,
             // if so add it to set_c, together with the conflict symbol(s).
-            cc = CfgCtxt::create(get_start_config_from_tail(c),
-                                 get_config_conflict_context(
-                                   c, *this->new_states.states_new_array),
-                                 c);
+            cc = std::make_shared<CfgCtxt>(
+              get_start_config_from_tail(c),
+              get_config_conflict_context(c, this->new_states.states_new_array),
+              c);
             c->z = 0;
-            set_c = set_insert(set_c, (void*)cc);
+            set_c.insert(cc);
         }
     }
 
-    while (set_c != nullptr) {
+    while (!set_c.inner.empty()) {
         k++;
         MAX_K = k; // K for LR(K).
         std::cout << "while loop: k = " << k << std::endl;
 
-        for (ObjectItem* si = set_c; si != nullptr; si = si->next) {
-            cc = static_cast<CfgCtxt*>(si->object);
+        for (const auto& cc : set_c.inner) {
             Configuration* c = cc->c;
             if (nullptr == c) {
                 std::cout << "? c is nullptr";
@@ -374,28 +273,28 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, int state_no)
 
             int k1 = k - c->z; ///////////!!!!!!!!
 
-            if (c->nMarker == nullptr) {
-                std::cout << "Error: c->nMarker is nullptr. " << std::endl;
+            if (c->nMarker.empty()) {
+                std::cout << "Error: c->nMarker is empty. " << std::endl;
                 continue;
             }
+            // TODO: lrk_theads takes c->nMarker.next...
             std::shared_ptr<List> phi =
-              lrk_theads(this->grammar, c->nMarker->next, k1);
+              lrk_theads(this->grammar, c->nMarker, k1);
             if (phi == nullptr) {
                 // std::cout << "phi is nullptr. should not!" << std::endl;
                 continue;
             }
 
-            for (ObjectItem* x = phi->head; x != nullptr; x = x->next) {
-                auto* x_str = static_cast<SymbolList>(x->object);
-                int x_len = get_lrk_theads_len(x_str);
+            for (auto& x_str : phi->inner) {
+                int x_len = static_cast<int>(x_str.size());
                 if (x_len == k1) {
-                    set_c2 = insert_lrk_pt(lrk_pt_array,
-                                           state_no,
-                                           cc->ctxt,
-                                           get_last_symbol(x_str)->snode,
-                                           c,
-                                           c_tail,
-                                           set_c2);
+                    insert_lrk_pt(lrk_pt_array,
+                                  state_no,
+                                  cc->ctxt,
+                                  x_str.back().snode,
+                                  c,
+                                  c_tail,
+                                  set_c2);
                 } else if (x_len == k1 - 1) {
                     ConfigPairNode* n =
                       ConfigPairNode::list_find(lane_head_tail_pairs, c);
@@ -405,14 +304,14 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, int state_no)
                         for (; n != nullptr; n = n->next) {
                             if (c != n->end)
                                 break;
-                            set_c2 = fill_set_c2(lrk_pt_array,
-                                                 n,
-                                                 c,
-                                                 c_tail,
-                                                 k1,
-                                                 set_c2,
-                                                 state_no,
-                                                 cc);
+                            fill_set_c2(lrk_pt_array,
+                                        n,
+                                        c,
+                                        c_tail,
+                                        k1,
+                                        set_c2,
+                                        state_no,
+                                        cc.get());
                         }
                     } else {
                         ConfigPairNode* tmp =
@@ -422,14 +321,14 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, int state_no)
                         for (ConfigPairNode* n = lane_head_tail_pairs;
                              n != nullptr;
                              n = n->next) {
-                            set_c2 = fill_set_c2(lrk_pt_array,
-                                                 n,
-                                                 c,
-                                                 c_tail,
-                                                 k1,
-                                                 set_c2,
-                                                 state_no,
-                                                 cc);
+                            fill_set_c2(lrk_pt_array,
+                                        n,
+                                        c,
+                                        c_tail,
+                                        k1,
+                                        set_c2,
+                                        state_no,
+                                        cc.get());
                         }
                         // now combine the two list.
                         if (nullptr == lane_head_tail_pairs) {
@@ -445,7 +344,7 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, int state_no)
         }
 
         set_c = set_c2;
-        set_c2 = nullptr;
+        set_c2.inner.clear();
     }
 }
 
@@ -457,17 +356,17 @@ remove_rr_conflict_from_list(size_t state_no, NewStates& new_states)
 {
     std::shared_ptr<Conflict> c_prev = nullptr;
     std::shared_ptr<Conflict>& c =
-      new_states.states_new_array->conflict_list[state_no];
+      new_states.states_new_array[state_no].conflict;
     while (nullptr != c) {
         if (c->r < 0 && c->s < 0) {  // remove this node.
             if (c_prev == nullptr) { // remove at head.
-                new_states.states_new_array->conflict_list[state_no] = c->next;
-                c = new_states.states_new_array->conflict_list[state_no];
+                new_states.states_new_array[state_no].conflict = c->next;
+                c = new_states.states_new_array[state_no].conflict;
             } else { // remove in the middle.
                 c_prev->next = c->next;
                 c = c_prev->next;
             }
-            new_states.states_new_array->rr_count[state_no]--;
+            new_states.states_new_array[state_no].rr_count--;
             new_states.conflicts_count.rr--;
             continue;
         }
@@ -476,7 +375,7 @@ remove_rr_conflict_from_list(size_t state_no, NewStates& new_states)
     }
 
     // if list is empty, remove this conflict.
-    if (new_states.states_new_array->conflict_list[state_no] == nullptr) {
+    if (new_states.states_new_array[state_no].conflict == nullptr) {
         for (int& state : states_inadequate->states) {
             if (static_cast<int>(state_no) == state) {
                 state = -1;
@@ -495,7 +394,7 @@ static void
 update_lr1_parsing_table(size_t state_no, NewStates& new_states)
 {
     for (std::shared_ptr<Conflict> c =
-           new_states.states_new_array->conflict_list[state_no];
+           new_states.states_new_array[state_no].conflict;
          c != nullptr;
          c = c->next) {
         update_action(get_col(*c->lookahead),
@@ -520,7 +419,7 @@ LaneTracing::lane_tracing_lrk() -> std::optional<LRkPTArray>
     ConfigPairNode::list_dump(lane_head_tail_pairs);
 
     for (const int state_no : states_inadequate->states) {
-        int ct_rr = this->new_states.states_new_array->rr_count[state_no];
+        size_t ct_rr = this->new_states.states_new_array[state_no].rr_count;
 
         if (state_no >= 0 && ct_rr > 0) {
             this->edge_pushing(lrk_pt_array, state_no);

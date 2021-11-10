@@ -195,6 +195,12 @@ struct SymbolTableNode
     {
         return this->type == symbol_type::NONTERMINAL;
     }
+    /// Given a SymbolTableNode, returns whether it is vanishable.
+    [[nodiscard]] constexpr inline auto is_vanish_symbol() const noexcept
+      -> bool
+    {
+        return this->vanishable;
+    }
     void init_terminal_property()
     {
         this->TP = new TerminalProperty;
@@ -214,17 +220,17 @@ struct HashTblNode
 constexpr size_t HT_SIZE = 997; /* should be a prime. */
 extern std::array<HashTblNode, HT_SIZE> HashTbl;
 
-/* used in other data structures. */
-using SymbolNode = struct SymNode;
-struct SymNode
+/// used in other data structures.
+struct SymbolNode
 {
     std::shared_ptr<SymbolTableNode> snode;
-    SymNode* next;
 
-    static auto create(std::shared_ptr<SymbolTableNode> sn) -> SymbolNode*;
+    explicit SymbolNode(std::shared_ptr<SymbolTableNode> snode)
+      : snode(std::move(snode))
+    {}
 };
 
-using SymbolList = SymbolNode*;
+using SymbolList = std::list<SymbolNode>;
 
 //////////////////////////////////
 // For queue used by getClosure()
@@ -316,12 +322,9 @@ constexpr bool USE_REM_FINAL_STATE = true;
 /* Context of a configuration. */
 struct Context
 {
-    SymbolList nContext = nullptr;
-    int context_count = 0;
+    SymbolList context{};
 
-    /*
-     * Empty a context.
-     */
+    /// Empty a context.
     void clear();
     friend auto operator<<(std::ostream& os, const Context& dt)
       -> std::ostream&;
@@ -330,10 +333,9 @@ struct Context
 /* Production of a configuration, or rule of a grammar. */
 struct Production
 {
-    SymbolNode* nLHS;
-    SymbolList nRHS_head;
-    SymbolNode* nRHS_tail;
-    int RHS_count;
+    std::shared_ptr<SymbolNode> nLHS;
+    // TODO: use a vector instead.
+    SymbolList nRHS;
     unsigned int isUnitProduction : 1; // 1 - true, 0 - false
     unsigned int hasCode : 1; // has associated code: 1 - true, 0 -false
     unsigned int padding : 30;
@@ -371,9 +373,9 @@ using TransitorList = OriginatorList;
 using Configuration = struct ConfigurationNode;
 struct ConfigurationNode
 {
-    int ruleID;          // index of rule in grammar.rules[].
-    SymbolNode* nMarker; // point to scanned symbol.
-    int marker;          // redundant to nMarker, but make processing easier.
+    int ruleID;         // index of rule in grammar.rules[].
+    SymbolList nMarker; // point to scanned symbol.
+    int marker;         // redundant to nMarker, but make processing easier.
     Context* context;
     std::shared_ptr<struct StateNode> owner;
 
@@ -456,7 +458,7 @@ struct StateNode
     size_t core_config_count;
 
     int state_no;
-    SymbolNode* trans_symbol;
+    std::shared_ptr<SymbolNode> trans_symbol;
 
     std::shared_ptr<StateList> parents_list;
 
@@ -496,14 +498,12 @@ struct Grammar
     {}
 
     std::vector<Production*> rules{};
-    SymbolNode* goal_symbol{};
+    std::shared_ptr<SymbolNode> goal_symbol{ nullptr };
     SymbolList terminal_list{};
-    int terminal_count{};
     SymbolList non_terminal_list{};
-    int non_terminal_count{};
     SymbolList vanish_symbol_list{};
-    int vanish_symbol_count{};
     std::ofstream& fp_v;
+    SymbolList tokens{};
 
     /*
      * Write rules of the given grammar.
@@ -614,7 +614,6 @@ struct GetYaccGrammarOutput
     /// Output of `process_yacc_file_input_section1`.
     struct Section1Output
     {
-        SymbolNode* tokens_tail;
         std::shared_ptr<SymbolTableNode> start_symbol;
     };
 
@@ -625,8 +624,7 @@ struct GetYaccGrammarOutput
                                           const uint32_t expected_sr_conflict)
       -> Section1Output;
     /// Processes section 2 (grammar section) of a yacc input file.
-    void process_yacc_file_input_section2(SymbolNode* tokens_tail,
-                                          std::ifstream& fp);
+    void process_yacc_file_input_section2(std::ifstream& fp);
 
     /// Outputs a new symbol and inserts it to the LHS or RHS
     /// of a rule of the grammar.
@@ -644,41 +642,35 @@ struct GetYaccGrammarOutput
     /// be delcared in section 1.
     ///
     /// Empty string is not allowed.
-    auto output_nonterminal(SymbolNode* tokens_tail,
-                            YACC_STATE state,
+    auto output_nonterminal(YACC_STATE state,
                             bool& is_prec,
                             const YACC_STATE yacc_sec2_state)
       -> std::shared_ptr<SymbolTableNode>;
 };
 
-/* for indexed access of states_new states */
-struct StateArray
+struct StateArrayElement
+{
+    std::shared_ptr<State> state;
+    std::shared_ptr<Conflict> conflict;
+    size_t rs_count;
+    size_t rr_count;
+};
+
+/// for indexed access of states_new states
+struct StateArray : std::vector<StateArrayElement>
 {
   public:
-    std::vector<std::shared_ptr<State>> state_list = {};
+    explicit inline StateArray() { this->reserve(PARSING_TABLE_INIT_SIZE); }
 
-    // each cell is for a state, index is state_no.
-    std::vector<std::shared_ptr<Conflict>> conflict_list = {};
-    std::vector<int> rs_count = {}; // shift/reduce conflicts count.
-    std::vector<int> rr_count = {}; // reduce/reduce conflicts count.
-
-    explicit inline StateArray()
-    {
-        this->state_list.reserve(PARSING_TABLE_INIT_SIZE);
-        this->conflict_list.reserve(PARSING_TABLE_INIT_SIZE);
-    }
-
-    static auto create() -> std::shared_ptr<StateArray>;
-    static void expand(StateArray* array, size_t new_size);
     inline void add_state(std::shared_ptr<State> s) noexcept
     {
-        this->state_list.push_back(s);
+        this->push_back(StateArrayElement{ s, nullptr, 0, 0 });
     }
 };
 
 struct NewStates
 {
-    std::shared_ptr<StateArray> states_new_array{ nullptr };
+    StateArray states_new_array{};
     StateCollection* states_new{ nullptr };
     ConflictsCount conflicts_count{};
 
@@ -687,6 +679,7 @@ struct NewStates
     ///
     /// @note no need to check size of conflict arrays,
     /// which is handled in expand_parsing_table().
+    /// TODO: this is no longer true :)
     auto add_to_conflict_array(int state,
                                std::shared_ptr<SymbolTableNode> lookahead,
                                int action1,
@@ -820,10 +813,9 @@ class YAlgorithm : public LR0
     void insert_action_of_symbol(std::shared_ptr<SymbolTableNode> symbol,
                                  int new_state,
                                  size_t old_state_index,
-                                 std::vector<int>& old_states);
+                                 const std::vector<int>& old_states);
     void insert_actions_of_combined_states(int new_state,
-                                           int src_state,
-                                           std::vector<int>& old_states);
+                                           const std::vector<int>& old_states);
     void show_state_config_info(std::ostream& os) const noexcept;
 };
 
@@ -833,8 +825,7 @@ constexpr int CONST_ACC = -10000000; /* for ACC in parsing table */
 
 extern std::atomic_size_t PARSING_TABLE_SIZE;
 extern std::vector<int> ParsingTable;
-extern int ParsingTblCols;
-extern int ParsingTblRows;
+extern size_t ParsingTblRows;
 /*
  * For parsing table column header names.
  * Value = terminal_count + non_terminal_count + 1 columns.
@@ -844,7 +835,6 @@ extern std::vector<std::shared_ptr<SymbolTableNode>> ParsingTblColHdr;
  * For final parsing table.
  */
 extern SymbolList F_ParsingTblColHdr;
-extern int F_ParsingTblCols;
 
 /*
  * Used by step 4 of remove unit production in y.c,
@@ -914,22 +904,20 @@ is_final_configuration(const Grammar& grammar, const Configuration* c) -> bool;
 extern auto
 is_empty_production(const Grammar& grammar, const Configuration* c) -> bool;
 extern auto
-add_symbol2_context(std::shared_ptr<SymbolTableNode> snode, Context* c) -> bool;
+add_symbol2_context(std::shared_ptr<SymbolTableNode> snode, Context& c) -> bool;
 extern auto
 is_compatible_successor_config(const std::shared_ptr<const State>& s,
                                int rule_id) -> std::optional<size_t>;
 extern void
-copy_config(Configuration* c_dest, const Configuration* c_src);
+copy_config(Configuration& c_dest, const Configuration& c_src);
 extern void
 add_core_config2_state(const Grammar& grammar,
                        std::shared_ptr<State>,
                        Configuration* new_config);
 extern void
 add_successor(std::shared_ptr<State>& s, std::shared_ptr<State> n);
-extern void
-expand_parsing_table(StateArray& states_new_array);
 extern auto
-get_theads(const Grammar& grammar, SymbolNode*) -> SymbolNode*;
+get_theads(const Grammar& grammar, const SymbolList& alpha) -> SymbolList;
 extern void
 show_theads(SymbolList alpha, SymbolList theads);
 extern auto
@@ -937,7 +925,7 @@ find_similar_core_config(const std::shared_ptr<const State>& t,
                          const Configuration* c,
                          size_t* config_index) -> Configuration*;
 extern void
-copy_context(Context* dest, const Context* src);
+copy_context(Context& dest, const Context& src);
 extern void
 mandatory_update_action(std::shared_ptr<SymbolTableNode> lookahead,
                         int row,
@@ -950,10 +938,13 @@ get_reachable_states(const Grammar& grammar,
                      std::vector<int>& states_reachable);
 extern void
 print_parsing_table_note(std::ostream& os);
+/// Insert snode to the list, no repetition allowed, increasing order.
+/// Do it like insertion sort.
+///
+/// @return whether snode already existed.
 extern auto
-insert_symbol_list_unique_inc(SymbolList list,
-                              std::shared_ptr<SymbolTableNode> snode,
-                              bool* exist) -> SymbolNode*;
+insert_symbol_list_unique_inc(SymbolList& list,
+                              std::shared_ptr<SymbolTableNode> snode) -> bool;
 extern void
 print_parsing_table(std::ostream& os,
                     const Grammar& grammar); // for DEBUG use.
@@ -962,8 +953,6 @@ extern auto
 has_common_core(std::shared_ptr<State> s1, std::shared_ptr<State> s2) -> bool;
 extern auto
 combine_context(Context* c_dest, const Context* c_src) -> bool;
-extern void
-get_context(const Grammar& grammar, const Configuration* cfg, Context* context);
 extern void
 write_parsing_table_col_header(std::ostream& os, const Grammar& grammar);
 
@@ -983,15 +972,6 @@ get_col(const SymbolTableNode& n) -> int
 }
 
 /*
- * Given a SymbolTableNode, returns whether it is vanishable.
- */
-constexpr inline auto
-is_vanish_symbol(const SymbolTableNode& n) -> bool
-{
-    return n.vanishable;
-}
-
-/*
  * Update the destination state of a entry in the parsing table.
  * Used by updateRepeatedRow(), remove_unit_production_step3() and
  * remove_unit_production_step1and2().
@@ -1003,7 +983,7 @@ is_vanish_symbol(const SymbolTableNode& n) -> bool
 inline void
 update_action(size_t col, size_t row, int state_dest)
 {
-    ParsingTable.at(row * ParsingTblCols + col) = state_dest;
+    ParsingTable.at(row * ParsingTblColHdr.size() + col) = state_dest;
 }
 
 /* Defined in upe.c */
@@ -1028,7 +1008,7 @@ show_manpage();
 extern auto
 get_options(std::span<const std::string_view> args,
             Options& options,
-            FileNames* files) -> int;
+            FileNames* files) -> size_t;
 
 /* Defined in gen_compiler.cpp */
 // Length is ParsingTblRows (?)
@@ -1051,38 +1031,32 @@ hash_tbl_dump(std::ostream& os);
 extern void
 hash_tbl_destroy();
 extern auto
-find_in_symbol_list(SymbolList a, std::shared_ptr<const SymbolTableNode> s)
+find_in_symbol_list(SymbolList& a, std::shared_ptr<const SymbolTableNode> s)
   -> SymbolNode*;
 extern auto
-find_in_inc_symbol_list(SymbolList a, std::shared_ptr<SymbolTableNode> s)
+find_in_inc_symbol_list(SymbolList& a, std::shared_ptr<SymbolTableNode> s)
   -> SymbolNode*;
 extern auto
-clone_symbol_list(const SymbolList a) -> SymbolList;
+clone_symbol_list(const SymbolList& a) -> SymbolList;
 extern void
 free_symbol_node(SymbolNode* n);
-extern void
-free_symbol_node_list(SymbolNode* a);
 extern auto
 create_rule_id_node(size_t rule_id) -> RuleIDNode*;
 extern void
-write_symbol_list(SymbolList a, const std::string_view name);
+write_symbol_list(const SymbolList& a, const std::string_view name);
 extern auto
-remove_from_symbol_list(SymbolList a,
-                        std::shared_ptr<SymbolTableNode> s,
-                        bool* exist) -> SymbolList;
+remove_from_symbol_list(SymbolList& a, std::shared_ptr<SymbolTableNode> s)
+  -> bool;
 extern auto
 get_symbol_list_len(SymbolList a) -> int;
-extern auto
-combine_inc_symbol_list(SymbolList a, SymbolList b) -> SymbolNode*;
-extern auto
-insert_inc_symbol_list(SymbolList a, std::shared_ptr<SymbolTableNode> n)
-  -> SymbolNode*;
+extern void
+combine_inc_symbol_list(SymbolList& a, const SymbolList& b);
+extern void
+insert_inc_symbol_list(SymbolList& a, std::shared_ptr<SymbolTableNode> n);
 
 /*
  * For use by get_yacc_grammar.cpp and gen_compiler.cpp
  */
-extern SymbolList tokens;
-extern int tokens_ct;
 
 extern void
 write_tokens();
@@ -1104,8 +1078,12 @@ gen_graphviz_input2(const Grammar& grammar,
                     const Options& options); /* For O2, O3 */
 
 /* functions in lr0.c */
+
+/// Get the scanned symbol of configuration c.
+/// The scanned symbol can be obtained by nMarker pointer
+/// as here, or by marker which needs more calculation.
 extern auto
-get_scanned_symbol(const Configuration* c)
+get_scanned_symbol(const Configuration& c)
   -> std::shared_ptr<SymbolTableNode>; // in y.c
 extern auto
 create_state_collection() -> StateCollection*;
@@ -1130,9 +1108,6 @@ extern StateNoArray* states_inadequate;
 extern auto
 create_originator_list() -> OriginatorList*;
 extern auto
-insert_originator_list(Configuration* c, Configuration* originator, int cycle)
-  -> bool;
-extern auto
 create_state_no_array() -> StateNoArray*;
 extern void
 add_state_no_array(StateNoArray* sa, int state_no);
@@ -1144,11 +1119,5 @@ is_inadequate_state(int state_no) -> bool;
 // these are used in lane_tracing.c and lrk.c only.
 extern void
 my_write_state(const Grammar& grammar, const State& s);
-extern void
-my_show_t_heads(SymbolList alpha, SymbolList theads);
 extern auto
-test_a(const SymbolNode* n) -> bool;
-extern auto
-get_contexts_generated(SymbolList list, bool* null_possible) -> SymbolList;
-extern auto
-combine_context_list(SymbolList list, SymbolList new_list) -> SymbolNode*;
+test_a(const SymbolList& n) -> bool;

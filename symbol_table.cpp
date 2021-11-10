@@ -76,9 +76,9 @@ write_non_terminal_rule_id_list(const Grammar& grammar)
 {
     int count = 0;
     std::cout << "--Nonterminal symbol rule index list--" << std::endl;
-    for (SymbolNode* a = grammar.non_terminal_list; a != nullptr; a = a->next) {
+    for (const SymbolNode& a : grammar.non_terminal_list) {
         std::cout << count++ << ": ";
-        write_rule_id_list(*a->snode);
+        write_rule_id_list(*a.snode);
     }
 }
 
@@ -100,23 +100,6 @@ destroy_rule_id_list(RuleIDNode* r)
  * Functions for SymbolNode.
  *******************************************/
 
-/*
- * Create a symbol node, used by Production, Context etc.
- */
-auto
-SymbolNode::create(std::shared_ptr<SymbolTableNode> sn) -> SymbolNode*
-{
-    if (sn == nullptr)
-        throw std::runtime_error("SymbolNode::create error: sn is nullptr\n");
-
-    SymbolNode* n = new SymbolNode;
-    if (n == nullptr)
-        throw std::runtime_error("SymbolNode::create error: out of memory\n");
-    n->snode = sn;
-    n->next = nullptr;
-    return n;
-}
-
 void
 free_symbol_node(SymbolNode* n)
 {
@@ -125,101 +108,51 @@ free_symbol_node(SymbolNode* n)
     delete n;
 }
 
-void
-free_symbol_node_list(SymbolNode* a)
-{
-    while (a != nullptr) {
-        SymbolNode* b = a->next;
-        delete a;
-        a = b;
-    }
-}
-
 auto
-find_in_symbol_list(SymbolList a,
+find_in_symbol_list(SymbolList& a,
                     const std::shared_ptr<const SymbolTableNode> s)
   -> SymbolNode*
 {
-    for (SymbolNode* b = a; b != nullptr; b = b->next) {
-        if (b->snode == s)
-            return b;
+    for (auto& b : a) {
+        if (b.snode == s) {
+            return &b;
+        }
     }
 
     return nullptr;
 }
 
+/// Given a symbol list a, returns a clone of it.
 auto
-get_symbol_list_len(SymbolList a) -> int
+clone_symbol_list(const SymbolList& a) -> SymbolList
 {
-    int len = 0;
-    for (SymbolNode* b = a; b != nullptr; b = b->next) {
-        len++;
-    }
-    return len;
-}
-
-/*
- * Given a symbol list a, returns a clone of it.
- */
-auto
-clone_symbol_list(const SymbolList a) -> SymbolList
-{
-    if (a == nullptr)
-        return nullptr;
-    SymbolNode* c = SymbolNode::create(a->snode);
-    SymbolNode* clone = c;
-    for (SymbolNode* b = a->next; b != nullptr; b = b->next) {
-        c->next = SymbolNode::create(b->snode);
-        c = c->next;
-    }
-
-    return clone;
-}
-
-/*
- * Remove s from list a.
- * @return: the new list.
- */
-auto
-remove_from_symbol_list(SymbolList a,
-                        std::shared_ptr<SymbolTableNode> s,
-                        bool* exist) -> SymbolList
-{
-    SymbolNode* b = nullptr;
-    *exist = true;
-
-    if (a->snode == s) { // is the first node.
-        b = a;
-        a = a->next;
-        free_symbol_node(b);
-        return a;
-    }
-
-    for (b = a; b->next != nullptr; b = b->next) {
-        if (b->next->snode == s) {
-            SymbolNode* tmp = b->next;
-            b->next = tmp->next;
-            free_symbol_node(tmp);
-            return a;
-        }
-    }
-
-    // b->next is nullptr. s is NOT in list a.
-    *exist = false;
     return a;
 }
 
-/*
- * Find in a sorted (INCREMENTAL) list.
- */
+/// Remove s from list a.
+/// @return `true` if `s` was found in `a`.
 auto
-find_in_inc_symbol_list(SymbolList a, std::shared_ptr<SymbolTableNode> s)
+remove_from_symbol_list(SymbolList& a, std::shared_ptr<SymbolTableNode> s)
+  -> bool
+{
+    for (auto it = a.begin(); it != a.end(); it++) {
+        if (it->snode == s) {
+            a.erase(it);
+            return true;
+        }
+    }
+    return false;
+}
+
+/// Find in a sorted (INCREMENTAL) list.
+auto
+find_in_inc_symbol_list(SymbolList& a, std::shared_ptr<SymbolTableNode> s)
   -> SymbolNode*
 {
-    for (SymbolNode* b = a; b != nullptr; b = b->next) {
-        if (b->snode == s)
-            return b;
-        if (*s->symbol > *b->snode->symbol) {
+    for (SymbolNode& b : a) {
+        if (b.snode == s)
+            return &b;
+        if (*s->symbol > *b.snode->symbol) {
             return nullptr;
         }
     }
@@ -227,42 +160,27 @@ find_in_inc_symbol_list(SymbolList a, std::shared_ptr<SymbolTableNode> s)
     return nullptr;
 }
 
-/*
- * Insert symbol n into INC list a.
- * @Return: the result list.
- */
-auto
-insert_inc_symbol_list(SymbolList a, std::shared_ptr<SymbolTableNode> n)
-  -> SymbolNode*
+/// Insert symbol n into INC list a.
+void
+insert_inc_symbol_list(SymbolList& a, std::shared_ptr<SymbolTableNode> n)
 {
-    SymbolNode *b = nullptr, *b_prev = nullptr;
-    if (n == nullptr)
-        return a;
-    if (a == nullptr)
-        return SymbolNode::create(n);
+    if (n == nullptr) {
+        return;
+    }
 
-    for (b_prev = nullptr, b = a; b != nullptr; b_prev = b, b = b->next) {
-        int cmp = n->symbol->compare(*b->snode->symbol);
-        if (cmp < 0) {               // insert after b_prev, before b.
-            if (b_prev == nullptr) { // insert at the head.
-                b_prev = SymbolNode::create(n);
-                b_prev->next = b;
-                return b_prev;
-            } // insert in the middle.
-            b_prev->next = SymbolNode::create(n);
-            b_prev->next->next = b;
-            return a;
+    for (auto it = a.begin(); it != a.end(); it++) {
+        int cmp = n->symbol->compare(*it->snode->symbol);
+        if (cmp < 0) {
+            a.emplace(it, n);
+            return;
         }
         if (cmp > 0) { // go on.
             continue;
-        } // equals. already exists.
-        return a;
+        }
+        return; // equals. already exists.
     }
 
-    // b is nullptr. insert at the end.
-    b_prev->next = SymbolNode::create(n);
-
-    return a;
+    a.emplace_back(n);
 }
 
 /*
@@ -270,64 +188,55 @@ insert_inc_symbol_list(SymbolList a, std::shared_ptr<SymbolTableNode> n)
  * Returns the head of the combined list.
  * This can be used when combining contexts.
  */
-auto
-combine_inc_symbol_list(SymbolList a, SymbolList b) -> SymbolNode*
+void
+combine_inc_symbol_list(SymbolList& a, const SymbolList& b)
 {
-    if (a == nullptr)
-        return clone_symbol_list(b);
-    if (b == nullptr)
-        return a;
+    if (a.empty())
+        a = b;
+    if (b.empty())
+        return;
 
-    SymbolNode* na_prev = nullptr;
-    SymbolNode* na = a;
-    SymbolNode* nb = b;
+    auto na = a.begin();
+    auto nb = b.begin();
 
     while (true) {
         int cmp = na->snode->symbol->compare(*nb->snode->symbol);
-        // std::cout << "strcmp(" << *na->snode->symbol << ", "
-        //           << *nb->snode->symbol << ") = " << cmp << std::endl;
         if (cmp == 0) {
-            na_prev = na;
-            na = na->next;
-            nb = nb->next;
-        } else if (cmp > 0) {         // insert b before na.
-            if (na_prev == nullptr) { // insert at the head of a.
-                na_prev = SymbolNode::create(nb->snode);
-                na_prev->next = a;
-                a = na_prev;
-            } else { // insert in the middle of list a before na.
-                na_prev->next = SymbolNode::create(nb->snode);
-                na_prev->next->next = na;
+            na++;
+            nb++;
+        } else if (cmp > 0) { // insert b before na.
+            a.insert(na, *nb);
+            nb++;
+        } else { // cmp <= 0.
+            na++;
+        }
+
+        if (na == a.end()) {
+            for (; nb != b.end(); nb++) {
+                a.push_back(*nb);
             }
-            nb = nb->next;
-        } else { // cmp < 0.
-            na_prev = na;
-            na = na->next;
-        }
-
-        if (na == nullptr) {
-            na_prev->next = clone_symbol_list(nb); // attach the rest of nb.
             break;
         }
-        if (nb == nullptr) {
+        if (nb == b.end()) {
             break;
         }
-        // writeSymbolList(a, "a");
     }
-
-    return a;
 }
 
 void
-write_symbol_list(SymbolList a, const std::string_view name)
+write_symbol_list(const SymbolList& a, const std::string_view name)
 {
-    SymbolNode* b = a;
     std::cout << name << ": ";
-    if (b != nullptr) {
-        std::cout << *b->snode->symbol;
-        for (b = b->next; b != nullptr; b = b->next) {
-            std::cout << ", " << *b->snode->symbol;
+    bool first = true;
+    for (const auto& b : a) {
+        if (first) {
+            first = false;
+        } else {
+            std::cout << ", ";
         }
+        std::cout << *b.snode->symbol;
+    }
+    if (!a.empty()) {
         std::cout << std::endl;
     }
 }

@@ -21,9 +21,12 @@
 
 #include "stack_config.hpp"
 #include "y.hpp"
+#include <any>
 #include <cstddef>
 #include <cstdint>
+#include <forward_list>
 #include <fstream>
+#include <utility>
 #include <vector>
 
 /*
@@ -210,48 +213,104 @@ trace_back_lrk(Configuration* c);
 extern void
 trace_back_lrk_clear(Configuration* c);
 
-// Set - a linked list of objects.
-struct ObjectItem
+/// Set - a linked list of objects.
+template<typename T>
+struct Set
 {
-    void* object;
-    ObjectItem* next;
-};
-using Set = ObjectItem;
-extern auto
-set_insert(Set* set, void* object) -> Set*;
-extern auto
-set_find(Set* set, void* object) -> ObjectItem*;
-extern auto
-set_delete(Set* set, void* object) -> Set*;
-extern void
-set_dump(const Set* set, void (*set_item_dump)(void*));
+    using DumpFunction = void (*)(const T&);
+    using iterator = typename std::forward_list<T>::iterator;
+    using const_iterator = typename std::forward_list<T>::const_iterator;
 
-// List - a single linked list.
+    /// Insert if not exist.
+    /// NOTE: "not exist" means the object, but if "not exist" means
+    /// the contents of the object, then a separate function should
+    /// be written for this.
+    void insert(T object)
+    {
+        auto it = this->inner.begin();
+        for (; it != this->inner.end(); it++) {
+            if (*it == object) {
+                return;
+            }
+        }
+    }
+    auto find(const T& object) const noexcept -> iterator
+    {
+        auto it = this->cbegin();
+        for (; it != this->cend();) {
+            if (*it == object) {
+                return it;
+            }
+        }
+        return it;
+    }
+    void remove(const T& object) { this->inner.remove(object); }
+    /// A function pointer is passed in. This function dumps the set item.
+    void dump(DumpFunction set_item_dump) const
+    {
+        if (this->inner.empty()) {
+            std::cout << "(set is empty)" << std::endl;
+            return;
+        }
+        for (const auto& s : this->inner) {
+            (*set_item_dump)(s);
+        }
+    }
+
+    auto begin() noexcept -> iterator { return this->inner.begin(); }
+    auto cbegin() noexcept -> const_iterator { return this->inner.cbegin(); }
+    auto end() noexcept -> iterator { return this->inner.end(); }
+    auto end() const noexcept -> const_iterator { return this->inner.end(); }
+    auto cend() const noexcept -> const_iterator { return this->inner.cend(); }
+
+    std::forward_list<T> inner;
+};
+
+/// List - a single linked list.
 struct List
 {
-    int count;
-    ObjectItem* head;
-    ObjectItem* tail;
+    using DumpFunction = void (*)(const SymbolList&);
 
-    static auto create() -> std::shared_ptr<List>;
+    explicit constexpr List() noexcept = default;
     // insert new object at tail of list t,
     // without checking if the object already exists.
-    void insert_tail(void* object);
+    inline void insert_tail(SymbolList object)
+    {
+        this->inner.push_back(object);
+        this->count++;
+    }
     // Remove from list t all strings whose j-th symbol is non-terminal.
-    void lrk_theads_rm_nt(int j);
+    void lrk_theads_rm_nt(size_t j);
     // Remove from t all strings whose k-heads consist entirely
     // of terminals, and add the k-heads to set t_heads;
-    void lrk_theads_rm_theads(int k, List* t_heads);
+    void lrk_theads_rm_theads(size_t k, List* t_heads);
     // Add to the end of list the result of applying all possible
     // productions to the j-th symbol, omitting existing strings,
     // and truncate until it contains no more than k non-vanishable
     // symbols.
-    void add_derivatives(const Grammar& grammar, ObjectItem* o, int j, int k);
-    void dump(void (*list_item_dump)(void*)) const;
-};
+    void add_derivatives(const Grammar& grammar,
+                         const SymbolList& o,
+                         size_t j,
+                         size_t k);
+    void dump(DumpFunction list_item_dump) const noexcept
+    {
+        if (this->inner.empty()) {
+            std::cout << "(list is empty)" << std::endl;
+            return;
+        }
 
-extern void
-print_symbol_list(void* object);
+        std::cout << "list count: " << this->count << std::endl;
+
+        size_t i = 0;
+        for (const auto& s : this->inner) {
+            std::cout << ++i << ' ';
+            (*list_item_dump)(s);
+        }
+    }
+
+    std::list<SymbolList> inner{};
+    size_t count = 0;
+};
 
 //
 // LRk_P_T - LR(k) parsing table.
@@ -260,7 +319,7 @@ constexpr uintptr_t CONST_CONFLICT_SYMBOL = -10000010;
 struct LRkPTRow
 {
     int state;
-    SymbolNode* token;
+    std::shared_ptr<SymbolNode> token;
     ConfigPairNode** row;
     LRkPTRow* next;
 };
@@ -271,7 +330,7 @@ constexpr size_t LRK_P_T_INC = 10;
 // LR(k) parsing table.
 struct LRkPT
 {
-    int k;         // k in LR(k).
+    size_t k;      // k in LR(k).
     int row_count; // number of rows.
     LRkPTRow* rows;
 
@@ -306,7 +365,7 @@ struct LRkPTArray
         return this->array.size() + 1;
     }
     void add(LRkPT* t) noexcept;
-    [[nodiscard]] auto get(int k) const noexcept -> LRkPT*;
+    [[nodiscard]] auto get(size_t k) const noexcept -> LRkPT*;
     void dump() const noexcept;
     void dump_file() const noexcept;
 };
@@ -320,6 +379,12 @@ struct CfgCtxt
     SymbolList ctxt; // conflict context symbols
     Configuration* tail;
 
+    explicit CfgCtxt(Configuration* c, SymbolList ctxt, Configuration* tail)
+      : c(c)
+      , ctxt(std::move(ctxt))
+      , tail(tail)
+    {}
+
     static auto create(Configuration* c,
                        SymbolList s,
                        Configuration* tail) noexcept -> CfgCtxt*;
@@ -329,7 +394,7 @@ struct CfgCtxt
 
 // for LR(k) theads.
 extern auto
-lrk_theads(const Grammar& grammar, SymbolList alpha, int k)
+lrk_theads(const Grammar& grammar, SymbolList& alpha, size_t k)
   -> std::shared_ptr<List>;
 
 /// @brief Holds the information passed to the lane-tracing algorithm.
@@ -363,7 +428,7 @@ class LaneTracing : public YAlgorithm
     auto lt_tbl_entry_find_insert(int from_state) -> LtTblEntry*;
     auto lt_tbl_entry_find(int from_state) -> LtTblEntry*;
     void lt_tbl_entry_add_context(int from_state,
-                                  SymbolList ctxt) noexcept(false);
+                                  SymbolList& ctxt) noexcept(false);
     auto add_split_state(std::shared_ptr<State> y,
                          State& s,
                          size_t successor_index) -> bool;
@@ -389,7 +454,7 @@ class LaneTracing : public YAlgorithm
                                   LlistContextSet* e_ctxt,
                                   size_t e_parent_state_no,
                                   bool copy) const -> int;
-    auto get_the_context(const Configuration* o) noexcept(false) -> SymbolNode*;
+    auto get_the_context(const Configuration* o) noexcept(false) -> SymbolList;
     auto trace_back(Configuration* c, laneHead* lh_list) noexcept(false)
       -> laneHead*;
     [[nodiscard]] auto get_state_conflict_lane_head(
@@ -403,13 +468,13 @@ class LaneTracing : public YAlgorithm
     void pop_lane();
     void check_stack_top();
     void dump_stacks() const;
-    void move_markers(Configuration* o) noexcept;
+    void move_markers(const Configuration* o) noexcept;
     void context_adding(SymbolList context_generated,
                         size_t cur_config_index) const;
     void stack_operation(int* fail_ct, Configuration* o);
     void context_adding_routine(SymbolList context_generated,
                                 Configuration* o,
-                                int cur_config_index,
+                                size_t cur_config_index,
                                 int* fail_ct);
     /* used by both originator list and transitor list */
     void lane_tracing_reduction(Configuration* c) noexcept(false);

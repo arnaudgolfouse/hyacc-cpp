@@ -39,15 +39,10 @@ constexpr bool DEBUG_GEN_GVIZ = false;
 struct GvNode
 {
     int target_state;
-    // Don't free those for now, wait for RAII
-    SymbolNode* labels;
-    // Don't free those for now, wait for RAII
-    SymbolNode* labels_tail;
+    std::list<SymbolNode> labels{};
 
     explicit GvNode(int target_state)
       : target_state(target_state)
-      , labels(nullptr)
-      , labels_tail(nullptr)
     {}
 };
 
@@ -73,20 +68,15 @@ insert_label_to_list(GvNode* n, std::shared_ptr<SymbolTableNode> snode)
     if (n == nullptr || snode == nullptr)
         return; // should not happen.
 
-    if (nullptr == n->labels) {
-        n->labels = n->labels_tail = SymbolNode::create(snode);
+    if (n->labels.empty()) {
+        n->labels.emplace_back(snode);
     } else {
-        SymbolNode* m = n->labels;
-        while (m->next != nullptr) {
-            if (m->snode == snode)
+        for (const auto& label : n->labels) {
+            if (label.snode == snode) {
                 return; // already exists.
-            m = m->next;
+            }
         }
-        // now m->next == nullptr
-        if (m->snode == snode)
-            return; // exists as the last one.
-        // else, not exist.
-        m->next = SymbolNode::create(snode);
+        n->labels.emplace_back(snode);
     }
 }
 
@@ -105,11 +95,10 @@ add_gv_node_to_list(GvNodeList& list,
     if (n == nullptr) { // targetState NOT found. Add to list.
         if constexpr (DEBUG_GEN_GVIZ) {
             std::cout << "target state " << target_state << " not found (label "
-                      << snode->symbol << ")" << std::endl;
+                      << *snode->symbol << ")" << std::endl;
         }
         auto new_node = GvNode(target_state);
-        new_node.labels = SymbolNode::create(snode);
-        new_node.labels_tail = new_node.labels;
+        new_node.labels.emplace_back(snode);
         list.push_back(new_node);
     } else { // found.
              // add snode to the label list of n.
@@ -129,11 +118,15 @@ dump_gv_node_list_r(const GvNodeList& list, int src_state, std::ostream& out)
         out << "  " << src_state << " -> r" << elem.target_state
             << " [ label=\"";
         // write label list
-        SymbolNode* labels = elem.labels;
-        for (; labels->next != nullptr; labels = labels->next) {
-            out << *labels->snode->symbol << ",";
+        bool first_label = true;
+        for (const auto& label : elem.labels) {
+            if (first_label) {
+                first_label = false;
+            } else {
+                out << ",";
+            }
+            out << *label.snode->symbol;
         }
-        out << *labels->snode->symbol;
         out << R"(" style="dashed" ];)" << std::endl;
     }
 }
@@ -146,11 +139,15 @@ dump_gv_node_list_s(const GvNodeList& list, int src_state, std::ostream& out)
         out << "  " << src_state << " -> " << elem.target_state
             << " [ label=\"";
         // write label list
-        const SymbolNode* labels = elem.labels;
-        for (; labels->next != nullptr; labels = labels->next) {
-            out << *labels->snode->symbol << ",";
+        bool first_label = true;
+        for (const auto& label : elem.labels) {
+            if (first_label) {
+                first_label = false;
+            } else {
+                out << ",";
+            }
+            out << *label.snode->symbol;
         }
-        out << *labels->snode->symbol;
         out << "\" ];" << std::endl;
     }
 }
@@ -187,9 +184,6 @@ gen_graphviz_input(const Grammar& grammar,
                    const std::string& y_gviz,
                    const Options& options)
 {
-
-    int row_size = ParsingTblRows;
-
     std::ofstream fp_gviz;
     fp_gviz.open(y_gviz);
 
@@ -198,11 +192,11 @@ gen_graphviz_input(const Grammar& grammar,
             << "  node [shape = doublecircle]; 0 acc;" << std::endl
             << "  node [shape = circle];" << std::endl;
 
-    for (int row = 0; row < row_size; row++) {
+    for (size_t row = 0; row < ParsingTblRows; row++) {
         GvNodeList r_list{};
         GvNodeList s_list{};
 
-        for (int col = 0; col < ParsingTblCols; col++) {
+        for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
             std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
             if (!is_goal_symbol(grammar, n)) {
                 auto [action, state] = get_action(n->type, col, row);
@@ -214,8 +208,8 @@ gen_graphviz_input(const Grammar& grammar,
                 } else if (action == 's' || action == 'g') {
                     add_gv_node_to_list(s_list, state, n);
                 } else if (action == 'a') {
-                    fp_gviz << " " << row << " -> acc [ label = \"" << n->symbol
-                            << "\" ];" << std::endl;
+                    fp_gviz << " " << row << " -> acc [ label = \""
+                            << *n->symbol << "\" ];" << std::endl;
                 }
             } // end of if
         }     // end of for.
@@ -239,9 +233,6 @@ gen_graphviz_input2(const Grammar& grammar,
                     const std::string& y_gviz,
                     const Options& options)
 {
-    /* value assigned at the end of generate_parsing_table(). */
-    int row_size = ParsingTblRows;
-
     std::ofstream fp_gviz;
     fp_gviz.open(y_gviz);
 
@@ -251,11 +242,11 @@ gen_graphviz_input2(const Grammar& grammar,
             << "  node [shape = circle];" << std::endl;
 
     int i = 0;
-    for (int row = 0; row < row_size; row++) {
+    for (size_t row = 0; row < ParsingTblRows; row++) {
         GvNodeList r_list{};
         GvNodeList s_list{};
         if (is_reachable_state(row)) {
-            for (int col = 0; col < ParsingTblCols; col++) {
+            for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
                 std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
                 if (!is_goal_symbol(grammar, n) && !is_parent_symbol(n)) {
                     auto [action, state] = get_action(n->type, col, row);
@@ -270,7 +261,7 @@ gen_graphviz_input2(const Grammar& grammar,
                         add_gv_node_to_list(s_list, state, n);
                     } else if (action == 'a') {
                         fp_gviz << " " << row << " -> acc [ label = \""
-                                << n->symbol << "\" ];" << std::endl;
+                                << *n->symbol << "\" ];" << std::endl;
                     }
                 }
             }
@@ -281,7 +272,7 @@ gen_graphviz_input2(const Grammar& grammar,
             int src_state = get_actual_state(row);
             dump_gv_node_list_r(r_list, src_state, fp_gviz);
             dump_gv_node_list_s(s_list, src_state, fp_gviz);
-        } /* end if */
+        }
     }
 
     fp_gviz << std::endl << "}" << std::endl;

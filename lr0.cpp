@@ -52,10 +52,10 @@ get_config_successors_lr0(const Grammar& grammar,
                           std::shared_ptr<State> s)
 {
     while (config_queue.size() > 0) {
-        Configuration* config = s->config[*config_queue.pop()];
+        const Configuration& config = *s->config[*config_queue.pop()];
 
-        if (config->marker >= 0 &&
-            config->marker < grammar.rules[config->ruleID]->RHS_count) {
+        if (config.marker >= 0 &&
+            config.marker < grammar.rules[config.ruleID]->nRHS.size()) {
             std::shared_ptr<SymbolTableNode> scanned_symbol =
               get_scanned_symbol(config);
 
@@ -76,11 +76,10 @@ get_config_successors_lr0(const Grammar& grammar,
                         // loop)
                         config_queue.push(s->config.size() - 1);
                     } // else is an existing old config, do nothing.
-
-                } // end for
-            }     // else, is a terminal, stop.
-        }         // end if config-marker >= 0 ...
-    }             // end of while
+                }
+            } // else, is a terminal, stop.
+        }     // end if config-marker >= 0 ...
+    }
 }
 
 static void
@@ -101,14 +100,14 @@ get_closure_lr0(const Grammar& grammar,
 void
 LR0::insert_reduction_to_parsing_table_lr0(const Configuration* c, int state_no)
 {
-    int max_col = this->grammar.terminal_count + 1;
+    size_t max_col = this->grammar.terminal_list.size() + 1;
 
     if (grammar.rules[c->ruleID]->nLHS->snode ==
         grammar.goal_symbol->snode) { // accept, action = "a";
         // note this should happen only if the end is $end.
         this->insert_action(hash_tbl_find(STR_END), state_no, CONST_ACC);
     } else { // reduct, action = "r";
-        for (int col = 0; col < max_col; col++) {
+        for (size_t col = 0; col < max_col; col++) {
             std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
             this->insert_action(n, state_no, (-1) * c->ruleID);
         }
@@ -135,20 +134,19 @@ void
 LR0::insert_reduction_to_parsing_table_lalr(const Configuration* c,
                                             int state_no)
 {
-    int max_col = this->grammar.terminal_count + 1;
+    size_t max_col = this->grammar.terminal_list.size() + 1;
 
     if (this->grammar.rules[c->ruleID]->nLHS->snode ==
         this->grammar.goal_symbol->snode) { // accept, action = "a";
         // note this should happen only if the end is $end.
         this->insert_action(hash_tbl_find(STR_END), state_no, CONST_ACC);
     } else { // reduct, action = "r";
-        SymbolNode* a = c->context->nContext;
-        if (a != nullptr) {
-            for (a = c->context->nContext; a != nullptr; a = a->next) {
-                this->insert_action(a->snode, state_no, (-1) * c->ruleID);
+        if (!c->context->context.empty()) {
+            for (const auto& a : c->context->context) {
+                this->insert_action(a.snode, state_no, (-1) * c->ruleID);
             }
         } else {
-            for (int col = 0; col < max_col; col++) {
+            for (size_t col = 0; col < max_col; col++) {
                 std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
                 this->insert_action(n, state_no, (-1) * c->ruleID);
             }
@@ -213,7 +211,7 @@ LR0::transition_lr0(std::shared_ptr<State> s) noexcept
             // do nothing.
         } else { // do transit operation.
             std::shared_ptr<SymbolTableNode> scanned_symbol =
-              get_scanned_symbol(c);
+              get_scanned_symbol(*c);
             if (scanned_symbol->symbol->empty()) { // empty reduction.
                 continue;
             }
@@ -222,20 +220,21 @@ LR0::transition_lr0(std::shared_ptr<State> s) noexcept
             if (new_state == nullptr) {
                 new_state = std::make_shared<State>();
                 // record which symbol this state is a successor by.
-                new_state->trans_symbol = SymbolNode::create(scanned_symbol);
+                new_state->trans_symbol =
+                  std::make_shared<SymbolNode>(scanned_symbol);
                 coll->add_state2(new_state);
             }
             // create a new core config for new_state.
-            Configuration* new_config = create_config(this->grammar, -1, 0, 1);
+            Configuration& new_config = *create_config(this->grammar, -1, 0, 1);
 
-            new_config->owner = new_state;
-            copy_config(new_config, c);
-            new_config->isCoreConfig = 1;
-            new_config->marker++;
-            if (new_config->nMarker != nullptr)
-                new_config->nMarker = new_config->nMarker->next;
+            new_config.owner = new_state;
+            copy_config(new_config, *c);
+            new_config.isCoreConfig = 1;
+            new_config.marker++;
+            if (!new_config.nMarker.empty())
+                new_config.nMarker.pop_front();
 
-            add_core_config2_state(this->grammar, new_state, new_config);
+            add_core_config2_state(this->grammar, new_state, &new_config);
         }
     } // end for
 
@@ -295,12 +294,13 @@ LR0::output_parsing_table_row_lalr(const std::shared_ptr<const State> s)
 void
 LR0::output_parsing_table() noexcept
 {
-    size_t rows = this->new_states.states_new_array->state_list.size();
+    size_t rows = this->new_states.states_new_array.size();
     int cols = n_symbol + 1;
 
     // expand size of parsing table array if needed.
-    if (rows * ParsingTblCols >= PARSING_TABLE_SIZE) {
-        expand_parsing_table(*this->new_states.states_new_array);
+    if (rows * ParsingTblColHdr.size() >= PARSING_TABLE_SIZE) {
+        // TODO
+        // expand_parsing_table(this->new_states.states_new_array);
     }
 
     for (size_t i = 0; i < cols * rows; ++i) {
@@ -309,7 +309,7 @@ LR0::output_parsing_table() noexcept
 
     for (size_t i = 0; i < rows; i++) {
         const std::shared_ptr<State> s =
-          this->new_states.states_new_array->state_list[i];
+          this->new_states.states_new_array[i].state;
         this->output_parsing_table_row(s);
     }
 }
@@ -317,12 +317,13 @@ LR0::output_parsing_table() noexcept
 void
 LR0::output_parsing_table_lalr()
 {
-    size_t rows = this->new_states.states_new_array->state_list.size();
+    size_t rows = this->new_states.states_new_array.size();
     int cols = n_symbol + 1;
 
     // expand size of parsing table array if needed.
     while (rows >= PARSING_TABLE_SIZE) {
-        expand_parsing_table(*this->new_states.states_new_array);
+        // TODO
+        // expand_parsing_table(*this->new_states.states_new_array);
     }
 
     for (size_t i = 0; i < cols * rows; ++i) {
@@ -331,7 +332,7 @@ LR0::output_parsing_table_lalr()
 
     for (size_t i = 0; i < rows; i++) {
         const std::shared_ptr<State> s =
-          this->new_states.states_new_array->state_list[i];
+          this->new_states.states_new_array[i].state;
         this->output_parsing_table_row_lalr(s);
     }
 }

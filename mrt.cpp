@@ -129,8 +129,9 @@ is_parent_symbol(const std::shared_ptr<const SymbolTableNode> s) -> bool
 }
 
 auto
-MRTreeNode::find_node_in_tree(const std::shared_ptr<MRTreeNode>& node,
-                              const std::shared_ptr<const SymbolTableNode> symbol)
+MRTreeNode::find_node_in_tree(
+  const std::shared_ptr<MRTreeNode>& node,
+  const std::shared_ptr<const SymbolTableNode> symbol)
   -> std::shared_ptr<MRTreeNode>
 {
     if (node == nullptr) {
@@ -168,7 +169,7 @@ MRTreeNode::create(std::shared_ptr<SymbolTableNode> symbol)
 {
     auto node = std::make_shared<MRTreeNode>();
     node->parent.reserve(MR_TREE_NODE_INIT_PARENT_COUNT);
-    node->symbol = SymbolNode::create(symbol);
+    node->symbol = std::make_shared<SymbolNode>(symbol);
     return node;
 }
 
@@ -198,7 +199,7 @@ MRTreeNode::insert_parent(std::shared_ptr<SymbolTableNode> symbol)
 auto
 MRTreeNode::is_mr_leaf(const MRLeaves& mr_leaves) noexcept -> int const
 {
-    for (int i = 0; i < mr_leaves.size(); i++) {
+    for (size_t i = 0; i < mr_leaves.size(); i++) {
         if (this == mr_leaves[i].get())
             return i;
     }
@@ -206,22 +207,17 @@ MRTreeNode::is_mr_leaf(const MRLeaves& mr_leaves) noexcept -> int const
 }
 
 static void
-write_branch(std::ostream& os, SymbolList branch)
+write_branch(std::ostream& os, const SymbolList& branch)
 {
-    SymbolNode* a = nullptr;
-    for (a = branch; a != nullptr; a = a->next) {
-        if (a != branch)
-            os << ", ";
-        os << a->snode->symbol;
+    for (const auto& a : branch) {
+        os << a.snode->symbol << ", ";
     }
-    if (a != branch)
-        os << ", ";
 }
 
 void
 MRTreeNode::write_leaf_branch(std::ostream& os,
-                              SymbolList branch,
-                              SymbolNode* branch_tail)
+                              SymbolList& branch,
+                              SymbolList& branch_tail)
 {
     os << this->symbol->snode->symbol;
     if (this->parent.empty()) {
@@ -230,17 +226,19 @@ MRTreeNode::write_leaf_branch(std::ostream& os,
     }
     os << ", ";
 
-    if (branch->next == nullptr) {
-        branch_tail->next = branch->next =
-          SymbolNode::create(this->symbol->snode);
+    if (branch.size() == 1) {
+        branch.emplace_back(this->symbol->snode);
+        branch_tail.emplace_back(this->symbol->snode);
     } else {
-        branch_tail->next->next = SymbolNode::create(this->symbol->snode);
-        branch_tail->next = branch_tail->next->next;
+        SymbolList new_branch_tail;
+        new_branch_tail.push_back(branch_tail.front());
+        new_branch_tail.emplace_back(this->symbol->snode);
+        branch_tail = new_branch_tail;
     }
 
-    for (int i = 0; i < this->parent.size(); i++) {
+    for (size_t i = 0; i < this->parent.size(); i++) {
         if (i > 0)
-            write_branch(os, branch->next);
+            write_branch(os, branch); // TODO: should be branch.next !
         this->parent[i]->write_leaf_branch(os, branch, branch_tail);
     }
 }
@@ -248,8 +246,10 @@ MRTreeNode::write_leaf_branch(std::ostream& os,
 static void
 write_mr_forest(std::ostream& os, const MRLeaves& mr_leaves)
 {
-    SymbolList branch = SymbolNode::create(hash_tbl_find(""));
-    SymbolNode* branch_tail = SymbolNode::create(hash_tbl_find(""));
+    SymbolList branch;
+    SymbolList branch_tail;
+    branch.emplace_back(hash_tbl_find(""));
+    branch_tail.emplace_back(hash_tbl_find(""));
 
     os << std::endl
        << "==writeMRForest (mr_leaves_co" << std::endl
@@ -257,9 +257,6 @@ write_mr_forest(std::ostream& os, const MRLeaves& mr_leaves)
     for (const auto& mr_leave : mr_leaves) {
         mr_leave->write_leaf_branch(os, branch, branch_tail);
     }
-
-    free_symbol_node_list(branch);
-    free_symbol_node(branch_tail);
 }
 
 void
@@ -304,16 +301,16 @@ build_multirooted_tree(const Grammar& grammar) -> MRLeaves
     MRLeaves mr_leaves;
     mr_leaves.reserve(MR_LEAVES_INIT_MAX_COUNT);
 
-    for (int i = 1; i < grammar.rules.size(); i++) {
+    for (size_t i = 1; i < grammar.rules.size(); i++) {
         if (grammar.is_unit_production(i)) {
             std::shared_ptr<MRTreeNode> lhs =
               find_node_in_forest(mr_leaves, grammar.rules[i]->nLHS->snode);
             std::shared_ptr<MRTreeNode> rhs = find_node_in_forest(
-              mr_leaves, grammar.rules[i]->nRHS_head->snode);
+              mr_leaves, grammar.rules[i]->nRHS.front().snode);
             if (lhs != nullptr && rhs == nullptr) {
                 // insert rhs as child of lhs.
                 MRTreeNode::insert_child(
-                  lhs, mr_leaves, grammar.rules[i]->nRHS_head->snode);
+                  lhs, mr_leaves, grammar.rules[i]->nRHS.front().snode);
             } else if (lhs == nullptr && rhs != nullptr) {
                 // insert lhs as parent of rhs.
                 rhs->insert_parent(grammar.rules[i]->nLHS->snode);
@@ -321,7 +318,7 @@ build_multirooted_tree(const Grammar& grammar) -> MRLeaves
                 // insert as new tree.
                 insert_new_tree(mr_leaves,
                                 grammar.rules[i]->nLHS->snode,
-                                grammar.rules[i]->nRHS_head->snode);
+                                grammar.rules[i]->nRHS.front().snode);
             } else { // just add this relationship.
                 MRTreeNode::insert_parent_child_relation(
                   lhs, rhs.get(), mr_leaves);
@@ -357,7 +354,7 @@ get_node(int leaf_index, MRTreeNode* node, MRParents* parents)
         if (leaf_index_for_parent_done == false) {
             leaf_index_for_parent[parents->size()] = leaf_index;
         }
-        parents->push_back(SymbolNode::create(node->symbol->snode));
+        parents->push_back(std::make_shared<SymbolNode>(node->symbol->snode));
     }
 
     for (const auto& parent : node->parent) {
@@ -374,7 +371,7 @@ get_node(int leaf_index, MRTreeNode* node, MRParents* parents)
  */
 void
 get_parents_for_mr_leaf(const MRLeaves& mr_leaves,
-                        size_t leaf_index,
+                        const size_t leaf_index,
                         MRParents* parents)
 {
     for (const auto& parent : mr_leaves[leaf_index]->parent) {
@@ -390,7 +387,7 @@ get_all_mr_parents(const MRLeaves& mr_leaves)
 {
     leaf_index_for_parent_done = false;
 
-    for (int i = 0; i < mr_leaves.size(); i++) {
+    for (size_t i = 0; i < mr_leaves.size(); i++) {
         get_parents_for_mr_leaf(mr_leaves, i, all_parents.get());
     }
 
@@ -411,7 +408,7 @@ write_all_mr_parents(std::ostream& os, const MRLeaves& mr_leaves)
        << "side '()' is a corresp" << std::endl
        << "d" << std::endl
        << "g leaf):\n";
-    for (int i = 0; i < all_parents->size(); i++) {
+    for (size_t i = 0; i < all_parents->size(); i++) {
         os << (*all_parents)[i]->snode->symbol << " (=>"
            << mr_leaves[leaf_index_for_parent[i]]->symbol->snode->symbol << ")"
            << std::endl;

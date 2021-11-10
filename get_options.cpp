@@ -29,6 +29,7 @@
 
 #include "y.hpp"
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
@@ -229,10 +230,10 @@ set_lrk(Options& options)
 ///
 /// @param cmd_argc argc passed from main.
 /// @param argc_pt index of current cmd parameter.
-void
+static void
 get_single_letter_option(Options& options,
                          size_t cmd_argc,
-                         int argc_pt,
+                         size_t argc_pt,
                          std::string::const_iterator& s,
                          const std::string::const_iterator& end)
 {
@@ -477,7 +478,7 @@ get_mnemonic_long_option(Options& options, const std::string& s)
 auto
 get_options(const std::span<const std::string_view> args,
             Options& options,
-            FileNames* files) -> int
+            FileNames* files) -> size_t
 {
     if (args.size() == 1) {
         show_helpmsg_exit(ErrorFlags::NO_INPUT_FILE);
@@ -485,9 +486,9 @@ get_options(const std::span<const std::string_view> args,
 
     *files = init_options(options);
 
-    int infile_index = -1;
-    for (int i = 1; i < args.size(); i++) {
-        int argc_pt = i;
+    std::optional<size_t> infile_index = std::nullopt;
+    for (size_t i = 1; i < args.size(); i++) {
+        size_t argc_pt = i;
         const std::string argv_i = std::string(args[i]);
         // std::cout  <<  i<< ", " <<  argv_i << std::endl;
         size_t len = argv_i.size();
@@ -520,16 +521,15 @@ get_options(const std::span<const std::string_view> args,
                 }
             }
         } else {
-            if (infile_index == -1) {
+            if (!infile_index.has_value()) {
                 infile_index = i;
-                // std::cout << "file to open: " <<  argv[i] << std::endl;
             }
         }
     }
 
-    if (infile_index == -1) {
+    if (!infile_index.has_value()) {
         show_helpmsg_exit(ErrorFlags::NO_INPUT_FILE);
     }
 
-    return infile_index;
+    return infile_index.value();
 }

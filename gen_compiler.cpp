@@ -87,35 +87,36 @@ print_break(std::ofstream& fp)
  * Token - terminal symbols.
  */
 void
-write_tokens()
+write_tokens(const SymbolList& tokens)
 {
-    int i = 0;
-    SymbolNode* a = nullptr;
-    for (a = tokens, i = 0; a != nullptr; a = a->next, i++) {
-        std::cout << "token " << i + 1 << ": " << a->snode->symbol << std::endl;
+    size_t i = 0;
+    for (const auto& a : tokens) {
+        std::cout << "token " << i + 1 << ": " << a.snode->symbol << std::endl;
+        i++;
     }
 }
 
 /*
  *  Write all terminal tokens that are not quoted, and not "error".
  */
-void
-write_tokens_to_compiler_file(std::ofstream& fp, std::ofstream& fp_h)
+static void
+write_tokens_to_compiler_file(std::ofstream& fp,
+                              std::ofstream& fp_h,
+                              const SymbolList& tokens)
 {
     auto& options = Options::get();
     fp << std::endl << "/* tokens */" << std::endl << std::endl;
     if (options.use_header_file)
         fp_h << std::endl << "/* tokens */" << std::endl << std::endl;
 
-    int index = 0;
-    int i = 0;
-    for (SymbolNode* a = tokens; a != nullptr; a = a->next, i++) {
-        if (a->snode->TP->is_quoted || *a->snode->symbol == STR_ERROR)
+    size_t index = 0;
+    for (const auto& a : tokens) {
+        if (a.snode->TP->is_quoted || *a.snode->symbol == STR_ERROR)
             continue;
 
-        fp << "#define " << a->snode->symbol << index + 257 << std::endl;
+        fp << "#define " << a.snode->symbol << index + 257 << std::endl;
         if (options.use_header_file)
-            fp_h << "#define " << a->snode->symbol << index + 257 << std::endl;
+            fp_h << "#define " << a.snode->symbol << index + 257 << std::endl;
         index++;
     }
 
@@ -138,7 +139,8 @@ write_tokens_to_compiler_file(std::ofstream& fp, std::ofstream& fp_h)
 [[nodiscard]] static auto
 process_yacc_file_section1(std::ifstream& fp_yacc,
                            std::ofstream& fp,
-                           std::ofstream& fp_h) -> Position
+                           std::ofstream& fp_h,
+                           const SymbolList& tokens) -> Position
 {
     Position position{ 1, 1 };
 
@@ -170,7 +172,7 @@ process_yacc_file_section1(std::ifstream& fp_yacc,
         }
     }
 
-    write_tokens_to_compiler_file(fp, fp_h);
+    write_tokens_to_compiler_file(fp, fp_h, tokens);
     return position;
 }
 
@@ -225,7 +227,7 @@ find_full_rule(const Grammar& grammar, int rule_count) -> Production*
     for (size_t full_rule = rule_count; full_rule < grammar.rules.size();
          ++full_rule) {
 
-        if ((rule = grammar.rules[full_rule]) && (node = rule->nLHS) &&
+        if ((rule = grammar.rules[full_rule]) && (node = rule->nLHS.get()) &&
             (sym = node->snode)) {
             if (sym->symbol->starts_with(
                   "$$")) /* node symbol starting with $$ we continue */
@@ -241,25 +243,26 @@ find_full_rule(const Grammar& grammar, int rule_count) -> Production*
 }
 
 static auto
-find_mid_prod_index(const Production* rule, const Production* mid_prod_rule)
-  -> int
+find_mid_prod_index(const Production& rule, const Production& mid_prod_rule)
+  -> std::optional<size_t>
 {
-    const SymbolNode* lnode = mid_prod_rule->nLHS;
+    const SymbolNode* lnode = mid_prod_rule.nLHS.get();
     std::shared_ptr<const SymbolTableNode> lsym = lnode->snode;
     const std::string_view l = *lsym->symbol;
-    const SymbolNode* rnode = rule->nRHS_head;
     std::shared_ptr<const SymbolTableNode> rsym = nullptr;
 
-    for (int i = 0; rnode; ++i, rnode = rnode->next) {
+    size_t i = 0;
+    for (const auto& rnode : rule.nRHS) {
         const std::string_view r = *rsym->symbol;
-        if (!(rsym = rnode->snode)) {
+        if (!(rsym = rnode.snode)) {
             throw std::runtime_error(
               std::string("Did not find mid production rule of ").append(l));
         }
         if (l == r)
             return i;
+        i++;
     }
-    return -1;
+    return std::nullopt;
 }
 
 static auto
@@ -271,9 +274,9 @@ find_sym(const Production* rule, int dollar_number)
         return sym;
 
     int i = 1;
-    const SymbolNode* node = rule->nRHS_head;
-    for (; i < dollar_number && node; ++i, node = node->next)
-        ;
+    auto node = rule->nRHS.begin();
+    for (; i < dollar_number && node != rule->nRHS.end(); ++i, node++) {
+    }
     if (i != dollar_number) {
         throw std::runtime_error(std::string("Rule terminated before ") +
                                  std::to_string(dollar_number) + " RHS");
@@ -319,7 +322,7 @@ process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
 
         switch (state) {
             case LHS:
-                if (isspace(c) && reading_symbol == false) {
+                if (isspace(c) && !reading_symbol) {
                     // do nothing, skip space.
                 } else if (c == ':') {
                     reading_symbol = false;
@@ -464,14 +467,14 @@ process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
                 } else if (reading_number && !isdigit(c)) {
                     Production* start_rule =
                       yacc_grammar_output.grammar.rules[rule_count];
-                    int rhs_index = 0;
+                    std::optional<size_t> rhs_index = 0;
 
                     const Production* rule =
                       find_full_rule(yacc_grammar_output.grammar, rule_count);
-                    if (rule != start_rule)
-                        rhs_index = find_mid_prod_index(rule, start_rule);
-                    else
-                        rhs_index = rule->RHS_count;
+                    if (rule != start_rule) {
+                        rhs_index = find_mid_prod_index(*rule, *start_rule);
+                    } else
+                        rhs_index = rule->nRHS.size();
                     std::optional<std::string> token_type = std::nullopt;
                     if (explicit_type) {
                         token_type = explicit_type;
@@ -481,13 +484,16 @@ process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
                           find_sym(rule, dollar_number);
                         token_type = sym->token_type;
                     }
+                    int rhs_index_int =
+                      rhs_index.has_value() ? static_cast<int>(*rhs_index) : -1;
                     if (token_type)
-                        fp << "(yypvt[" << dollar_number - rhs_index << "]."
+                        fp << "(yypvt[" << dollar_number - rhs_index_int << "]."
                            << token_type.value() << ")/* " << rule_count << ' '
-                           << rhs_index << " */";
+                           << rhs_index_int << " */";
                     else
-                        fp << "yypvt[" << dollar_number - rhs_index << "]/* "
-                           << rule_count << ' ' << rhs_index << " */";
+                        fp << "yypvt[" << dollar_number - rhs_index_int
+                           << "]/* " << rule_count << ' ' << rhs_index_int
+                           << " */";
 
                     fp << c;
                     reading_number = false;
@@ -626,17 +632,6 @@ copy_yaccpar_file_2(std::ofstream& fp, const std::string& filename)
 // Functions to print parsing table arrays. START.
 ///////////////////////////////////////////////////////
 
-auto
-get_index_in_tokens_array(std::shared_ptr<SymbolTableNode> s) -> int
-{
-    SymbolNode* a = tokens;
-    for (int i = 0; a != nullptr; a = a->next, i++) {
-        if (s == a->snode)
-            return i;
-    }
-    return -1;
-}
-
 /*
  * Returns the index of the given symbol in the
  * non-terminal array of the given grammar.
@@ -646,14 +641,12 @@ static auto
 get_non_terminal_index(const Grammar& grammar,
                        std::shared_ptr<const SymbolTableNode> snode) -> int
 {
-    const SymbolNode* a = grammar.non_terminal_list;
-    for (int i = 0; a != nullptr; a = a->next) {
-        if (snode == a->snode)
+    int i = 0;
+    for (const auto& a : grammar.non_terminal_list) {
+        if (snode == a.snode)
             return i;
         i++;
     }
-    // std::cout << "getNonTerminalIndex warning: ";
-    // std::cout  <<  symbol<< " not found!" << std::endl;
     return -1;
 }
 
@@ -673,53 +666,50 @@ print_yyr1(std::ofstream& fp, const Grammar& grammar)
 
     if (Options::get().use_remove_unit_production) {
         int index = 0;
-        for (int i = 1; i < grammar.rules.size(); i++) {
+        for (size_t i = 1; i < grammar.rules.size(); i++) {
             // std::cout << "rule " <<  i<< " lhs: " <<  grammar.rules[i]->LHS
             // << std::endl;
             index = grammar.rules[i]->nLHS->snode->value;
             fp << std::setw(INTEGER_PADDING) << index;
             if (i < grammar.rules.size() - 1)
                 fp << ',';
-            if ((i - (ITEM_PER_LINE - 1)) % ITEM_PER_LINE == 0)
+            if ((i + 1) % ITEM_PER_LINE == 0)
                 fp << std::endl;
         }
         fp << "};" << std::endl;
         return;
     }
 
-    for (int i = 1; i < grammar.rules.size(); i++) {
+    for (size_t i = 1; i < grammar.rules.size(); i++) {
         fp << std::setw(INTEGER_PADDING)
            << (-1) *
                 get_non_terminal_index(grammar, grammar.rules[i]->nLHS->snode);
         if (i < grammar.rules.size() - 1)
             fp << ',';
-        if ((i - (ITEM_PER_LINE - 1)) % ITEM_PER_LINE == 0)
+        if ((i + 1) % ITEM_PER_LINE == 0)
             fp << std::endl;
     }
     fp << "};" << std::endl;
 }
 
-/*
- * yyr2[0] is a dummy field, and is alwasy 0.
- * for i >= 1, yyr2[i] defines the following for grammar rule i:
- *   let x be the number of symbols on the RHS of rule i,
- *   let y indicate whether there is any code associated
- *     with this rule (y = 1 for yes, y = 0 for no).
- *   then yyr2[i] = (x << 1) + y;
- */
+/// yyr2[0] is a dummy field, and is alwasy 0.
+/// for i >= 1, yyr2[i] defines the following for grammar rule i:
+///   let x be the number of symbols on the RHS of rule i,
+///   let y indicate whether there is any code associated
+///     with this rule (y = 1 for yes, y = 0 for no).
+///   then yyr2[i] = (x << 1) + y;
 void
 print_yyr2(std::ofstream& fp, const Grammar& grammar)
 {
-    int i = 0;
     fp << "static YYCONST yytabelem yyr2[] = {" << std::endl;
     fp << std::setw(INTEGER_PADDING) << 0 << ',';
-    for (i = 1; i < grammar.rules.size(); i++) {
+    for (size_t i = 1; i < grammar.rules.size(); i++) {
         fp << std::setw(INTEGER_PADDING)
-           << (grammar.rules[i]->RHS_count << 1) +
+           << (grammar.rules[i]->nRHS.size() << 1) +
                 static_cast<int>(grammar.rules[i]->hasCode);
         if (i < grammar.rules.size() - 1)
             fp << ',';
-        if ((i - (ITEM_PER_LINE - 1)) % ITEM_PER_LINE == 0)
+        if ((i + 1) % ITEM_PER_LINE == 0)
             fp << std::endl;
     }
     fp << "};" << std::endl;
@@ -728,11 +718,12 @@ print_yyr2(std::ofstream& fp, const Grammar& grammar)
 void
 print_yynonterminals(std::ofstream& fp, const Grammar& grammar)
 {
-    SymbolNode* a = nullptr;
     fp << "yytoktype yynts[] = {" << std::endl;
 
-    int i = 1; // ignore first nonterminal: $accept.
-    for (a = grammar.non_terminal_list->next; a != nullptr; a = a->next) {
+    size_t i = 1; // ignore first nonterminal: $accept.
+    auto a = grammar.non_terminal_list.begin();
+    a++;
+    for (; a != grammar.non_terminal_list.end(); a++) {
         fp << "\t\"" << a->snode->symbol << "\",\t-" << i << ',' << std::endl;
         i++;
     }
@@ -740,24 +731,22 @@ print_yynonterminals(std::ofstream& fp, const Grammar& grammar)
     fp << "};" << std::endl;
 }
 
-/*
- * Print terminal tokens.
- */
-void
-print_yytoks(std::ofstream& fp)
+/// Print terminal tokens.
+static void
+print_yytoks(std::ofstream& fp, const SymbolList& tokens)
 {
     fp << "yytoktype yytoks[] = {" << std::endl;
-    for (SymbolNode* a = tokens; a != nullptr; a = a->next) {
-        if (*a->snode->symbol == STR_ERROR)
+    for (const auto& a : tokens) {
+        if (*a.snode->symbol == STR_ERROR)
             continue;
 
-        if (a->snode->symbol->size() == 2 &&
-            (*a->snode->symbol)[0] == '\\') { // escape sequence
-            fp << R"(	"\\)" << a->snode->symbol << R"(",	)"
-               << a->snode->value << ',' << std::endl;
+        if (a.snode->symbol->size() == 2 &&
+            (*a.snode->symbol)[0] == '\\') { // escape sequence
+            fp << R"(	"\\)" << a.snode->symbol << R"(",	)"
+               << a.snode->value << ',' << std::endl;
         } else {
-            fp << "\t\"" << a->snode->symbol << "\",\t" << a->snode->value
-               << ',' << std::endl;
+            fp << "\t\"" << a.snode->symbol << "\",\t" << a.snode->value << ','
+               << std::endl;
         }
     }
 
@@ -776,13 +765,13 @@ print_yyreds(std::ofstream& fp, const Grammar& grammar)
     for (int i = 1; i < grammar.rules.size(); i++) {
         fp << "\t\"" << grammar.rules[i]->nLHS->snode->symbol << " : ";
 
-        const SymbolNode* a = grammar.rules[i]->nRHS_head;
-        for (int j = 0; j < grammar.rules[i]->RHS_count; j++) {
+        auto a = grammar.rules[i]->nRHS.begin();
+        for (size_t j = 0; j < grammar.rules[i]->nRHS.size(); j++) {
             if (j > 0)
                 fp << ' ';
 
             if (j > 0)
-                a = a->next;
+                a++;
             const std::string_view symbol = *a->snode->symbol;
 
             if (symbol.size() == 1 ||
@@ -797,25 +786,10 @@ print_yyreds(std::ofstream& fp, const Grammar& grammar)
     fp << "};" << std::endl;
 }
 
-void
-print_yytoken(std::ofstream& fp)
-{
-    const SymbolNode* a = tokens;
-
-    fp << "int yytoken[] = {" << std::endl;
-    for (int i = 0; a != nullptr; a = a->next, i++) {
-        fp << "\t\"" << a->snode->symbol << "\",\t" << 257 + i << ','
-           << std::endl;
-    }
-
-    fp << "\t\"-unknown-\", -1  /* ends search */" << std::endl;
-    fp << "};" << std::endl;
-}
-
 static void
 print_parsing_tbl_entry(std::ofstream& fp,
-                        char action,
-                        int state_no,
+                        const char action,
+                        const int state_no,
                         int& count)
 {
     bool is_entry = false;
@@ -846,7 +820,6 @@ print_parsing_tbl_entry(std::ofstream& fp,
 static void
 print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
 {
-    int col_size = ParsingTblCols;
     std::vector<int> rowoffset;
     rowoffset.reserve(ParsingTblRows);
     int count = 0;
@@ -854,7 +827,7 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
     fp << "static YYCONST yytabelem yyptblact[] = {" << std::endl;
 
     if (Options::get().use_remove_unit_production) {
-        for (int row = 0; row < ParsingTblRows; row++) {
+        for (size_t row = 0; row < ParsingTblRows; row++) {
             if (is_reachable_state(row)) {
 
                 if constexpr (USE_REM_FINAL_STATE) {
@@ -865,7 +838,7 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
                         continue;
                     }
                 }
-                for (int col = 0; col < ParsingTblCols; col++) {
+                for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
                     std::shared_ptr<const SymbolTableNode> n =
                       ParsingTblColHdr[col];
                     if (is_goal_symbol(grammar, n) == false &&
@@ -894,7 +867,7 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
                 }
             }
 
-            for (int j = 0; j < ParsingTblCols; j++) {
+            for (size_t j = 0; j < ParsingTblColHdr.size(); j++) {
                 auto [action, state_no] =
                   get_action(ParsingTblColHdr[j]->type, j, i);
                 // std::cout  <<  action <<  state_no<< ", ";
@@ -922,8 +895,8 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
 
 static void
 print_parsing_tbl_col_entry(std::ofstream& fp,
-                            char action,
-                            int token_value,
+                            const char action,
+                            const int token_value,
                             int& count)
 {
     bool is_entry = false;
@@ -953,13 +926,11 @@ print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
     constexpr int FINAL_STATE_COL_ENTRY = -10000001;
 
     int count = 0;
-    int col_size = ParsingTblCols;
 
     fp << "static YYCONST yytabelem yyptbltok[] = {" << std::endl;
 
     if (Options::get().use_remove_unit_production) {
-        int i = 0;
-        for (int row = 0; row < ParsingTblRows; row++) {
+        for (size_t row = 0; row < ParsingTblRows; row++) {
             if (is_reachable_state(row)) {
 
                 if constexpr (USE_REM_FINAL_STATE) {
@@ -969,7 +940,7 @@ print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
                         continue;
                     }
                 }
-                for (int col = 0; col < ParsingTblCols; col++) {
+                for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
                     std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
                     if (is_goal_symbol(grammar, n) == false &&
                         is_parent_symbol(n) == false) {
@@ -981,7 +952,7 @@ print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
             }         // end of if.
         }
     } else {
-        for (int i = 0; i < ParsingTblRows; i++) {
+        for (size_t i = 0; i < ParsingTblRows; i++) {
 
             if constexpr (USE_REM_FINAL_STATE) {
                 if (final_state_list[i] < 0) { // is a final state.
@@ -990,7 +961,7 @@ print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
                     continue;
                 }
             }
-            for (int j = 0; j < ParsingTblCols; j++) {
+            for (size_t j = 0; j < ParsingTblColHdr.size(); j++) {
                 std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[j];
                 auto [action, state] = get_action(n->type, j, i);
                 print_parsing_tbl_col_entry(fp, action, n->value, count);
@@ -1011,7 +982,7 @@ get_final_states(std::ofstream& fp)
     fp << "static YYCONST yytabelem yyfs[] = {" << std::endl;
     fp << final_state_list[0];
     int j = 0;
-    for (int i = 1; i < ParsingTblRows; i++) {
+    for (size_t i = 1; i < ParsingTblRows; i++) {
         if (Options::get().use_remove_unit_production) {
             if (is_reachable_state(i) == false)
                 continue;
@@ -1059,8 +1030,8 @@ write_lrk_table_arrays(std::ofstream& fp,
 
     // yy_lrk_cols
     fp << std::endl << "/* yyPTC_count + 2 */" << std::endl;
-    fp << "static YYCONST yytabelem yy_lrk_cols = " << ParsingTblCols + 2 << ';'
-       << std::endl;
+    fp << "static YYCONST yytabelem yy_lrk_cols = "
+       << ParsingTblColHdr.size() + 2 << ';' << std::endl;
 
     // yy_lrk_r[].
     fp << std::endl << "/* Values in each LR(k) parsing table. */" << std::endl;
@@ -1069,7 +1040,7 @@ write_lrk_table_arrays(std::ofstream& fp,
     for (const LRkPT* t : lrk_pt_array->array) {
         for (const LRkPTRow* r = t->rows; r != nullptr; r = r->next) {
             fp << "  " << r->state << ", " << r->token->snode->value << ", ";
-            for (size_t j = 0; j < ParsingTblCols; j++) {
+            for (size_t j = 0; j < ParsingTblColHdr.size(); j++) {
                 if (r->row[j] != nullptr) {
                     if (reinterpret_cast<uintptr_t>(r->row[j]->end) ==
                         CONST_CONFLICT_SYMBOL) {
@@ -1100,7 +1071,7 @@ write_lrk_table_arrays(std::ofstream& fp,
     fp << std::endl
        << "/* Values of parsing table column tokens. */" << std::endl;
     fp << "static YYCONST yytabelem yyPTC[] = {" << std::endl;
-    for (int i = 0; i < ParsingTblCols; i++) {
+    for (int i = 0; i < ParsingTblColHdr.size(); i++) {
         if (i > 0)
             fp << ", ";
         if (i % ITEM_PER_LINE == 0) {
@@ -1144,8 +1115,8 @@ write_parsing_table_arrays(std::ofstream& fp,
            << std::endl;
         print_yynonterminals(fp, grammar); // yynts[]. nonterminals.
 
-        print_yytoks(fp);          // yytoks[]. tokens.
-        print_yyreds(fp, grammar); // yyreds[]. Productions of grammar.
+        print_yytoks(fp, grammar.tokens); // yytoks[]. tokens.
+        print_yyreds(fp, grammar);        // yyreds[]. Productions of grammar.
         fp << "#endif /* YYDEBUG */" << std::endl << std::endl;
 
     } else { // use LR(k).
@@ -1153,7 +1124,7 @@ write_parsing_table_arrays(std::ofstream& fp,
            << std::endl
            << std::endl;
         print_yynonterminals(fp, grammar); // yynts[]. nonterminals.
-        print_yytoks(fp);                  // yytoks[]. tokens.
+        print_yytoks(fp, grammar.tokens);  // yytoks[]. tokens.
 
         fp << std::endl << "#ifdef YYDEBUG" << std::endl << std::endl;
         print_yyreds(fp, grammar); // yyreds[]. Productions of grammar.
@@ -1211,8 +1182,11 @@ generate_compiler(GetYaccGrammarOutput& yacc_grammar_output,
 
     if (options.use_lines)
         fp << std::endl << "# line 1 \"" << infile << '\"' << std::endl;
-    Position position =
-      process_yacc_file_section1(fp_yacc, fp, fp_h); // declaration section.
+    Position position = process_yacc_file_section1(
+      fp_yacc,
+      fp,
+      fp_h,
+      yacc_grammar_output.grammar.tokens); // declaration section.
 
     write_special_info(fp);
 
@@ -1239,8 +1213,6 @@ generate_compiler(GetYaccGrammarOutput& yacc_grammar_output,
                                infile,
                                position); // get reduction code.
     copy_yaccpar_file_2(fp, HYACC_PATH);
-
-    free_symbol_node_list(tokens);
 
     fp.close();
     if (options.use_header_file)

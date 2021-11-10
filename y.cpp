@@ -56,19 +56,15 @@ std::array<HashTblNode, HT_SIZE> HashTbl;
 // Grammar grammar;
 std::atomic_size_t PARSING_TABLE_SIZE;
 std::vector<int> ParsingTable;
-int ParsingTblCols;
-int ParsingTblRows;
+size_t ParsingTblRows;
 std::vector<std::shared_ptr<SymbolTableNode>> ParsingTblColHdr;
 SymbolList F_ParsingTblColHdr;
-int F_ParsingTblCols;
 std::vector<int> states_reachable;
 std::vector<int> actual_state_no;
 int n_symbol;
 size_t n_rule;
 size_t n_rule_opt;
 std::vector<int> final_state_list;
-SymbolList tokens;
-int tokens_ct;
 StateNoArray* states_inadequate;
 
 /* Declaration of functions. */
@@ -137,7 +133,7 @@ operator<<(std::ostream& os, const StateList& state_list) -> std::ostream&
     for (size_t i = 0; i < state_list.state_list.size(); i++) {
         if (i > 0)
             os << ", ";
-        os << state_list.state_list[i]->state_no;
+        os << state_list.state_list.at(i)->state_no;
     }
     os << std::endl;
     return os;
@@ -154,10 +150,10 @@ Production::write(std::ostream& os, int marker) const noexcept
     os << "-> ";
 
     int i = 0;
-    for (SymbolNode* n = this->nRHS_head; n != nullptr; n = n->next) {
+    for (const auto& n : this->nRHS) {
         if (i == marker)
             os << ". ";
-        os << *n->snode->symbol << " ";
+        os << *n.snode->symbol << " ";
         i++;
     }
     if (i == marker)
@@ -221,14 +217,10 @@ Grammar::get_opt_rule_count() const noexcept -> size_t
 void
 Grammar::write_terminals(std::ostream& os) const
 {
-    os << "Terminals (" << this->terminal_count << "): " << std::endl;
+    os << "Terminals (" << this->terminal_list.size() << "): " << std::endl;
 
-    SymbolNode* a = this->terminal_list;
-    if (a != nullptr) {
-        os << *a->snode->symbol << std::endl;
-        for (a = a->next; a != nullptr; a = a->next) {
-            os << *a->snode->symbol << std::endl;
-        }
+    for (const auto& a : this->terminal_list) {
+        os << *a.snode->symbol << std::endl;
     }
     os << std::endl;
 }
@@ -236,13 +228,10 @@ Grammar::write_terminals(std::ostream& os) const
 void
 Grammar::write_non_terminals(std::ostream& os) const
 {
-    os << "Non-terminals (" << this->non_terminal_count << "): " << std::endl;
-    SymbolNode* a = this->non_terminal_list;
-    if (a != nullptr) {
-        os << *a->snode->symbol << std::endl;
-        for (a = a->next; a != nullptr; a = a->next) {
-            os << *a->snode->symbol << std::endl;
-        }
+    os << "Non-terminals (" << this->non_terminal_list.size()
+       << "): " << std::endl;
+    for (const auto& a : this->non_terminal_list) {
+        os << *a.snode->symbol << std::endl;
     }
     os << std::endl;
 }
@@ -251,12 +240,10 @@ void
 Grammar::write_vanish_symbols(std::ostream& os) const
 {
     SymbolNode* a = nullptr;
-    os << "Vanish symbols (" << this->vanish_symbol_count << "): " << std::endl;
-    if ((a = this->vanish_symbol_list) != nullptr) {
-        os << *a->snode->symbol << std::endl;
-        for (a = this->vanish_symbol_list; a != nullptr; a = a->next) {
-            os << *a->snode->symbol << std::endl;
-        }
+    os << "Vanish symbols (" << this->vanish_symbol_list.size()
+       << "): " << std::endl;
+    for (const auto& a : this->vanish_symbol_list) {
+        os << *a.snode->symbol << std::endl;
     }
     os << std::endl;
 }
@@ -280,40 +267,24 @@ Grammar::write(std::ostream& os,
     os << std::endl;
 }
 
-auto
-StateArray::create() -> std::shared_ptr<StateArray>
-{
-    return std::make_shared<StateArray>();
-}
-
-void
-StateArray::expand(StateArray* a, size_t new_size)
-{
-    a->rs_count = std::vector<int>(a->conflict_list.size(), 0);
-    a->rr_count = std::vector<int>(a->conflict_list.size(), 0);
-    while (a->conflict_list.size() != new_size) {
-        a->conflict_list.push_back(nullptr);
-    }
-}
-
 void
 NewStates::inc_conflict_count(const int s, const size_t state) noexcept
 {
     if (s > 0) {
         this->conflicts_count.rs++;
-        this->states_new_array->rs_count[state]++;
+        this->states_new_array.at(state).rs_count++;
     } else {
         this->conflicts_count.rr++;
-        this->states_new_array->rr_count[state]++;
+        this->states_new_array.at(state).rr_count++;
     }
 }
 
 auto
-NewStates::add_to_conflict_array(int state,
-                                 std::shared_ptr<SymbolTableNode> lookahead,
-                                 int action1,
-                                 int action2) noexcept
-  -> std::shared_ptr<ConflictNode>
+NewStates::add_to_conflict_array(
+  const int state,
+  const std::shared_ptr<SymbolTableNode> lookahead,
+  const int action1,
+  const int action2) noexcept -> std::shared_ptr<ConflictNode>
 {
     int r = 0, s = 0; // r < s
     Conflict* b_prev = nullptr;
@@ -326,17 +297,17 @@ NewStates::add_to_conflict_array(int state,
         s = action1;
     }
 
-    if (this->states_new_array->rr_count.at(state) == 0 &&
-        this->states_new_array->rs_count.at(state) == 0) {
+    if (this->states_new_array.at(state).rr_count == 0 &&
+        this->states_new_array.at(state).rs_count == 0) {
         std::shared_ptr<ConflictNode> c =
           std::make_shared<ConflictNode>(state, lookahead, r, s);
-        this->states_new_array->conflict_list.at(state) = c;
+        this->states_new_array.at(state).conflict = c;
         this->inc_conflict_count(s, state);
         return c;
     }
 
     for (std::shared_ptr<Conflict> b =
-           this->states_new_array->conflict_list[state];
+           this->states_new_array.at(state).conflict;
          b != nullptr;
          b_prev = b.get(), b = b->next) {
         if (state == b->state && lookahead == b->lookahead && r == b->r &&
@@ -347,8 +318,8 @@ NewStates::add_to_conflict_array(int state,
               std::make_shared<ConflictNode>(state, lookahead, r, s);
 
             if (b_prev == nullptr) { // insert at the head.
-                c->next = this->states_new_array->conflict_list[state];
-                this->states_new_array->conflict_list[state] = c;
+                c->next = this->states_new_array.at(state).conflict;
+                this->states_new_array.at(state).conflict = c;
             } else { // insert in the middle.
                 c->next = b;
                 b_prev->next = c;
@@ -374,8 +345,7 @@ void
 YAlgorithm::init()
 {
     this->new_states.states_new = create_state_collection();
-    this->new_states.states_new_array =
-      StateArray::create(); // size == PARSING_TABLE_SIZE
+    this->new_states.states_new_array.clear(); // size == PARSING_TABLE_SIZE
 
     if (this->options.use_lalr) {
         states_inadequate = create_state_no_array();
@@ -396,14 +366,15 @@ operator<<(std::ostream& os, const Context& context) -> std::ostream&
 {
     os << " {";
 
-    const SymbolNode* s = context.nContext;
-    if (s != nullptr) {
-        os << *s->snode->symbol;
-        while ((s = s->next) != nullptr) {
-            os << ", " << *s->snode->symbol;
+    bool first_s = true;
+    for (const auto& s : context.context) {
+        if (first_s) {
+            first_s = false;
+        } else {
+            os << ", ";
         }
+        os << *s.snode->symbol;
     }
-
     os << "} ";
     return os;
 }
@@ -414,7 +385,7 @@ write_configuration(std::ostream& os,
                     const Configuration& c)
 {
     auto& options = Options::get();
-    grammar.rules[c.ruleID]->write(os, c.marker);
+    grammar.rules.at(c.ruleID)->write(os, c.marker);
 
     if (options.use_lr0 && !options.use_lalr) { // LR(0), no context.
         // do nothing unless is goal production.
@@ -470,10 +441,11 @@ write_state_conflict_list(std::ostream& os,
     if (state < 0)
         return;
 
-    if (states_array.rr_count[state] == 0 && states_array.rs_count[state] == 0)
+    if (states_array.at(state).rr_count == 0 &&
+        states_array.at(state).rs_count == 0)
         return;
 
-    auto c = states_array.conflict_list[state];
+    auto c = states_array.at(state).conflict;
     for (; c != nullptr; c = c->next) {
         os << c->state << ": ";
         if (c->s > 0) {
@@ -497,22 +469,21 @@ NewStates::write_grammar_conflict_list(std::ostream& os) const noexcept
        << this->conflicts_count.rr << " reduce/reduce" << std::endl
        << "\n";
 
-    for (int i = 0; i < ParsingTblRows; i++) {
-        if (this->states_new_array->rs_count[i] > 0) {
-            os << "  state " << i << ": " << this->states_new_array->rs_count[i]
+    for (size_t i = 0; i < ParsingTblRows; i++) {
+        const auto& state = this->states_new_array.at(i);
+        if (state.rs_count > 0) {
+            os << "  state " << i << ": " << state.rs_count
                << " shift/reduce conflict"
-               << ((this->states_new_array->rs_count[i] == 1) ? "" : "s");
-            if (this->states_new_array->rr_count[i] > 0) {
-                os << ", " << this->states_new_array->rr_count[i]
-                   << " reduce/reduce conflict"
-                   << ((this->states_new_array->rr_count[i] == 1) ? "" : "s");
+               << ((state.rs_count == 1) ? "" : "s");
+            if (state.rr_count > 0) {
+                os << ", " << state.rr_count << " reduce/reduce conflict"
+                   << ((state.rr_count == 1) ? "" : "s");
             }
             os << std::endl;
-        } else if (this->states_new_array->rr_count[i] > 0) {
-            os << "  state " << i << ": " << this->states_new_array->rr_count[i]
+        } else if (state.rr_count > 0) {
+            os << "  state " << i << ": " << state.rr_count
                << " reduce/reduce conflict"
-               << ((this->states_new_array->rr_count[i] == 1) ? "" : "s")
-               << std::endl;
+               << ((state.rr_count == 1) ? "" : "s") << std::endl;
         }
     }
     os << std::endl;
@@ -532,28 +503,27 @@ NewStates::write_grammar_conflict_list2(std::ostream& os) const noexcept
        << this->conflicts_count.rr << " reduce/reduce]" << std::endl
        << "\n";
 
-    for (int i = 0; i < ParsingTblRows; i++) {
+    for (size_t i = 0; i < ParsingTblRows; i++) {
         if (!is_reachable_state(i))
             continue;
 
         int state = get_actual_state(i);
-
-        if (a->rs_count[i] > 0) {
-            os << "  state " << state << ": " << a->rs_count[i]
-               << " shift/reduce conflict"
-               << ((a->rs_count[i] == 1) ? "" : "s");
-            final_rs_count += a->rs_count[i];
-            if (a->rr_count[i] > 0) {
-                os << ", " << a->rr_count[i] << " reduce/reduce conflict"
-                   << ((a->rr_count[i] == 1) ? "" : "s");
-                final_rr_count += a->rr_count[i];
+        const auto& a_i = a.at(i);
+        if (a_i.rs_count > 0) {
+            os << "  state " << state << ": " << a_i.rs_count
+               << " shift/reduce conflict" << ((a_i.rs_count == 1) ? "" : "s");
+            final_rs_count += a_i.rs_count;
+            if (a_i.rr_count > 0) {
+                os << ", " << a_i.rr_count << " reduce/reduce conflict"
+                   << ((a_i.rr_count == 1) ? "" : "s");
+                final_rr_count += a_i.rr_count;
             }
             os << std::endl;
-        } else if (a->rr_count[i] > 0) {
-            os << "  state " << state << ": " << a->rr_count[i]
-               << " reduce/reduce conflict"
-               << ((a->rr_count[i] == 1) ? "" : "s") << std::endl;
-            final_rr_count += a->rr_count[i];
+        } else if (a_i.rr_count > 0) {
+            os << "  state " << state << ": " << a_i.rr_count
+               << " reduce/reduce conflict" << ((a_i.rr_count == 1) ? "" : "s")
+               << std::endl;
+            final_rr_count += a_i.rr_count;
         }
     }
 
@@ -604,7 +574,7 @@ write_state_collection(std::ostream& os,
 
     std::shared_ptr<State> s = new_states.states_new->states_head;
     while (s != nullptr) {
-        write_state(os, grammar, *new_states.states_new_array, *s);
+        write_state(os, grammar, new_states.states_new_array, *s);
         s = s->next;
         os << std::endl;
     }
@@ -614,233 +584,178 @@ write_state_collection(std::ostream& os,
     os << std::endl;
 }
 
-/*
- * Add the given symbol to the context in increasing order.
- * There is no need to sort context later.
- */
+/// Add the given symbol to the context in increasing order.
+/// There is no need to sort context later.
 auto
-add_symbol2_context(std::shared_ptr<SymbolTableNode> snode, Context* c) -> bool
+add_symbol2_context(std::shared_ptr<SymbolTableNode> snode, Context& c) -> bool
 {
-    SymbolNode *s = c->nContext, *s_prev = nullptr;
-    for (; s != nullptr; s_prev = s, s = s->next) {
-        int cmp_val = s->snode->symbol->compare(*snode->symbol);
+    for (auto it = c.context.begin(); it != c.context.end(); it++) {
+        int cmp_val = (*it).snode->symbol->compare(*snode->symbol);
         if (cmp_val == 0)
             return false;  // already in context.
         if (cmp_val > 0) { // s_prev < snode < s
-            SymbolNode* t = SymbolNode::create(snode);
-            t->next = s;
-            if (s_prev == nullptr) {
-                c->nContext = t;
-            } else {
-                s_prev->next = t;
-            }
-            c->context_count++;
-
+            c.context.emplace(it, snode);
             return true; // inserted in the middle of context list.
         }
         // else: cmp_val < 0, go to next context node.
     }
 
-    // insert at the end of list. now s == nullptr.
-    if (s_prev == nullptr) {
-        c->nContext = SymbolNode::create(snode);
-    } else {
-        s_prev->next = SymbolNode::create(snode);
-    }
-    c->context_count++;
-
+    // insert at the end of list.
+    c.context.emplace_back(snode);
     return true;
 }
 
-/*
- * Insert snode to the list, no repetition allowed, increasing order.
- * Do it like insertion sort.
- *
- * @parameters:
- *  exist - label whether snode already existed.
- */
 auto
-insert_symbol_list_unique_inc(SymbolList list,
-                              std::shared_ptr<SymbolTableNode> snode,
-                              bool* exist) -> SymbolNode*
+insert_symbol_list_unique_inc(SymbolList& list,
+                              std::shared_ptr<SymbolTableNode> snode) -> bool
 {
-    *exist = false;
-    if (list == nullptr)
-        return SymbolNode::create(snode);
-
-    SymbolNode *n = list, *n_prev = nullptr;
-    for (; n != nullptr; n_prev = n, n = n->next) {
-        if (n->snode == snode) {
-            *exist = true;
-            return list; // existing node.
+    for (auto it = list.begin(); it != list.end(); it++) {
+        if (it->snode == snode) {
+            return true; // existing node.
         }
-        if (*n->snode->symbol > *snode->symbol) {
-            SymbolNode* new_node = SymbolNode::create(snode);
-            // insert new_snode before n.
-
-            if (n_prev == nullptr) {
-                new_node->next = list;
-                return new_node;
-            }
-            new_node->next = n;
-            n_prev->next = new_node;
-            return list;
+        if (*it->snode->symbol > *snode->symbol) {
+            list.emplace(it, snode);
+            return false;
         }
-    } // end of for.
+    }
 
     // insert as the last node.
-    n_prev->next = SymbolNode::create(snode);
-    return list;
+    list.emplace_back(snode);
+    return false;
 }
 
-/*
- * Insert symbol to list tail if not exist, un-ordered.
- */
+/// Insert symbol to list tail if not exist, un-ordered.
 static auto
-insert_unique_symbol_list(SymbolList list,
-                          std::shared_ptr<SymbolTableNode> snode,
-                          bool* exist) -> SymbolNode*
+insert_unique_symbol_list(SymbolList& list,
+                          std::shared_ptr<SymbolTableNode> snode) -> bool
 {
-    *exist = false;
-
-    if (list == nullptr)
-        return SymbolNode::create(snode);
-
-    SymbolNode *n = list, *n_prev = nullptr;
-    for (; n != nullptr; n_prev = n, n = n->next) {
-        if (n->snode == snode) {
-            *exist = true;
-            return list; // existing node.
+    for (const auto& it : list) {
+        if (it.snode == snode) {
+            return true; // existing node.
         }
-    } // end of for.
+    }
 
     // insert as the last node.
-    n_prev->next = SymbolNode::create(snode);
-    return list;
+    list.emplace_back(snode);
+    return false;
 }
 
 static void
-write_symbol_node_array(std::ostream& os, SymbolNode* str)
+write_symbol_node_array(std::ostream& os, const SymbolList& str)
 {
-    for (SymbolNode* a = str; a != nullptr; a = a->next) {
-        if (a != str)
+    bool first_a = true;
+    for (const auto& a : str) {
+        if (first_a) {
+            first_a = false;
+        } else {
             os << ", ";
-        os << *a->snode->symbol;
+        }
+        os << *a.snode->symbol;
     }
     os << std::endl;
 }
 
 static void
-show_t_heads(std::ostream& os, const SymbolList alpha, const SymbolList theads)
+show_t_heads(std::ostream& os,
+             const SymbolList& alpha,
+             const SymbolList& theads)
 {
     os << "string '";
 
-    for (SymbolNode* a = alpha; a != nullptr; a = a->next)
-        os << *a->snode->symbol << " ";
+    for (const auto& a : alpha)
+        os << *a.snode->symbol << " ";
 
     os << "' has theads: ";
 
-    for (SymbolNode* a = theads; a != nullptr; a = a->next)
-        os << *a->snode->symbol << " ";
+    for (const auto& a : theads)
+        os << *a.snode->symbol << " ";
 
     os << std::endl;
 }
 
-void
-insert_alpha_to_heads(SymbolNode* s, SymbolNode* heads, SymbolNode* theads)
+/// @note This will skip `s`'s first element.
+static void
+insert_alpha_to_heads(const SymbolList& s,
+                      SymbolList& heads,
+                      SymbolList& theads)
 {
-    bool exist = false;
-
-    for (SymbolNode* a = s; a != nullptr; a = a->next) {
-        if (is_vanish_symbol(*a->snode)) {
+    if (s.empty()) {
+        throw std::runtime_error("s should not be empty");
+    }
+    auto s_it = s.begin();
+    ++s_it;
+    for (; s_it != s.end(); ++s_it) {
+        const auto& a = *s_it;
+        if (a.snode->is_vanish_symbol()) {
             // note: a vanishable symbol must be a non-terminal.
-            heads->next =
-              insert_unique_symbol_list(heads->next, a->snode, &exist);
-        } else { // not vanlish symbol. break after insertion.
-            if (a->snode->is_terminal()) { // here actually can insert to tail.
-                theads->next =
-                  insert_symbol_list_unique_inc(theads->next, a->snode, &exist);
+            insert_unique_symbol_list(heads, a.snode);
+        } else { // not vanish symbol. break after insertion.
+            if (a.snode->is_terminal()) { // here actually can insert to tail.
+                insert_symbol_list_unique_inc(theads, a.snode);
             } else { // non_terminal.
-                heads->next =
-                  insert_unique_symbol_list(heads->next, a->snode, &exist);
+                insert_unique_symbol_list(heads, a.snode);
             }
             return;
-        } // end for
-    }
-
-    // all symbols are vanishable, since didn't return in the cycle.
-    std::shared_ptr<SymbolTableNode> snode = hash_tbl_find("");
-    theads->next = insert_symbol_list_unique_inc(theads->next, snode, &exist);
-}
-
-/*
- * Insert the RHS symbols to heads up to an unvanishable symbol.
- */
-void
-insert_rhs_to_heads(SymbolNode* s, SymbolNode* heads, SymbolNode* theads)
-{
-    bool exist = false;
-
-    for (SymbolNode* a = s; a != nullptr; a = a->next) {
-        if (is_vanish_symbol(*a->snode)) {
-            // note: a vanishable symbol must be a non-terminal.
-            heads->next =
-              insert_unique_symbol_list(heads->next, a->snode, &exist);
-        } else { // not vanlish symbol. break after inserting last one.
-            if (a->snode->is_terminal()) {
-                theads->next =
-                  insert_symbol_list_unique_inc(theads->next, a->snode, &exist);
-            } else { // non_terminal.
-                heads->next =
-                  insert_unique_symbol_list(heads->next, a->snode, &exist);
-            }
-            return;
-        } // end for
-    }
-}
-
-/*
- * Algorithm:
- *
- * insert each symbol S in alpha to heads until S is NOT vanishable.
- * if S is a terminal, then insert S to theads; else insert to heads.
- * if all symbols are N.T., insert empty string to theads.
- *
- * for each symbol A in heads {
- *   for each grammar rule r where A is the LHS {
- *     for each symbol B in r's RHS until NOT vanishable {
- *       if B is NT, insert B to heads's tail;
- *       else B is T, insert (like insertion sort) to theads.
- *     }
- *   }
- * }
- *
- * @added to replace the old one on: 3/9/2008
- */
-auto
-get_theads(const Grammar& grammar, SymbolNode* alpha) -> SymbolNode*
-{
-    // dummy header of the lists heads and theads.
-    SymbolNode* heads = SymbolNode::create(hash_tbl_find(""));
-    SymbolNode* theads = SymbolNode::create(hash_tbl_find(""));
-
-    insert_alpha_to_heads(alpha, heads, theads);
-
-    SymbolNode* n = nullptr;
-    for (n = heads->next; n != nullptr; n = n->next) {
-        for (const RuleIDNode* rules = n->snode->ruleIDList; rules != nullptr;
-             rules = rules->next) {
-            Production* p = grammar.rules[rules->rule_id];
-            insert_rhs_to_heads(p->nRHS_head, heads, theads);
         }
     }
 
-    free_symbol_node_list(heads);
+    // all symbols are vanishable, since we didn't return in the cycle.
+    std::shared_ptr<SymbolTableNode> snode = hash_tbl_find("");
+    insert_symbol_list_unique_inc(theads, snode);
+}
 
-    // remove the dummy header of theads list.
-    n = theads;
-    theads = theads->next;
-    free_symbol_node(n);
+/// Insert the RHS symbols to heads up to an unvanishable symbol.
+static void
+insert_rhs_to_heads(const SymbolList& s, SymbolList& heads, SymbolList& theads)
+{
+    for (const auto& a : s) {
+        if (a.snode->is_vanish_symbol()) {
+            // note: a vanishable symbol must be a non-terminal.
+            insert_unique_symbol_list(heads, a.snode);
+        } else { // not vanlish symbol. break after inserting last one.
+            if (a.snode->is_terminal()) {
+                insert_symbol_list_unique_inc(theads, a.snode);
+            } else { // non_terminal.
+                insert_unique_symbol_list(heads, a.snode);
+            }
+            return;
+        }
+    }
+}
+
+/// Algorithm:
+///
+/// insert each symbol S in alpha to heads until S is NOT vanishable.
+/// if S is a terminal, then insert S to theads; else insert to heads.
+/// if all symbols are N.T., insert empty string to theads.
+///
+/// for each symbol A in heads {
+///   for each grammar rule r where A is the LHS {
+///     for each symbol B in r's RHS until NOT vanishable {
+///       if B is NT, insert B to heads's tail;
+///       else B is T, insert (like insertion sort) to theads.
+///     }
+///   }
+/// }
+///
+/// @added to replace the old one on: 3/9/2008
+///
+/// @note This will skip alpha's first element.
+auto
+get_theads(const Grammar& grammar, const SymbolList& alpha) -> SymbolList
+{
+    SymbolList heads{};
+    SymbolList theads{};
+
+    insert_alpha_to_heads(alpha, heads, theads);
+
+    for (const auto& n : heads) {
+        for (const RuleIDNode* rules = n.snode->ruleIDList; rules != nullptr;
+             rules = rules->next) {
+            Production* p = grammar.rules.at(rules->rule_id);
+            insert_rhs_to_heads(p->nRHS, heads, theads);
+        }
+    }
 
     if (Options::get().debug_gen_parsing_machine) {
         grammar.fp_v << "==getTHeads: theads for: ";
@@ -851,74 +766,56 @@ get_theads(const Grammar& grammar, SymbolNode* alpha) -> SymbolNode*
     return theads;
 }
 
-/*
- * Helper function for getContext().
- * This section of code is called three times.
- */
-void
-get_context_do(const Configuration* cfg, Context* context)
+/// Obtain the context for a configuration.
+static void
+get_context(const Grammar& grammar, const Configuration& cfg, Context& context)
 {
-    SymbolNode* a = cfg->context->nContext;
-    while (a != nullptr) {
-        add_symbol2_context(a->snode, context);
-        a = a->next;
-    }
-}
+    SymbolList theads{};
+    const Production& production = *grammar.rules.at(cfg.ruleID);
 
-/*
- * Obtain the context for a configuration.
- */
-void
-get_context(const Grammar& grammar, const Configuration* cfg, Context* context)
-{
-    SymbolList theads = nullptr;
-    Production* production = grammar.rules[cfg->ruleID];
-
-    if (cfg->marker == production->RHS_count - 1) {
+    if (cfg.marker == production.nRHS.size() - 1) {
         // is last symbol, just copy the context.
-        get_context_do(cfg, context);
+        for (const auto& a : cfg.context->context) {
+            add_symbol2_context(a.snode, context);
+        }
     } else { // need to find thead(alpha)
         if (Options::get().show_theads)
-            write_configuration(grammar.fp_v, grammar, *cfg);
+            write_configuration(grammar.fp_v, grammar, cfg);
 
         // alpha is the string after scanned symbol.
-        SymbolList alpha =
-          cfg->nMarker->next; // we know cfg->nMarker != nullptr.
+
+        const SymbolList& alpha =
+          cfg.nMarker; // we know cfg.nMarker is not empty.
         theads = get_theads(grammar, alpha);
 
         if (Options::get().show_theads) {
             show_t_heads(grammar.fp_v, alpha, theads);
         }
 
-        // if theads_count == 0, just copy the context.
-        if (theads == nullptr) {
-            get_context_do(cfg, context);
+        // if theads is empty, just copy the context.
+        if (theads.empty()) {
+            for (const auto& a : cfg.context->context) {
+                add_symbol2_context(a.snode, context);
+            }
         } else { // theads_count > 0
-            for (SymbolNode* a = theads; a != nullptr; a = a->next) {
-                if (a->snode->symbol->empty()) { // empty string.
+            for (const auto& a : theads) {
+                if (a.snode->symbol->empty()) { // empty string.
                     // Entire alpha vanishable. Copy context.
-                    get_context_do(cfg, context);
+                    for (const auto& a : cfg.context->context) {
+                        add_symbol2_context(a.snode, context);
+                    }
                 } else {
-                    add_symbol2_context(a->snode, context);
+                    add_symbol2_context(a.snode, context);
                 }
-            } // end of for
+            }
         }
-    } // end of if-else
-
-    free_symbol_node_list(theads);
+    }
 }
 
-/*
- * Empty a context.
- */
 void
 Context::clear()
 {
-    this->context_count = 0;
-    if (this->nContext != nullptr) {
-        free_symbol_node_list(this->nContext);
-        this->nContext = nullptr;
-    }
+    this->context.clear();
 }
 
 void
@@ -939,80 +836,47 @@ free_config(Configuration* c)
     delete c;
 }
 
-/*
- * Determine if productions p1 and p2 are the same.
- * Can be used for general production comparison.
- * In this program this is no longer used.
- * But can be used to find out if the grammar has
- * repeated rules etc.
- */
-auto
-is_same_production(const Production* p1, const Production* p2) -> bool
-{
-    if (p1->nLHS->snode != p2->nLHS->snode) {
-        return false;
-    }
-    if (p1->RHS_count != p2->RHS_count) {
-        return false;
-    }
-
-    const SymbolNode* a = p1->nRHS_head;
-    const SymbolNode* b = p2->nRHS_head;
-
-    while (a != nullptr) {
-        if (a->snode != b->snode)
-            return false;
-        a = a->next;
-        b = b->next;
-    }
-    return true;
-}
-
-/*
- * Determine if contexts c1 and c2 are the same.
- */
-auto
-is_same_context(const Context* c1, const Context* c2) -> bool
-{
-    if (c1->context_count != c2->context_count)
-        return false;
-
-    const SymbolNode* a = c1->nContext;
-    const SymbolNode* b = c2->nContext;
-    while (a != nullptr) {
-        if (a->snode != b->snode)
-            return false;
-        a = a->next;
-        b = b->next;
-    }
-    return true;
-}
-
-/*
- * Determine if configurations con and c are the same.
- */
-auto
-is_same_config(const Configuration* con, const Configuration* c) -> bool
-{
-    if (con->marker != c->marker)
-        return false;
-    if (con->ruleID != c->ruleID)
-        return false;
-    if (!is_same_context(con->context, c->context))
-        return false;
-    return true;
-}
-
-/*
- * Note that a successor config's marker = 0.
- */
+/// Determine if contexts c1 and c2 are the same.
 static auto
-is_existing_successor_config(const State& s, int rule_id, const Context* con)
+is_same_context(const Context& c1, const Context& c2) -> bool
+{
+    if (c1.context.size() != c2.context.size())
+        return false;
+
+    auto a = c1.context.cbegin();
+    auto b = c2.context.cbegin();
+    while (a != c1.context.cend()) {
+        if (a->snode != b->snode)
+            return false;
+        a++;
+        b++;
+    }
+    return true;
+}
+
+/// Determine if configurations con and c are the same.
+static auto
+is_same_config(const Configuration& config1, const Configuration& config2)
   -> bool
+{
+    if (config1.marker != config2.marker)
+        return false;
+    if (config1.ruleID != config2.ruleID)
+        return false;
+    if (!is_same_context(*config1.context, *config2.context))
+        return false;
+    return true;
+}
+
+/// Note that a successor config's marker = 0.
+static auto
+is_existing_successor_config(const State& s,
+                             const int rule_id,
+                             const Context& con) -> bool
 {
     for (const auto& config : s.config) {
         if (config->marker == 0 && rule_id == config->ruleID &&
-            is_same_context(con, config->context))
+            is_same_context(con, *config->context))
             return true; // existing config
     }
     return false;
@@ -1021,21 +885,21 @@ is_existing_successor_config(const State& s, int rule_id, const Context* con)
 /// Add `con` to `s.config`.
 static void
 add_successor_config_to_state(const Grammar& grammar,
-                              std::shared_ptr<StateNode> s,
-                              int rule_id,
-                              const Context* con)
+                              const std::shared_ptr<StateNode> s,
+                              const int rule_id,
+                              const Context& con)
 {
-    // marker = 0, isCoreConfig = 0.
+    // marker = 0, is_core_config = 0.
     Configuration* c = create_config(grammar, rule_id, 0, 0);
     c->owner = s;
-    copy_context(c->context, con);
+    copy_context(*c->context, con);
     s->config.push_back(c);
 }
 
 auto
 is_final_configuration(const Grammar& grammar, const Configuration* c) -> bool
 {
-    if (c->marker == grammar.rules[c->ruleID]->RHS_count)
+    if (c->marker == grammar.rules.at(c->ruleID)->nRHS.size())
         return true;
     return false;
 }
@@ -1043,7 +907,7 @@ is_final_configuration(const Grammar& grammar, const Configuration* c) -> bool
 auto
 is_empty_production(const Grammar& grammar, const Configuration* c) -> bool
 {
-    if (grammar.rules[c->ruleID]->RHS_count == 0)
+    if (grammar.rules.at(c->ruleID)->nRHS.size() == 0)
         return true;
     return false;
 }
@@ -1070,8 +934,8 @@ config_cmp(const Grammar& grammar,
            const Configuration* c1,
            const Configuration* c2) -> int
 {
-    const Production* c1_production = grammar.rules[c1->ruleID];
-    const Production* c2_production = grammar.rules[c2->ruleID];
+    const Production* c1_production = grammar.rules.at(c1->ruleID);
+    const Production* c2_production = grammar.rules.at(c2->ruleID);
 
     // std::cout << "compare LHS" << std::endl;
     int cmp_val = c1_production->nLHS->snode->symbol->compare(
@@ -1080,21 +944,18 @@ config_cmp(const Grammar& grammar,
         return cmp_val;
 
     // std::cout << "compare RHS" << std::endl;
-    int count = c1_production->RHS_count;
-    if (count > c2_production->RHS_count) {
-        count = c2_production->RHS_count;
-    }
-    const SymbolNode* a = c1_production->nRHS_head;
-    const SymbolNode* b = c2_production->nRHS_head;
-    for (int i = 0; i < count; i++) {
+    auto a = c1_production->nRHS.cbegin();
+    auto b = c2_production->nRHS.cbegin();
+    while ((a != c1_production->nRHS.cend()) &&
+           (b != c2_production->nRHS.cend())) {
         cmp_val = a->snode->symbol->compare(*b->snode->symbol);
         if (cmp_val != 0)
             return cmp_val;
-        a = a->next;
-        b = b->next;
+        a++;
+        b++;
     }
 
-    cmp_val = c1_production->RHS_count - c2_production->RHS_count;
+    cmp_val = c1_production->nRHS.size() - c2_production->nRHS.size();
     if (cmp_val > 0) {
         return 1;
     } // c1 RHS is longer.
@@ -1114,23 +975,19 @@ config_cmp(const Grammar& grammar,
 
     // If production and marker are the same, go on to compare context.
     // std::cout << "compare context" << std::endl;
-    count = c1->context->context_count;
-    if (count > c2->context->context_count) {
-        count = c2->context->context_count;
-    }
-
-    a = c1->context->nContext;
-    b = c2->context->nContext;
-    while (a != nullptr) {
+    a = c1->context->context.cbegin();
+    b = c2->context->context.cbegin();
+    while ((a != c1->context->context.cend()) &&
+           (b != c2->context->context.cend())) {
         cmp_val = a->snode->symbol->compare(*b->snode->symbol);
         if (cmp_val != 0)
             return cmp_val;
-        a = a->next;
-        b = b->next;
+        a++;
+        b++;
     }
 
     // std::cout << "compare context count" << std::endl;
-    cmp_val = c1->context->context_count - c2->context->context_count;
+    cmp_val = c1->context->context.size() - c2->context->context.size();
     if (cmp_val > 0) {
         return 1;
     }
@@ -1153,7 +1010,7 @@ add_core_config2_state(const Grammar& grammar,
 {
     size_t i = 0;
     for (; i < s->config.size(); i++) {
-        const int cmp_val = config_cmp(grammar, s->config[i], new_config);
+        const int cmp_val = config_cmp(grammar, s->config.at(i), new_config);
         if (cmp_val == 0) {
             // a core config shouldn't be added twice.
             throw std::runtime_error("add_core_config2_state: a core "
@@ -1180,7 +1037,7 @@ is_compatible_successor_config(const std::shared_ptr<const State>& s,
                                const int rule_id) -> std::optional<size_t>
 {
     for (size_t i = 0; i < s->config.size(); i++) {
-        const Configuration* c = s->config[i];
+        const Configuration* c = s->config.at(i);
         if (c->marker == 0 && rule_id == c->ruleID)
             return i; // existing compatible config
     }
@@ -1197,17 +1054,18 @@ get_config_successors(const Grammar& grammar,
                       std::shared_ptr<State> s)
 {
     while (config_queue.size() > 0) {
-        Configuration* config = s->config[*config_queue.pop()];
+        Configuration& config = *s->config.at(*config_queue.pop());
 
-        if (config->marker >= 0 &&
-            config->marker < grammar.rules[config->ruleID]->RHS_count) {
-            const SymbolTableNode& scanned_symbol = *get_scanned_symbol(config);
+        if (config.marker >= 0 &&
+            config.marker < grammar.rules.at(config.ruleID)->nRHS.size()) {
+            const std::shared_ptr<SymbolTableNode> scanned_symbol =
+              get_scanned_symbol(config);
 
-            if (scanned_symbol.is_non_terminal()) {
-                Context tmp_context;
-                get_context(grammar, config, &tmp_context);
+            if (scanned_symbol->is_non_terminal()) {
+                Context tmp_context{};
+                get_context(grammar, config, tmp_context);
 
-                for (const RuleIDNode* r = scanned_symbol.ruleIDList;
+                for (const RuleIDNode* r = scanned_symbol->ruleIDList;
                      r != nullptr;
                      r = r->next) {
                     // Grammar.rules[r->ruleID] starts with this scanned
@@ -1219,7 +1077,7 @@ get_config_successors(const Grammar& grammar,
 
                     if (!index_opt.has_value()) { // new config.
                         add_successor_config_to_state(
-                          grammar, s, r->rule_id, &tmp_context);
+                          grammar, s, r->rule_id, tmp_context);
                         // `s->config.size() - 1 >= 0` here (see the first line
                         // of the loop)
                         config_queue.push(s->config.size() - 1);
@@ -1232,9 +1090,9 @@ get_config_successors(const Grammar& grammar,
                             // to config_queue. This saves time. marker = 0
                             // here, no need to check marker >= 0.
                             if (is_final_configuration(grammar,
-                                                       s->config[index]))
+                                                       s->config.at(index)))
                                 continue;
-                            if (get_scanned_symbol(s->config[index])
+                            if (get_scanned_symbol(*s->config.at(index))
                                   ->is_terminal())
                                 continue;
                             if (config_queue.exist(index) == 1)
@@ -1259,30 +1117,27 @@ get_config_successors(const Grammar& grammar,
 static void
 get_successor_for_config(const Grammar& grammar,
                          std::shared_ptr<State> s,
-                         const Configuration* config)
+                         const Configuration& config)
 {
-    static Context tmp_context;
-    tmp_context.nContext = nullptr;
 
-    if (config->marker >= 0 &&
-        config->marker < grammar.rules[config->ruleID]->RHS_count) {
+    if (config.marker >= 0 &&
+        config.marker < grammar.rules.at(config.ruleID)->nRHS.size()) {
         const SymbolTableNode& scanned_symbol = *get_scanned_symbol(config);
 
         if (scanned_symbol.is_non_terminal()) {
-
-            tmp_context.clear(); // clear tmp_context
-            get_context(grammar, config, &tmp_context);
+            Context tmp_context{};
+            get_context(grammar, config, tmp_context);
 
             for (const RuleIDNode* r = scanned_symbol.ruleIDList; r != nullptr;
                  r = r->next) {
-                // Grammar.rules[r->ruleID] starts with this scanned
+                // grammar.rules.at(r->ruleID) starts with this scanned
                 // symbol.
 
                 // If not an existing config, add to state s.
-                if (is_existing_successor_config(
-                      *s, r->rule_id, &tmp_context) == false) {
+                if (is_existing_successor_config(*s, r->rule_id, tmp_context) ==
+                    false) {
                     add_successor_config_to_state(
-                      grammar, s, r->rule_id, &tmp_context);
+                      grammar, s, r->rule_id, tmp_context);
                 }
             }
         } // else, is a terminal, stop.
@@ -1297,7 +1152,7 @@ get_successor_for_config(const Grammar& grammar,
  */
 static void
 combine_compatible_config(std::shared_ptr<State> s,
-                          bool debug_comb_comp_config,
+                          const bool debug_comb_comp_config,
                           std::ofstream& fp_v)
 {
     if (s == nullptr) {
@@ -1312,14 +1167,14 @@ combine_compatible_config(std::shared_ptr<State> s,
     }
 
     for (size_t i = 1; i < s->config.size(); i++) {
-        Configuration* c = s->config[i];
+        Configuration* c = s->config.at(i);
         if (c == nullptr)
             continue;
         for (size_t j = 0; j < i; j++) {
-            if (is_compatible_config(c, s->config[j])) {
-                combine_context(s->config[j]->context, c->context);
+            if (is_compatible_config(c, s->config.at(j))) {
+                combine_context(s->config.at(j)->context, c->context);
                 free_config(c); // combine config i to j, then remove i.
-                s->config[i] = nullptr;
+                s->config.at(i) = nullptr;
                 break;
             }
         }
@@ -1330,12 +1185,12 @@ combine_compatible_config(std::shared_ptr<State> s,
     size_t i = 0;
     size_t j = 0;
     while (j < s->config.size()) {
-        while (s->config[j] == nullptr) {
+        while (s->config.at(j) == nullptr) {
             j++;
         }
         if (j >= s->config.size())
             break;
-        s->config[i] = s->config[j];
+        s->config.at(i) = s->config.at(j);
         j++;
         i++;
     }
@@ -1346,9 +1201,19 @@ combine_compatible_config(std::shared_ptr<State> s,
     }
 }
 
-// TODO: use this to replace xx, yy, zz, yyy and zzz.
 struct Counts
-{};
+{
+    /// no. of calls to get_closure.
+    size_t get_closure_calls = 0;
+    /// number of config in all states before combine.
+    size_t nb_config_before_combine = 0;
+    /// max config count in all states before combine.
+    size_t max_config_before_combine = 0;
+    /// number of config in all states after combine.
+    size_t nb_config_after_combine = 0;
+    /// max config count in all states after combine.
+    size_t max_config_after_combine = 0;
+};
 
 /*
  * xx - no. of calls to getClosure,
@@ -1357,11 +1222,7 @@ struct Counts
  * yyy - number of config in all states after combine,
  * zzz - max config count in all states after combine.
  */
-static size_t xx = 0;
-static size_t yy = 0;
-static size_t zz = 0;
-static size_t yyy = 0;
-static size_t zzz = 0;
+static Counts counts{};
 
 /*
  * Get the configuration closure of a state s given its
@@ -1393,21 +1254,21 @@ YAlgorithm::get_state_closure(std::shared_ptr<State> state)
         get_config_successors(this->grammar, *this->config_queue, state);
     } else {
         for (const Configuration* config : state->config) {
-            get_successor_for_config(grammar, state, config);
+            get_successor_for_config(grammar, state, *config);
         }
 
-        xx++;
-        yy += state->config.size();
-        if (zz < state->config.size())
-            zz = state->config.size();
+        counts.get_closure_calls++;
+        counts.nb_config_before_combine += state->config.size();
+        if (counts.max_config_before_combine < state->config.size())
+            counts.max_config_before_combine = state->config.size();
 
         if (this->options.debug_comb_comp_config)
             combine_compatible_config(
               state, this->options.debug_comb_comp_config, this->fp_v);
 
-        yyy += state->config.size();
-        if (zzz < state->config.size())
-            zzz = state->config.size();
+        counts.nb_config_after_combine += state->config.size();
+        if (counts.max_config_after_combine < state->config.size())
+            counts.max_config_after_combine = state->config.size();
     }
 }
 
@@ -1464,17 +1325,12 @@ StateCollection::add_state2(std::shared_ptr<State> new_state)
 // StateCollection functions. END.
 ///////////////////////////////////////////
 
-/*
- * Get the scanned symbol of configuration c.
- * The scanned symbol can be obtained by nMarker pointer
- * as here, or by marker which needs more calculation.
- */
 auto
-get_scanned_symbol(const Configuration* c) -> std::shared_ptr<SymbolTableNode>
+get_scanned_symbol(const Configuration& c) -> std::shared_ptr<SymbolTableNode>
 {
-    if (c->nMarker == nullptr)
+    if (c.nMarker.empty())
         return nullptr;
-    return c->nMarker->snode;
+    return c.nMarker.front().snode;
 }
 
 /*
@@ -1504,8 +1360,6 @@ auto
 create_context() -> Context*
 {
     auto* c = new Context;
-    c->nContext = nullptr;
-    c->context_count = 0;
     return c;
 }
 
@@ -1526,9 +1380,9 @@ create_config(const Grammar& grammar,
     c->marker = marker;
     c->isCoreConfig = is_core_config;
 
-    c->nMarker = nullptr;
     if (rule_id >= 0)
-        c->nMarker = grammar.rules[rule_id]->nRHS_head;
+        c->nMarker =
+          grammar.rules.at(rule_id)->nRHS; // copy, not exactly what we want !
 
     c->owner = nullptr;
     if (Options::get().use_lalr) {
@@ -1546,19 +1400,9 @@ create_config(const Grammar& grammar,
 }
 
 void
-copy_context(Context* dest, const Context* src)
+copy_context(Context& dest, const Context& src)
 {
-    dest->context_count = src->context_count;
-
-    dest->nContext = nullptr;
-    if (src->nContext != nullptr) {
-        SymbolNode* a = src->nContext;
-        SymbolNode* b = dest->nContext = SymbolNode::create(a->snode);
-        while ((a = a->next) != nullptr) {
-            b->next = SymbolNode::create(a->snode);
-            b = b->next;
-        }
-    }
+    dest.context = src.context;
 }
 
 /*
@@ -1566,47 +1410,42 @@ copy_context(Context* dest, const Context* src)
  * used by function transition when creating new state.
  */
 void
-copy_config(Configuration* c_dest, const Configuration* c_src)
+copy_config(Configuration& c_dest, const Configuration& c_src)
 {
-    c_dest->marker = c_src->marker;
-    c_dest->isCoreConfig = c_src->isCoreConfig;
-    c_dest->ruleID = c_src->ruleID;
-    c_dest->nMarker = c_src->nMarker;
-    copy_context(c_dest->context, c_src->context);
+    c_dest.marker = c_src.marker;
+    c_dest.isCoreConfig = c_src.isCoreConfig;
+    c_dest.ruleID = c_src.ruleID;
+    c_dest.nMarker = c_src.nMarker;
+    copy_context(*c_dest.context, *c_src.context);
 }
 
 /////////////////////////////////////////////////////////
 // Functions for combining compatible states. START.
 /////////////////////////////////////////////////////////
 
-/*
- * Two configurations are common core configurations if
- * they have the same production and marker, but
- * DIFFERENT contexts.
- */
-auto
-is_common_config(const Configuration* con, const Configuration* c) -> bool
+/// Two configurations are common core configurations if
+/// they have the same production and marker, but
+/// DIFFERENT contexts.
+static auto
+is_common_config(const Configuration& con, const Configuration& c) -> bool
 {
-    if (con->marker != c->marker)
+    if (con.marker != c.marker)
         return false;
-    if (con->ruleID != c->ruleID)
+    if (con.ruleID != c.ruleID)
         return false;
     // If all same, then are same config, not common config!
-    if (is_same_context(con->context, c->context))
+    if (is_same_context(*con.context, *c.context))
         return false;
     return true;
 }
 
-/*
- * Pre-assumption: s1, s2 have at least one core config.
- * Returns true if at least one config pair have common config.
- */
+/// Pre-assumption: s1, s2 have at least one core config.
+/// Returns true if at least one config pair have common config.
 auto
 has_common_core(const State* s1, const State* s2) -> bool
 {
     if (s1 == nullptr || s2 == nullptr)
         return false;
-    // std::cout << "hasCommonCore: " << std::endl;
 
     bool result = false;
     if (s1->core_config_count != s2->core_config_count)
@@ -1614,9 +1453,9 @@ has_common_core(const State* s1, const State* s2) -> bool
     if (s1->core_config_count == 0)
         return false;
     for (size_t i = 0; i < s1->core_config_count; i++) {
-        if (is_same_config(s1->config[i], s2->config[i])) {
+        if (is_same_config(*s1->config.at(i), *s2->config.at(i))) {
             // do nothing.
-        } else if (is_common_config(s1->config[i], s2->config[i])) {
+        } else if (is_common_config(*s1->config.at(i), *s2->config.at(i))) {
             result = true;
         } else { // not same, and not common core.
             return false;
@@ -1625,43 +1464,40 @@ has_common_core(const State* s1, const State* s2) -> bool
     return result;
 }
 
-/*
- * Pre-assumption: contexts c1 and c2 are sorted in increasing order.
- * See function addSymbol2Context().
- */
-auto
-has_empty_intersection(const Context* c1, const Context* c2) -> bool
+/// Pre-assumption: contexts c1 and c2 are sorted in increasing order.
+/// See function addSymbol2Context().
+static auto
+has_empty_intersection(const Context& c1, const Context& c2) -> bool
 {
-    const SymbolNode* a = c1->nContext;
-    const SymbolNode* b = c2->nContext;
-
+    auto a = c1.context.cbegin();
+    auto b = c2.context.cbegin();
     // intrinsically this is O(m + n).
-    while (a != nullptr && b != nullptr) {
+    while (a != c1.context.cend() && b != c2.context.cend()) {
         if (a->snode == b->snode)
             return false; // common element found
         if (*a->snode->symbol < *b->snode->symbol) {
-            a = a->next;
+            a++;
         } else {
-            b = b->next;
+            b++;
         }
     }
 
     return true;
 }
 
-/*
- * condition (a).
- * if (a) is satisfied, return true, otherwise false.
- */
-auto
-is_compatible_state_a(const State* s1, const State* s2) -> bool
+/// condition (a).
+/// if (a) is satisfied, return true, otherwise false.
+// TODO: this function seems to assume that `s1.core_config_count ==
+// s2.core_config_count` !
+static auto
+is_compatible_state_a(const State& s1, const State& s2) -> bool
 {
-    size_t count = s1->core_config_count;
+    size_t count = s1.core_config_count;
     for (size_t i = 0; i < count; i++) {
         for (size_t j = 0; j < count; j++) {
             if (i != j) {
-                const Context* c1 = s1->config[i]->context;
-                const Context* c2 = s2->config[j]->context;
+                const Context& c1 = *s1.config.at(i)->context;
+                const Context& c2 = *s2.config.at(j)->context;
                 if (!has_empty_intersection(c1, c2)) {
                     return false;
                 }
@@ -1671,18 +1507,16 @@ is_compatible_state_a(const State* s1, const State* s2) -> bool
     return true;
 }
 
-/*
- * condition (b) or (c).
- * if (b) or (c) is satisfied, return true, otherwise false.
- */
-auto
-is_compatible_state_bc(const State* s) -> bool
+/// condition (b) or (c).
+/// if (b) or (c) is satisfied, return true, otherwise false.
+static auto
+is_compatible_state_bc(const State& s) -> bool
 {
-    size_t count = s->core_config_count;
+    size_t count = s.core_config_count;
     for (size_t i = 0; i < count - 1; i++) {
         for (size_t j = i + 1; j < count; j++) {
-            const Context* c1 = s->config[i]->context;
-            const Context* c2 = s->config[j]->context;
+            const Context& c1 = *s.config.at(i)->context;
+            const Context& c2 = *s.config.at(j)->context;
             if (has_empty_intersection(c1, c2)) {
                 return false;
             } // end if
@@ -1691,10 +1525,8 @@ is_compatible_state_bc(const State* s) -> bool
     return true;
 }
 
-/*
- * Pre-assumption:
- *   s1 and s2 have at least one core configuration.
- */
+/// Pre-assumption:
+///   s1 and s2 have at least one core configuration.
 auto
 is_compatible_states(const State* s1, const State* s2) -> bool
 {
@@ -1705,11 +1537,11 @@ is_compatible_states(const State* s1, const State* s2) -> bool
         return true;
 
     // now check context to see if s1 and s2 are compatible.
-    if (is_compatible_state_a(s1, s2))
+    if (is_compatible_state_a(*s1, *s2))
         return true;
-    if (is_compatible_state_bc(s1))
+    if (is_compatible_state_bc(*s1))
         return true;
-    if (is_compatible_state_bc(s2))
+    if (is_compatible_state_bc(*s2))
         return true;
 
     return false;
@@ -1723,7 +1555,7 @@ YAlgorithm::update_state_parsing_tbl_entry(const State& s)
 {
     for (const auto& config : s.config) {
         const std::shared_ptr<const SymbolTableNode> scanned_symbol =
-          get_scanned_symbol(config);
+          get_scanned_symbol(*config);
 
         // for final config and empty reduction.
         if (is_final_configuration(grammar, config) ||
@@ -1748,7 +1580,7 @@ find_similar_core_config(const std::shared_ptr<const State>& t,
                          size_t* config_index) -> Configuration*
 {
     for (size_t i = 0; i < t->core_config_count; i++) {
-        Configuration* tmp = t->config[i];
+        Configuration* tmp = t->config.at(i);
 
         // don't compare context, it'll be compared in
         // combine_context().
@@ -1791,12 +1623,11 @@ YAlgorithm::propagate_context_change(const State& s)
           t->trans_symbol->snode;
         bool is_changed = false;
 
-        for (const auto& config : s.config) {
-            Configuration* c = config; // bug removed: i -> j. 3-4-2008.
+        for (const auto& c : s.config) {
             if (is_final_configuration(this->grammar, c))
                 continue;
             // if not a successor on symbol, next.
-            if (trans_symbol != get_scanned_symbol(c))
+            if (trans_symbol != get_scanned_symbol(*c))
                 continue;
 
             c->marker += 1;
@@ -1816,7 +1647,7 @@ YAlgorithm::propagate_context_change(const State& s)
                     config_queue->push(config_index);
                     get_config_successors(this->grammar, *config_queue, t);
                 } else {
-                    get_successor_for_config(this->grammar, t, d);
+                    get_successor_for_config(this->grammar, t, *d);
                 }
             }
         } // end of for
@@ -1844,8 +1675,8 @@ YAlgorithm::combine_compatible_states(std::shared_ptr<State> s_dest,
 {
     bool is_changed = false;
     for (size_t i = 0; i < s_dest->core_config_count; i++) {
-        if (combine_context(s_dest->config[i]->context,
-                            s_src.config[i]->context)) {
+        if (combine_context(s_dest->config.at(i)->context,
+                            s_src.config.at(i)->context)) {
             is_changed = true;
 
             if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
@@ -1855,7 +1686,7 @@ YAlgorithm::combine_compatible_states(std::shared_ptr<State> s_dest,
             } else {
 
                 get_successor_for_config(
-                  this->grammar, s_dest, s_dest->config[i]);
+                  this->grammar, s_dest, *s_dest->config.at(i));
             }
         }
     }
@@ -1877,13 +1708,11 @@ YAlgorithm::combine_compatible_states(std::shared_ptr<State> s_dest,
 // Functions for combining compatible states. END.
 /////////////////////////////////////////////////////////
 
-/*
- * Determine if two states are the same.
- * This is done by checking if the two states have the
- * same core configurations.
- * Since the core confiurations are both in increasing order,
- * just compare them by pairs.
- */
+/// Determine if two states are the same.
+/// This is done by checking if the two states have the
+/// same core configurations.
+/// Since the core confiurations are both in increasing order,
+/// just compare them by pairs.
 auto
 is_same_state(const State& s1, const State& s2) -> bool
 {
@@ -1892,7 +1721,7 @@ is_same_state(const State& s1, const State& s2) -> bool
     }
 
     for (size_t i = 0; i < s1.core_config_count; i++) {
-        if (!is_same_config(s1.config[i], s2.config[i]))
+        if (!is_same_config(*s1.config.at(i), *s2.config.at(i)))
             return false;
     }
 
@@ -1902,7 +1731,7 @@ is_same_state(const State& s1, const State& s2) -> bool
 StateNode::StateNode()
   : core_config_count(0)
   , state_no(-1)
-  , trans_symbol(SymbolNode::create(hash_tbl_find("")))
+  , trans_symbol(std::make_shared<SymbolNode>(hash_tbl_find("")))
   , parents_list(StateList::create())
   , next(nullptr)
   , ON_LANE(0)
@@ -1918,16 +1747,14 @@ void
 YAlgorithm::insert_reduction_to_parsing_table(const Configuration* c,
                                               const int state_no)
 {
-    if (this->grammar.rules[c->ruleID]->nLHS->snode ==
+    if (this->grammar.rules.at(c->ruleID)->nLHS->snode ==
         this->grammar.goal_symbol->snode) { // accept, action = "a";
-        for (const SymbolNode* a = c->context->nContext; a != nullptr;
-             a = a->next) {
-            this->insert_action(a->snode, state_no, CONST_ACC);
+        for (const auto& a : c->context->context) {
+            this->insert_action(a.snode, state_no, CONST_ACC);
         }
     } else { // reduct, action = "r";
-        for (const SymbolNode* a = c->context->nContext; a != nullptr;
-             a = a->next) {
-            this->insert_action(a->snode, state_no, (-1) * c->ruleID);
+        for (const auto& a : c->context->context) {
+            this->insert_action(a.snode, state_no, (-1) * c->ruleID);
         }
     }
 }
@@ -1952,25 +1779,17 @@ add_successor(std::shared_ptr<State>& s, std::shared_ptr<State> n)
     }
 }
 
-/*
- * Insert a new state to the parsing machine.
- *
- * Used in 3 places: y.c, lr0.c, lane_tracing.c.
- * This can be changed to macro later.
- */
+/// Insert a new state to the parsing machine.
+///
+/// Used in 3 places: y.c, lr0.c, lane_tracing.c.
+/// This can be changed to macro later.
 void
 NewStates::insert_state_to_pm(std::shared_ptr<State> s) noexcept
 {
     s->state_no = this->states_new->state_count;
 
     this->states_new->add_state2(s);
-    this->states_new_array->add_state(s);
-
-    // expand size of parsing table array if needed.
-    while (this->states_new->state_count >=
-           static_cast<int>(PARSING_TABLE_SIZE)) {
-        expand_parsing_table(*this->states_new_array);
-    }
+    this->states_new_array.add_state(s);
 }
 
 /*
@@ -2057,12 +1876,11 @@ YAlgorithm::state_transition(std::shared_ptr<State> state)
 {
     StateCollection* coll = create_state_collection();
 
-    for (const auto& config : state->config) {
-        Configuration* c = config;
+    for (Configuration* c : state->config) {
         if (is_final_configuration(this->grammar, c)) {
             this->insert_reduction_to_parsing_table(c, state->state_no);
         } else { // do transit operation.
-            auto scanned_symbol = get_scanned_symbol(c);
+            auto scanned_symbol = get_scanned_symbol(*c);
             if (scanned_symbol->symbol->empty()) { // insert empty reduction.
                 this->insert_reduction_to_parsing_table(c, state->state_no);
                 continue;
@@ -2073,20 +1891,22 @@ YAlgorithm::state_transition(std::shared_ptr<State> state)
                 new_state = std::make_shared<State>();
                 // record which symbol this state is a successor
                 // by.
-                new_state->trans_symbol = SymbolNode::create(scanned_symbol);
+                new_state->trans_symbol =
+                  std::make_shared<SymbolNode>(scanned_symbol);
                 coll->add_state2(new_state);
             }
             // create a new core config for new_state.
-            Configuration* new_config = create_config(this->grammar, -1, 0, 1);
+            Configuration& new_config = *create_config(this->grammar, -1, 0, 1);
 
-            new_config->owner = new_state;
-            copy_config(new_config, c);
-            new_config->isCoreConfig = 1;
-            new_config->marker++;
-            if (new_config->nMarker != nullptr)
-                new_config->nMarker = new_config->nMarker->next;
+            new_config.owner = new_state;
+            copy_config(new_config, *c);
+            new_config.isCoreConfig = 1;
+            new_config.marker++;
+            if (!new_config.nMarker.empty()) {
+                new_config.nMarker.pop_front();
+            }
 
-            add_core_config2_state(this->grammar, new_state, new_config);
+            add_core_config2_state(this->grammar, new_state, &new_config);
         }
     }
 
@@ -2123,8 +1943,8 @@ combine_context(Context* c_dest, const Context* c_src) -> bool
     if (c_dest == nullptr || c_src == nullptr)
         return false;
 
-    for (SymbolNode* a = c_src->nContext; a != nullptr; a = a->next) {
-        if (add_symbol2_context(a->snode, c_dest)) {
+    for (const SymbolNode& a : c_src->context) {
+        if (add_symbol2_context(a.snode, *c_dest)) {
             is_changed = true;
         }
     }
@@ -2192,19 +2012,8 @@ void
 init_parsing_table()
 {
     PARSING_TABLE_SIZE = PARSING_TABLE_INIT_SIZE;
-    size_t total_cells = PARSING_TABLE_SIZE * ParsingTblCols;
+    size_t total_cells = PARSING_TABLE_SIZE * ParsingTblColHdr.size();
     ParsingTable = std::vector<int>(4 * total_cells, 0);
-}
-
-void
-expand_parsing_table(StateArray& states_new_array)
-{
-    size_t total_cells = PARSING_TABLE_SIZE * ParsingTblCols;
-    ParsingTable = std::vector<int>(2 * total_cells, 0);
-    PARSING_TABLE_SIZE = PARSING_TABLE_SIZE *
-                         2; // TODO: who cares about thread safety anyways ? :p
-
-    StateArray::expand(&states_new_array, PARSING_TABLE_SIZE);
 }
 
 auto
@@ -2212,7 +2021,7 @@ get_action(symbol_type symbol_type, int col, int row) -> std::pair<char, int>
 {
     char action = '\0';
     int state_dest = 0;
-    const int x = ParsingTable.at(row * ParsingTblCols + col);
+    const int x = ParsingTable.at(row * ParsingTblColHdr.size() + col);
 
     if (x == 0) {
         state_dest = 0;
@@ -2271,7 +2080,7 @@ LR0::insert_action(std::shared_ptr<SymbolTableNode> lookahead,
     int reduce = 0, shift = 0; // for shift/reduce conflict.
     struct TerminalProperty *tp_s = nullptr, *tp_r = nullptr;
 
-    int cell = row * ParsingTblCols + get_col(*lookahead);
+    int cell = row * ParsingTblColHdr.size() + get_col(*lookahead);
 
     if (ParsingTable.at(cell) == 0) {
         ParsingTable.at(cell) = state_dest;
@@ -2433,7 +2242,7 @@ print_parsing_table(std::ostream& os, const Grammar& grammar)
 
     for (int row = 0; row < row_size; row++) {
         os << row << "\t";
-        for (int col = 0; col < ParsingTblCols; col++) {
+        for (int col = 0; col < ParsingTblColHdr.size(); col++) {
             const std::shared_ptr<const SymbolTableNode> n =
               ParsingTblColHdr.at(col);
             if (!is_goal_symbol(grammar, n)) {
@@ -2465,16 +2274,12 @@ YAlgorithm::init_start_state()
     state0->config.push_back(create_config(this->grammar, 0, 0, 1));
     state0->core_config_count = 1;
 
-    state0->config[0]->owner = state0;
-    state0->config[0]->context->context_count = 1;
+    state0->config.at(0)->owner = state0;
     hash_tbl_insert(STR_END);
-    state0->config[0]->context->nContext =
-      SymbolNode::create(hash_tbl_find(STR_END));
-
-    // writeState(state0);
+    state0->config.at(0)->context->context.emplace_back(hash_tbl_find(STR_END));
 
     this->new_states.states_new->add_state2(state0);
-    this->new_states.states_new_array->add_state(state0);
+    this->new_states.states_new_array.add_state(state0);
 
     // insert to state hash table as the side effect of search.
     auto ignore = this->state_hash_table.search(state0, *this);
@@ -2510,10 +2315,10 @@ get_final_state_list(const Grammar& grammar)
                 if (!is_reachable_state(i))
                     continue;
 
-                int row_start = i * ParsingTblCols;
+                int row_start = i * ParsingTblColHdr.size();
                 int action = 0, new_action = 0;
                 int j = 0;
-                for (; j < ParsingTblCols; j++) {
+                for (; j < ParsingTblColHdr.size(); j++) {
                     n = ParsingTblColHdr.at(j);
 
                     if (is_goal_symbol(grammar, n) || is_parent_symbol(n))
@@ -2529,16 +2334,16 @@ get_final_state_list(const Grammar& grammar)
                     if (action != new_action)
                         break;
                 }
-                if (j == ParsingTblCols)
+                if (j == ParsingTblColHdr.size())
                     final_state_list.at(i) = action;
             }
 
         } else {
             for (int i = 0; i < ParsingTblRows; i++) {
-                int row_start = i * ParsingTblCols;
+                int row_start = i * ParsingTblColHdr.size();
                 int action = 0, new_action = 0;
                 int j = 0;
-                for (; j < ParsingTblCols; j++) {
+                for (; j < ParsingTblColHdr.size(); j++) {
                     new_action = ParsingTable.at(row_start + j);
                     if (new_action > 0 || new_action == CONST_ACC)
                         break;
@@ -2549,7 +2354,7 @@ get_final_state_list(const Grammar& grammar)
                     if (action != new_action)
                         break;
                 }
-                if (j == ParsingTblCols)
+                if (j == ParsingTblColHdr.size())
                     final_state_list.at(i) = action;
             }
         }
@@ -2588,24 +2393,27 @@ YAlgorithm::show_state_config_info(std::ostream& os) const noexcept
     if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
         this->config_queue->info();
     } else {
-        os << xx << " states in total." << std::endl;
-        os << "before combine: total cfg: " << yy << ", max cfg: " << zz
+        os << counts.get_closure_calls << " states in total." << std::endl;
+        os << "before combine: total cfg: " << counts.nb_config_before_combine
+           << ", max cfg: " << counts.max_config_before_combine
            << ", cfg/state: " << std::setprecision(2)
-           << static_cast<double>(yy) / static_cast<double>(xx)
+           << static_cast<double>(counts.nb_config_before_combine) /
+                static_cast<double>(counts.get_closure_calls)
            << std::endl; // before combineCompatibleConfig.
-        os << "after combine: total cfg: " << yyy << ", max cfg: " << zzz
+        os << "after combine: total cfg: " << counts.nb_config_after_combine
+           << ", max cfg: " << counts.max_config_after_combine
            << ", cfg/state: " << std::setprecision(2)
-           << static_cast<double>(yyy) / static_cast<double>(xx) << std::endl;
+           << static_cast<double>(counts.nb_config_after_combine) /
+                static_cast<double>(counts.get_closure_calls)
+           << std::endl;
     }
 
     get_avg_config_count(os, *this->new_states.states_new);
     this->state_hash_table.dump(os);
 }
 
-/*
- * print size of different objects. For development use
- * only.
- */
+/// print size of different objects. For development use
+/// only.
 static void
 print_size()
 {
@@ -2653,8 +2461,7 @@ show_conflict_count(const ConflictsCount& conflicts_count)
                   << " shift/shift conflicts" << std::endl;
 }
 
-/* Show statistics of the grammar and it's parsing machine.
- */
+/// Show statistics of the grammar and it's parsing machine.
 void
 YAlgorithm::show_stat(std::ostream& os) const noexcept
 {
@@ -2672,8 +2479,9 @@ YAlgorithm::show_stat(std::ostream& os) const noexcept
     // *fp_v << "[Note: A first rule '$accept ->
     //  start_symbol' is added]" << std::endl << "\n" ;*fp_v << "Symbols
     //  count: " <<  n_symbol<< std::endl ;
-    os << this->grammar.terminal_count << " terminals, "
-       << this->grammar.non_terminal_count << " nonterminals" << std::endl;
+    os << this->grammar.terminal_list.size() << " terminals, "
+       << this->grammar.non_terminal_list.size() << " nonterminals"
+       << std::endl;
     os << n_rule << " grammar rules" << std::endl;
     if (options.use_remove_unit_production) {
         os << n_rule_opt << " grammar rules after remove unit ";
@@ -2723,7 +2531,7 @@ YAlgorithm::show_stat(std::ostream& os) const noexcept
 static void
 write_parsing_tbl_row_lalr(std::ostream& os, int state)
 {
-    int row_start = state * ParsingTblCols;
+    int row_start = state * ParsingTblColHdr.size();
     int reduction = 1;
     int only_one_reduction = true;
 
@@ -2732,7 +2540,7 @@ write_parsing_tbl_row_lalr(std::ostream& os, int state)
     // write shift/acc actions.
     // note if a state has acc action, then that's the only
     // action. so don't have to put acc in a separate loop.
-    for (int col = 0; col < ParsingTblCols; col++) {
+    for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
         int v = ParsingTable.at(row_start + col);
         const std::shared_ptr<const SymbolTableNode> s =
           ParsingTblColHdr.at(col);
@@ -2767,7 +2575,7 @@ write_parsing_tbl_row_lalr(std::ostream& os, int state)
             os << "  . error " << reduction << std::endl;
         } // no reduction.
     } else {
-        for (int col = 0; col < ParsingTblCols; col++) {
+        for (int col = 0; col < ParsingTblColHdr.size(); col++) {
             int v = ParsingTable.at(row_start + col);
             const std::shared_ptr<const SymbolTableNode> s =
               ParsingTblColHdr.at(col);
@@ -2780,7 +2588,7 @@ write_parsing_tbl_row_lalr(std::ostream& os, int state)
 
     // write goto action.
     os << std::endl;
-    for (int col = 0; col < ParsingTblCols; col++) {
+    for (int col = 0; col < ParsingTblColHdr.size(); col++) {
         int v = ParsingTable.at(row_start + col);
         const std::shared_ptr<const SymbolTableNode> s =
           ParsingTblColHdr.at(col);
@@ -2800,7 +2608,7 @@ static void
 write_parsing_tbl_row(std::ostream& os, int state)
 {
     const auto& options = Options::get();
-    int row_start = state * ParsingTblCols;
+    int row_start = state * ParsingTblColHdr.size();
 
     os << std::endl;
 
@@ -2815,7 +2623,7 @@ write_parsing_tbl_row(std::ostream& os, int state)
         return;
     }
 
-    for (int col = 0; col < ParsingTblCols; col++) {
+    for (int col = 0; col < ParsingTblColHdr.size(); col++) {
         int v = ParsingTable.at(row_start + col);
         const std::shared_ptr<const SymbolTableNode> s =
           ParsingTblColHdr.at(col);
@@ -2882,7 +2690,7 @@ write_state_collection_info(std::ostream& os,
     os << std::endl << "\n";
     const State* s = new_states.states_new->states_head.get();
     while (s != nullptr) {
-        write_state_info(os, grammar, *new_states.states_new_array, *s);
+        write_state_info(os, grammar, new_states.states_new_array, *s);
         s = s->next.get();
     }
 
@@ -3031,7 +2839,6 @@ lr0(const FileNames& files, const Options& options, NewStates& new_states)
   -> int
 {
     std::optional<Queue> config_queue = std::nullopt;
-    /// USE_COMBINE_COMPATIBLE_STATES = false; ///
     hash_tbl_init();
 
     std::ofstream fp_v;
@@ -3066,7 +2873,6 @@ lr0(const FileNames& files, const Options& options, NewStates& new_states)
     std::optional<LRkPTArray> lrk_pt_array = std::nullopt;
     if (options.use_lalr) {
         lrk_pt_array = lane_tracing_algorithm.lane_tracing();
-        // outputParsingTable_LALR();
     }
 
     if (options.show_parsing_tbl)
@@ -3099,8 +2905,8 @@ lr0(const FileNames& files, const Options& options, NewStates& new_states)
                 print_final_parsing_table(lane_tracing_algorithm.grammar);
             }
         }
-        get_actual_state_no(); /* update actual_state_no[].
-                                */
+        get_actual_state_no(); // update actual_state_no[].
+
         if (options.show_parsing_tbl)
             print_condensed_final_parsing_table(lane_tracing_algorithm.grammar);
         if (options.show_grammar) {
@@ -3134,9 +2940,7 @@ lr0(const FileNames& files, const Options& options, NewStates& new_states)
     return 0;
 }
 
-/*
- * main function.
- */
+/// main function.
 auto
 main(int argc, const char* argv[]) -> int
 {
@@ -3148,13 +2952,12 @@ main(int argc, const char* argv[]) -> int
         for (const char* const arg : args_ptrs) {
             args.emplace_back(arg);
         }
-        int infile_index = 0;
         options.debug_expand_array = false;
 
         // test_x();
 
-        infile_index = get_options(args, options, &files);
-        hyacc_filename = args[infile_index];
+        size_t infile_index = get_options(args, options, &files);
+        hyacc_filename = args.at(infile_index);
 
         NewStates new_states{};
         if (options.use_lr0) {

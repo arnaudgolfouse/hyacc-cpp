@@ -66,7 +66,7 @@ debug : $(OBJS)
 	$(CC) $(FFLAG) $(OBJS) -o $(TARGET)
 	@echo release version is successfully built
 
-debug : FFLAG += -g -Wall -Wextra
+debug : FFLAG += -g -Wall -Wextra -fsanitize=address -fno-omit-frame-pointer
 debug : $(OBJS)
 	@echo please wait ...
 	@make create_path_file

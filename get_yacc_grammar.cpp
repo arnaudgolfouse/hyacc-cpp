@@ -87,20 +87,13 @@ static void
 add_rhs_symbol(Grammar& grammar, std::shared_ptr<SymbolTableNode> symbol)
 {
     // std::cout  << std::endl<< "==add RHS symbol: " <<  symbol << std::endl;
-    Production* p = grammar.rules.back();
-    p->RHS_count++;
+    Production& p = *grammar.rules.back();
 
-    SymbolNode* s = SymbolNode::create(symbol);
-    if (p->nRHS_head == nullptr) {
-        p->nRHS_head = p->nRHS_tail = s;
-    } else {
-        p->nRHS_tail->next = s;
-        p->nRHS_tail = s;
-    }
-
+    auto s = SymbolNode(symbol);
     // if s is a terminal, it's the last terminal of p's RHS.
-    if (s->snode->type == symbol_type::TERMINAL && s->snode->TP != nullptr)
-        p->lastTerminal = s->snode;
+    if (s.snode->type == symbol_type::TERMINAL && s.snode->TP != nullptr)
+        p.lastTerminal = s.snode;
+    p.nRHS.push_back(s);
 }
 
 /*
@@ -183,22 +176,6 @@ get_terminal_precedence(SymbolTableNode& n,
     }
 }
 
-/*
- * Add a token to the tokens list.
- */
-static void
-add_token(SymbolNode* tokens_tail, std::shared_ptr<SymbolTableNode> n)
-{
-    if (tokens_tail == nullptr) {
-        tokens_tail = tokens = SymbolNode::create(n);
-    } else {
-        tokens_tail->next = SymbolNode::create(n);
-        tokens_tail = tokens_tail->next;
-    }
-
-    tokens_ct++;
-}
-
 static auto
 get_symbol(const symbol_type t, GetYaccGrammarOutput& output)
   -> std::shared_ptr<SymbolTableNode>
@@ -223,8 +200,7 @@ get_symbol(const symbol_type t, GetYaccGrammarOutput& output)
  * empty string is not allowed.
  */
 static void
-output_terminal(SymbolNode* tokens_tail,
-                yacc_section1_state state,
+output_terminal(yacc_section1_state state,
                 yacc_section1_state prev_state,
                 const std::optional<std::string>& token_type,
                 GetYaccGrammarOutput& output,
@@ -285,7 +261,7 @@ output_terminal(SymbolNode* tokens_tail,
     }
 
     if (must_add_token)
-        add_token(tokens_tail, n);
+        output.grammar.tokens.emplace_back(n);
 }
 
 static void
@@ -448,10 +424,8 @@ GetYaccGrammarOutput::process_yacc_file_input_section1(
     off_t union_start = 0;
 
     this->reset_symbol();
-    tokens = nullptr;
-    SymbolNode* tokens_tail = nullptr;
+    this->grammar.tokens.clear();
     std::shared_ptr<SymbolTableNode> start_symbol = nullptr;
-    tokens_ct = 0;
     this->position.line = 1;
     this->position.col = 1;
 
@@ -496,12 +470,8 @@ GetYaccGrammarOutput::process_yacc_file_input_section1(
         } else if (c == '/' && state != IS_QUOTED_TERMINAL) {
             // '/' is not a valid char in a unquoted token.
             if (state == IS_TOKEN && !this->get_symbol().empty()) {
-                output_terminal(tokens_tail,
-                                state,
-                                prev_state,
-                                token_type,
-                                *this,
-                                precedence);
+                output_terminal(
+                  state, prev_state, token_type, *this, precedence);
             }
         } else if (state == IS_DIRECTIVE) {
             if (isspace(c)) {
@@ -521,8 +491,7 @@ GetYaccGrammarOutput::process_yacc_file_input_section1(
                 (last_c != '\\' || (this->get_symbol().size() == 2 &&
                                     this->get_symbol()[0] == '\\'))) {
                 // std::cout << "] terminal ends" << std::endl;
-                output_terminal(tokens_tail,
-                                state,
+                output_terminal(state,
                                 prev_state,
                                 token_type,
                                 *this,
@@ -555,12 +524,8 @@ GetYaccGrammarOutput::process_yacc_file_input_section1(
             if (isspace(c) && this->get_symbol().empty()) {
                 // do nothing, ignore space
             } else if (isspace(c)) { // output another token
-                output_terminal(tokens_tail,
-                                state,
-                                prev_state,
-                                token_type,
-                                *this,
-                                precedence);
+                output_terminal(
+                  state, prev_state, token_type, *this, precedence);
             } else if (c == '\'') {
                 // std::cout << "terminal starts: ['";
                 prev_state = state;
@@ -645,8 +610,7 @@ GetYaccGrammarOutput::process_yacc_file_input_section1(
             this->position.col = 1;
         }
     }
-    return Section1Output{ tokens_tail, start_symbol };
-    // write_tokens();
+    return Section1Output{ start_symbol };
 }
 
 /////////////////////////////////////////////////////////////
@@ -664,12 +628,9 @@ create_empty_production() -> Production*
         throw std::runtime_error(
           "create_empty_production error: output memory");
     }
-    p->nLHS = SymbolNode::create(hash_tbl_find(""));
 
-    p->RHS_count = 0;
     p->isUnitProduction = 0;
     p->hasCode = 0;
-    p->nLHS = p->nRHS_head = p->nRHS_tail = nullptr;
     p->lastTerminal = nullptr;
     return p;
 }
@@ -709,7 +670,7 @@ insert_mid_prod_rule(Grammar& grammar, int ct)
     name_lhs += std::to_string(ct);
     std::shared_ptr<SymbolTableNode> n = hash_tbl_insert(name_lhs);
     n->type = symbol_type::NONTERMINAL;
-    p->nLHS = SymbolNode::create(n);
+    p->nLHS = std::make_shared<SymbolNode>(n);
     p->hasCode = 1;
 
     add_rhs_symbol(grammar, n);
@@ -720,7 +681,7 @@ add_lhs_symbol(Grammar& grammar, std::shared_ptr<SymbolTableNode> symbol)
 {
     // std::cout  << std::endl<< "==add LHS symbol: " <<  symbol << std::endl;
     Production* p = create_new_rule(grammar);
-    p->nLHS = SymbolNode::create(symbol);
+    p->nLHS = std::make_shared<SymbolNode>(symbol);
 }
 
 /*
@@ -762,82 +723,67 @@ set_has_code(const Grammar& grammar)
 
 static auto
 is_in_vanish_symbol_list(const Grammar& grammar,
-                         const std::shared_ptr<SymbolTableNode> n) -> bool
+                         const std::shared_ptr<const SymbolTableNode> n) -> bool
 {
     // std::cout << "isInVanishSymbolList input: " <<  symbol << std::endl;
     if (n->symbol->empty()) {
         return true;
     }
 
-    for (SymbolNode* a = grammar.vanish_symbol_list; a != nullptr;
-         a = a->next) {
-        if (n == a->snode)
+    for (const auto& a : grammar.vanish_symbol_list) {
+        if (n == a.snode)
             return true;
     }
 
     return false;
 }
 
-/*
- * Used by the algorithm to find vanish symbol(s) of a grammar.
- */
+/// Used by the algorithm to find vanish symbol(s) of a grammar.
 static auto
 flag_y(const Grammar& grammar, Production* p) -> bool
 {
-    for (SymbolNode* a = p->nRHS_head; a != nullptr; a = a->next) {
-        if (is_in_vanish_symbol_list(grammar, a->snode) == false)
+    for (const auto& a : p->nRHS) {
+        if (!is_in_vanish_symbol_list(grammar, a.snode))
             return false;
     }
     return true; // x1,...,xn are all vanish symbols. Flag y.
 }
 
-/*
- * Called when creating a grammar.
- *
- * Define epsilon as empty string "".
- * Then epsilon production is one whose
- * RHS_count = 1 AND RHS[0] == "".
- *
- * NOTE: a symbol that can vanish must occur
- * on the left side of a production, thus a
- * non-terminal symbol.
- *
- * Algorithm:
- *   1. Flag all symbols which occur in epsilon-productions,
- *      i.e., all symbols y which occur in productions of
- *      the form y -> epsilon.
- *   2. Go thru the grammar and for each produciton
- *      y -> x1...xn, if x1, ..., xn are all flagged,
- *      then flag y.
- *   3. If any new symbols were flagged in step 2, go
- *      back to step 2.
- */
+/// Called when creating a grammar.
+///
+/// Define epsilon as empty string "".
+/// Then epsilon production is one whose
+/// RHS_count = 1 AND RHS[0] == "".
+///
+/// NOTE: a symbol that can vanish must occur
+/// on the left side of a production, thus a
+/// non-terminal symbol.
+///
+/// Algorithm:
+///   1. Flag all symbols which occur in epsilon-productions,
+///      i.e., all symbols y which occur in productions of
+///      the form y -> epsilon.
+///   2. Go thru the grammar and for each produciton
+///      y -> x1...xn, if x1, ..., xn are all flagged,
+///      then flag y.
+///   3. If any new symbols were flagged in step 2, go
+///      back to step 2.
 static void
 get_vanish_symbols(Grammar& grammar)
 {
-    SymbolNode* tail = nullptr;
-    grammar.vanish_symbol_count = 0;
+    grammar.vanish_symbol_list.clear();
 
     // find vanish symbols that occur in epsilon-productions.
     for (auto& rule : grammar.rules) {
         if (flag_y(grammar, rule)) {
-
-            if (tail == nullptr) {
-                tail = grammar.vanish_symbol_list =
-                  SymbolNode::create(rule->nLHS->snode);
-            } else {
-                tail->next = SymbolNode::create(rule->nLHS->snode);
-                tail = tail->next;
-            }
-
+            grammar.vanish_symbol_list.emplace_back(rule->nLHS->snode);
             rule->nLHS->snode->vanishable = true;
-            grammar.vanish_symbol_count++;
         }
     }
 
     // if so far no vanish symbol, then no epsilon-production.
     // then no more vanish symbols.
-    if (grammar.vanish_symbol_count == 0)
+    if (grammar.vanish_symbol_list.empty())
         return;
 
     while (true) {
@@ -846,20 +792,15 @@ get_vanish_symbols(Grammar& grammar)
             if (is_in_vanish_symbol_list(grammar, rule->nLHS->snode) == false) {
                 // y is not yet a vanish symbol, then:
                 if (flag_y(grammar, rule)) {
-                    // we know tail != nullptr
-                    tail->next = SymbolNode::create(rule->nLHS->snode);
-                    tail = tail->next;
-
+                    grammar.vanish_symbol_list.emplace_back(rule->nLHS->snode);
                     rule->nLHS->snode->vanishable = true;
-
-                    grammar.vanish_symbol_count++;
                     new_vanish_symbol_found = true;
                 }
             }
         }
         if (!new_vanish_symbol_found)
             break;
-    } // end while
+    }
 }
 
 /*
@@ -873,8 +814,6 @@ static void
 get_non_terminals(Grammar& grammar)
 {
     int index = 0;
-    SymbolNode* tail = nullptr;
-    grammar.non_terminal_count = 0;
 
     // First scan LHS of all rules.
     for (const auto& rule : grammar.rules) {
@@ -882,36 +821,29 @@ get_non_terminals(Grammar& grammar)
             nullptr) {
             continue;
         }
-        if (tail == nullptr) {
-            tail = grammar.non_terminal_list =
-              SymbolNode::create(rule->nLHS->snode);
-        } else {
-            tail->next = SymbolNode::create(rule->nLHS->snode);
-            tail = tail->next;
+        auto& back = grammar.non_terminal_list.emplace_back(rule->nLHS->snode);
+        if (*back.snode->symbol != STR_ACCEPT) {
+            back.snode->value = (-1) * (++index);
         }
-
-        if (*tail->snode->symbol != STR_ACCEPT)
-            tail->snode->value = (-1) * (++index);
-
-        grammar.non_terminal_count++;
     }
 
-    bool has_error = false;
+    // bool has_error = false;
+
     // Next scan RHS of all rules.
     // no extra non-terminal should appear, since otherwise
     // it's not used as the LHS of any rule.
     for (const auto& rule : grammar.rules) {
-        for (tail = rule->nRHS_head; tail != nullptr; tail = tail->next) {
-            if (tail->snode->type != symbol_type::NONTERMINAL)
+        for (const auto& symbol : rule->nRHS) {
+            if (symbol.snode->type != symbol_type::NONTERMINAL)
                 continue;
 
-            if (find_in_symbol_list(grammar.non_terminal_list, tail->snode) ==
+            if (find_in_symbol_list(grammar.non_terminal_list, symbol.snode) ==
                 nullptr) {
-                std::cerr << "error: non-terminal '" << *tail->snode->symbol
+                std::cerr << "error: non-terminal '" << *symbol.snode->symbol
                           << "' is not used as the LHS of any rule"
                           << std::endl;
                 ;
-                has_error = true;
+                // has_error = true;
             }
         }
     }
@@ -924,16 +856,13 @@ get_non_terminals(Grammar& grammar)
  * empty string is not included as terminal.
  */
 static void
-get_terminals(Grammar& g)
+get_terminals(Grammar& grammar)
 {
-    SymbolNode* tail = nullptr;
-    g.terminal_count = 0;
-
-    for (const auto& rule : g.rules) {
-        SymbolNode* s = rule->nRHS_head;
-        for (int j = 0; j < rule->RHS_count; j++) {
+    for (const auto& rule : grammar.rules) {
+        auto s = rule->nRHS.begin();
+        for (size_t j = 0; j < rule->nRHS.size(); j++) {
             if (j > 0)
-                s = s->next; // s: g->rules.at(i)->RHS[j].
+                s++; // s: g->rules.at(i)->RHS[j].
 
             if (s->snode->type != symbol_type::TERMINAL)
                 continue;
@@ -942,19 +871,13 @@ get_terminals(Grammar& g)
             if (s->snode->symbol->empty())
                 continue;
 
-            if (find_in_symbol_list(g.terminal_list, s->snode) != nullptr)
+            if (find_in_symbol_list(grammar.terminal_list, s->snode) != nullptr)
                 continue;
 
-            if (tail == nullptr) {
-                tail = g.terminal_list = SymbolNode::create(s->snode);
-            } else {
-                tail->next = SymbolNode::create(s->snode);
-                tail = tail->next;
-            }
+            grammar.terminal_list.emplace_back(s->snode);
             s->snode->type = symbol_type::TERMINAL;
-            g.terminal_count++;
-        } // end of for
-    }     // end of for
+        }
+    }
 }
 
 /*
@@ -1057,18 +980,19 @@ get_token_value(const std::string& s, int* index) -> int
  * rule section, which terminal list does not include.
  */
 static void
-get_tokens_value()
+get_tokens_value(SymbolList& tokens)
 {
     int index = 0;
-    for (SymbolNode* a = tokens; a != nullptr; a = a->next) {
-        a->snode->value = get_token_value(*a->snode->symbol, &index);
+    for (auto& a : tokens) {
+        a.snode->value = get_token_value(*a.snode->symbol, &index);
     }
 }
 
 static void
-get_goal_symbol(Grammar& g)
+get_goal_symbol(Grammar& grammar)
 {
-    g.goal_symbol = SymbolNode::create(g.rules.at(0)->nLHS->snode);
+    grammar.goal_symbol =
+      std::make_shared<SymbolNode>(grammar.rules.at(0)->nLHS->snode);
 }
 
 /*
@@ -1084,21 +1008,21 @@ get_goal_symbol(Grammar& g)
  * only very little time.
  */
 static void
-get_symbol_parsing_tbl_col(const Grammar& g)
+get_symbol_parsing_tbl_col(const Grammar& grammar)
 {
-    SymbolNode* a = g.terminal_list;
     std::shared_ptr<SymbolTableNode> n = hash_tbl_find(STR_END);
     n->seq = 0;
 
-    for (int i = 1; a != nullptr; a = a->next, i++) {
+    auto a = grammar.terminal_list.begin();
+    for (int i = 1; a != grammar.terminal_list.end(); a++, i++) {
         n = hash_tbl_find(*a->snode->symbol);
         n->seq = i;
     }
 
-    a = g.non_terminal_list;
-    for (int i = 1; a != nullptr; a = a->next, i++) {
+    a = grammar.non_terminal_list.begin();
+    for (int i = 1; a != grammar.non_terminal_list.end(); a++, i++) {
         n = hash_tbl_find(*a->snode->symbol);
-        n->seq = g.terminal_count + i;
+        n->seq = grammar.terminal_list.size() + i;
     }
 }
 
@@ -1110,18 +1034,18 @@ get_symbol_parsing_tbl_col(const Grammar& g)
 static void
 get_parsing_tbl_col_hdr(const Grammar& grammar)
 {
-    ParsingTblColHdr = std::vector<std::shared_ptr<SymbolTableNode>>(
-      1 + grammar.terminal_count + grammar.non_terminal_count, nullptr);
+    ParsingTblColHdr.clear();
+    ParsingTblColHdr.reserve(1 + grammar.terminal_list.size() +
+                             grammar.non_terminal_list.size());
 
-    ParsingTblColHdr.at(0) = hash_tbl_find(STR_END);
-    ParsingTblCols = 1;
+    ParsingTblColHdr.push_back(hash_tbl_find(STR_END));
 
-    for (SymbolNode* a = grammar.terminal_list; a != nullptr; a = a->next) {
-        ParsingTblColHdr.at(ParsingTblCols++) = a->snode;
+    for (const auto& a : grammar.terminal_list) {
+        ParsingTblColHdr.push_back(a.snode);
     }
 
-    for (SymbolNode* a = grammar.non_terminal_list; a != nullptr; a = a->next) {
-        ParsingTblColHdr.at(ParsingTblCols++) = a->snode;
+    for (const auto& a : grammar.non_terminal_list) {
+        ParsingTblColHdr.push_back(a.snode);
     }
 }
 
@@ -1133,13 +1057,13 @@ get_parsing_tbl_col_hdr(const Grammar& grammar)
  * it's an error and should be reported.
  */
 static void
-get_symbol_rule_id_list(const Grammar& g)
+get_symbol_rule_id_list(Grammar& grammar)
 {
-    for (SymbolNode* a = g.non_terminal_list; a != nullptr; a = a->next) {
-        std::shared_ptr<SymbolTableNode> n = a->snode;
+    for (auto& a : grammar.non_terminal_list) {
+        std::shared_ptr<SymbolTableNode>& n = a.snode;
         RuleIDNode* tail = nullptr;
-        for (size_t i = 0; i < g.rules.size(); i++) {
-            if (n == g.rules[i]->nLHS->snode) {
+        for (size_t i = 0; i < grammar.rules.size(); i++) {
+            if (n == grammar.rules[i]->nLHS->snode) {
                 RuleIDNode* r = create_rule_id_node(i);
                 if (tail == nullptr) {
                     n->ruleIDList = tail = r;
@@ -1150,15 +1074,14 @@ get_symbol_rule_id_list(const Grammar& g)
             }
         }
     }
-    // writeNonTerminalRuleIDList();
 }
 
 static void
-get_grammar_unit_productions(const Grammar& g)
+get_grammar_unit_productions(const Grammar& grammar)
 {
-    for (Production* rule : g.rules) {
-        if (rule->RHS_count == 1 &&
-            rule->nRHS_head->snode->symbol->size() > 0) {
+    for (Production* rule : grammar.rules) {
+        if (rule->nRHS.size() == 1 &&
+            rule->nRHS.front().snode->symbol->size() > 0) {
             rule->isUnitProduction = true;
         }
     }
@@ -1170,7 +1093,7 @@ get_grammar_params(Grammar& grammar)
     get_non_terminals(grammar);
     get_terminals(grammar);
 
-    get_tokens_value();
+    get_tokens_value(grammar.tokens);
 
     get_goal_symbol(grammar);
     get_vanish_symbols(grammar);
@@ -1191,8 +1114,7 @@ get_grammar_params(Grammar& grammar)
 /////////////////////////////////////////////////////////////
 
 auto
-GetYaccGrammarOutput::output_nonterminal(SymbolNode* tokens_tail,
-                                         const YACC_STATE state,
+GetYaccGrammarOutput::output_nonterminal(const YACC_STATE state,
                                          bool& is_prec,
                                          const YACC_STATE yacc_sec2_state)
   -> std::shared_ptr<SymbolTableNode>
@@ -1257,7 +1179,7 @@ GetYaccGrammarOutput::output_nonterminal(SymbolNode* tokens_tail,
                 n->TP->is_quoted = true;
 
                 // add this to the tokens list.
-                add_token(tokens_tail, n);
+                this->grammar.tokens.emplace_back(n);
             } else {
                 n->type = symbol_type::NONTERMINAL;
             }
@@ -1290,8 +1212,7 @@ get_cur_lhs(std::shared_ptr<SymbolTableNode> n, const Position position)
 }
 
 void
-GetYaccGrammarOutput::process_yacc_file_input_section2(SymbolNode* tokens_tail,
-                                                       std::ifstream& fp)
+GetYaccGrammarOutput::process_yacc_file_input_section2(std::ifstream& fp)
 {
     // for mid-production actions.
     int mid_prod_code_ct = 0;
@@ -1314,19 +1235,17 @@ GetYaccGrammarOutput::process_yacc_file_input_section2(SymbolNode* tokens_tail,
                 if (isspace(c) && this->get_symbol().empty()) {
                     // Ignore empty spaces before LHS symbol.
                 } else if (c == ':') {
-                    cur_lhs =
-                      get_cur_lhs(this->output_nonterminal(
-                                    tokens_tail, LHS, is_prec, yacc_sec2_state),
-                                  this->position); // OUTPUT LHS SYMBOL.
+                    cur_lhs = get_cur_lhs(
+                      this->output_nonterminal(LHS, is_prec, yacc_sec2_state),
+                      this->position); // OUTPUT LHS SYMBOL.
                     if constexpr (DEBUG_YACC_INPUT_PARSER) {
                         std::cout << "-> ";
                     }
                     yacc_sec2_state = RHS;
                 } else if (isspace(c)) {
-                    cur_lhs =
-                      get_cur_lhs(this->output_nonterminal(
-                                    tokens_tail, LHS, is_prec, yacc_sec2_state),
-                                  this->position); // OUTPUT LHS SYMBOL.
+                    cur_lhs = get_cur_lhs(
+                      this->output_nonterminal(LHS, is_prec, yacc_sec2_state),
+                      this->position); // OUTPUT LHS SYMBOL.
                     if constexpr (DEBUG_YACC_INPUT_PARSER) {
                         std::cout << "-> ";
                     }
@@ -1371,7 +1290,6 @@ GetYaccGrammarOutput::process_yacc_file_input_section2(SymbolNode* tokens_tail,
                 if (isspace(c)) {
                     if (!this->get_symbol().empty()) {
                         this->output_nonterminal(
-                          tokens_tail,
                           RHS,
                           is_prec,
                           yacc_sec2_state); // OUTPUT NEXT RHS SYMBOL.
@@ -1383,7 +1301,6 @@ GetYaccGrammarOutput::process_yacc_file_input_section2(SymbolNode* tokens_tail,
                     // <<  c;
                     if (!this->get_symbol().empty()) {
                         this->output_nonterminal(
-                          tokens_tail,
                           RHS,
                           is_prec,
                           yacc_sec2_state); // OUTPUT NEXT RHS SYMBOL.
@@ -1407,7 +1324,6 @@ GetYaccGrammarOutput::process_yacc_file_input_section2(SymbolNode* tokens_tail,
                     }
                     if (!this->get_symbol().empty())
                         this->output_nonterminal(
-                          tokens_tail,
                           RHS,
                           is_prec,
                           yacc_sec2_state); // OUTPUT NEXT RHS SYMBOL.
@@ -1428,7 +1344,6 @@ GetYaccGrammarOutput::process_yacc_file_input_section2(SymbolNode* tokens_tail,
                     }
                     if (!this->get_symbol().empty())
                         this->output_nonterminal(
-                          tokens_tail,
                           RHS,
                           is_prec,
                           yacc_sec2_state); // OUTPUT NEXT RHS SYMBOL.
@@ -1470,7 +1385,6 @@ GetYaccGrammarOutput::process_yacc_file_input_section2(SymbolNode* tokens_tail,
                     // std::cout << "] terminal ends" << std::endl;
                     yacc_sec2_state = RHS;
                     this->output_nonterminal(
-                      tokens_tail,
                       TERMINAL,
                       is_prec,
                       yacc_sec2_state); // OUTPUT NEXT RHS SYMBOL. is terminal.
@@ -1546,17 +1460,14 @@ GetYaccGrammarOutput::process_yacc_file_input_section2(SymbolNode* tokens_tail,
  */
 static void
 get_goal_rule_rhs(const Grammar& grammar,
-                  std::shared_ptr<SymbolTableNode> start_symbol)
+                  const std::shared_ptr<SymbolTableNode> start_symbol)
 {
     if (grammar.rules.size() > 1) {
         if (start_symbol != nullptr) {
-            grammar.rules[0]->nRHS_head = grammar.rules[0]->nRHS_tail =
-              SymbolNode::create(start_symbol);
+            grammar.rules[0]->nRHS.emplace_back(start_symbol);
         } else {
-            grammar.rules[0]->nRHS_head = grammar.rules[0]->nRHS_tail =
-              SymbolNode::create(grammar.rules[1]->nLHS->snode);
+            grammar.rules[0]->nRHS.emplace_back(grammar.rules[1]->nLHS->snode);
         }
-        grammar.rules[0]->RHS_count = 1;
     } else {
         throw std::runtime_error(
           "get_goal_rule_rhs() error: there is no user rule.");
@@ -1583,29 +1494,24 @@ post_modification(Grammar& grammar)
     std::shared_ptr<SymbolTableNode> n = hash_tbl_insert(STR_PLACE_HOLDER);
     n->type = symbol_type::NONTERMINAL;
 
-    int count = 0;
+    size_t count = 0;
     for (const auto& rule : grammar.rules) {
-        if (rule->RHS_count == 1 && rule->hasCode == 1u) {
-            // std::cout << "rule " <<  i<< " is a unit production with code" <<
+        if (rule->nRHS.size() == 1 && rule->hasCode == 1u) {
+            // std::cout << "rule " << i << " is a unit production with code" <<
             // std::endl;
             count++;
             Production* p = rule;
-            p->RHS_count++;
             p->isUnitProduction = 0;
             // add one more symbol to the end of RHS:
-            p->nRHS_tail->next = SymbolNode::create(n);
-            p->nRHS_tail = p->nRHS_tail->next;
+            p->nRHS.emplace_back(n);
         }
     }
 
     if (count > 0) {
         Production* p = create_new_rule(grammar); // $PlaceHolder -> epsilon
-        p->nLHS = SymbolNode::create(n);
-
-        p->RHS_count = 0;
+        p->nLHS = std::make_shared<SymbolNode>(n);
         p->isUnitProduction = 0;
         p->hasCode = 0;
-        p->nRHS_head = p->nRHS_tail = nullptr;
     }
 }
 
@@ -1626,8 +1532,8 @@ GetYaccGrammarOutput::GetYaccGrammarOutput(std::ofstream& fp_v)
     this->grammar.rules.reserve(GRAMMAR_RULE_INIT_MAX_COUNT);
 
     this->ysymbol.reserve(SYMBOL_INIT_SIZE);
-    for (auto i = 0; i < SYMBOL_INIT_SIZE; i++) {
-        this->ysymbol.push_back(-1);
+    for (size_t i = 0; i < SYMBOL_INIT_SIZE; i++) {
+        this->ysymbol.push_back(-1); // TODO: is this still needed...
     }
 }
 
@@ -1661,16 +1567,15 @@ GetYaccGrammarOutput::get_yacc_grammar(const std::string& infile,
         std::shared_ptr<SymbolTableNode> n = hash_tbl_insert(STR_ACCEPT);
         auto& new_rule =
           create_new_rule(output.grammar); // goal production rule.
-        new_rule->nLHS = SymbolNode::create(n);
+        new_rule->nLHS = std::make_shared<SymbolNode>(n);
         n->type = symbol_type::NONTERMINAL;
     }
 
     GetYaccGrammarOutput::Section1Output section1_output =
       output.process_yacc_file_input_section1(fp, expected_sr_conflict);
-    SymNode* tokens_tail = section1_output.tokens_tail;
     std::shared_ptr<SymbolTableNode> start_symbol =
       section1_output.start_symbol;
-    output.process_yacc_file_input_section2(tokens_tail, fp);
+    output.process_yacc_file_input_section2(fp);
 
     fp.close();
 
@@ -1682,8 +1587,8 @@ GetYaccGrammarOutput::get_yacc_grammar(const std::string& infile,
     get_grammar_params(output.grammar);
 
     n_rule = output.grammar.rules.size();
-    n_symbol =
-      output.grammar.terminal_count + output.grammar.non_terminal_count;
+    n_symbol = output.grammar.terminal_list.size() +
+               output.grammar.non_terminal_list.size();
     n_rule_opt = output.grammar.get_opt_rule_count();
     return output;
 }

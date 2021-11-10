@@ -30,11 +30,14 @@
 
 #include "lane_tracing.hpp"
 #include "y.hpp"
+#include <any>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 //////////////////////////////////////////////////////////////////
@@ -221,107 +224,6 @@ ConfigPairNode::list_destroy(ConfigPairList list) noexcept
 // Functions for Set. START.
 //////////////////////////////////////////////////////////////////
 
-/*
- * Create new set object.
- */
-static auto
-object_item_new(void* object) -> ObjectItem*
-{
-    auto* s = new ObjectItem;
-    s->object = object;
-    s->next = nullptr;
-    return s;
-}
-
-static void
-object_item_destroy(ObjectItem* s)
-{
-    delete s;
-}
-
-/*
- * Insert if not exist.
- * NOTE: "not exist" means the object, but if "not exist" means
- * the contents of the object, then a separate function should
- * be written for this.
- */
-auto
-set_insert(Set* set, void* object) -> Set*
-{
-    if (set == nullptr) {
-        return object_item_new(object);
-    }
-
-    Set* s = nullptr;
-    // else, set is not nullptr.
-    for (s = set; s->next != nullptr; s = s->next) {
-        if (s->object == object)
-            return set; // exists already.
-    }
-
-    // now s->next is nullptr.
-    if (s->object == object) {
-        return set;
-    }
-    s->next = object_item_new(object);
-
-    return set;
-}
-
-auto
-set_find(Set* set, void* object) -> ObjectItem*
-{
-    for (Set* s = set; s != nullptr; s = s->next) {
-        if (s->object == object)
-            return s;
-    }
-
-    return nullptr;
-}
-
-auto
-set_delete(Set* set, void* object) -> Set*
-{
-
-    if (set == nullptr) {
-        return nullptr;
-    }
-
-    Set *s = nullptr, *s_prev = set;
-    // else, set is not nullptr.
-    for (; s != nullptr; s_prev = s, s = s->next) {
-        if (s->object == object) {
-            if (s_prev == nullptr) {
-                s_prev = s;
-                s = s->next;
-                object_item_destroy(s_prev);
-                return s;
-            }
-            s_prev->next = s->next;
-            object_item_destroy(s);
-            return set;
-        }
-    }
-
-    return set;
-}
-
-/*
- * A function pointer is passed in. This function dumps the set item.
- */
-void
-set_dump(const Set* set, void (*set_item_dump)(void*))
-{
-    if (set == nullptr) {
-        std::cout << "(set is empty)" << std::endl;
-        return;
-    }
-
-    for (const Set* s = set; s != nullptr; s = s->next) {
-        (*set_item_dump)(s->object);
-    }
-}
-
 //////////////////////////////////////////////////////////////////
 // Functions for Set. END.
 //////////////////////////////////////////////////////////////////
@@ -331,50 +233,15 @@ set_dump(const Set* set, void (*set_item_dump)(void*))
 //////////////////////////////////////////////////////////////////
 
 // create an empty list.
-auto
-List::create() -> std::shared_ptr<List>
-{
-    auto t = std::make_shared<List>();
-    t->head = nullptr;
-    t->tail = nullptr;
-    t->count = 0;
-    return t;
-}
-
-// insert new object at tail of list t,
-// without checking if the object already exists.
-void
-List::insert_tail(void* object)
-{
-    if (object == nullptr)
-        return;
-
-    if (this->head == nullptr) {
-        this->head = this->tail = object_item_new(object);
-    } else {
-        this->tail->next = object_item_new(object);
-        this->tail = this->tail->next;
-    }
-
-    this->count++;
-}
-
-void
-List::dump(void (*list_item_dump)(void*)) const
-{
-    if (this->head == nullptr) {
-        std::cout << "(list is empty)" << std::endl;
-        return;
-    }
-
-    std::cout << "list count: " << this->count << std::endl;
-
-    int i = 0;
-    for (ObjectItem* s = this->head; s != nullptr; s = s->next) {
-        std::cout << ++i << " ";
-        (*list_item_dump)(s->object);
-    }
-}
+// auto
+// List::create() -> std::shared_ptr<List>
+// {
+//     auto t = std::make_shared<List>();
+//     t->head = nullptr;
+//     t->tail = nullptr;
+//     t->count = 0;
+//     return t;
+// }
 
 //////////////////////////////////////////////////////////////////
 // Functions for List. END.
@@ -405,7 +272,7 @@ LRkPT::dump() const noexcept
 
     for (const LRkPTRow* r = this->rows; r != nullptr; r = r->next) {
         std::cout << "[" << r->state << ", " << r->token->snode->symbol << "] ";
-        for (int i = 0; i < ParsingTblCols; i++) {
+        for (size_t i = 0; i < ParsingTblColHdr.size(); i++) {
             ConfigPairNode* n = r->row[i];
             if (n == nullptr) {
                 std::cout << "0 ";
@@ -442,7 +309,7 @@ lrk_pt_dump_file(const LRkPT* t, std::ofstream& fp)
 
     for (const LRkPTRow* r = t->rows; r != nullptr; r = r->next) {
         fp << "[" << r->state << ", " << r->token->snode->symbol << "] ";
-        for (int i = 0; i < ParsingTblCols; i++) {
+        for (size_t i = 0; i < ParsingTblColHdr.size(); i++) {
             const ConfigPairNode* n = r->row[i];
             if (n == nullptr) {
                 fp << "0 ";
@@ -460,11 +327,9 @@ lrk_pt_dump_file(const LRkPT* t, std::ofstream& fp)
     fp << std::endl;
 }
 
-/*
- * @Return: found - true if found, false if not.
- *          If found is true, return the row.
- *          otherwise, return the row before the insertion point.
- */
+/// @Return: found - true if found, false if not.
+///          If found is true, return the row.
+///          otherwise, return the row before the insertion point.
 auto
 LRkPT::find(int state,
             std::shared_ptr<SymbolTableNode> token,
@@ -496,11 +361,9 @@ LRkPT::find(int state,
     return r_prev;
 }
 
-/*
- * Pre-assumption: t is not nullptr.
- * Insert the new row after r.
- * @Return: the inserted new row.
- */
+/// Pre-assumption: t is not nullptr.
+/// Insert the new row after r.
+/// @Return: the inserted new row.
 static auto
 lrk_pt_add_row(LRkPT* t,
                LRkPTRow* r_prev,
@@ -509,10 +372,10 @@ lrk_pt_add_row(LRkPT* t,
 {
     auto* r = new LRkPTRow;
     r->state = state;
-    r->token = SymbolNode::create(token);
+    r->token = std::make_shared<SymbolNode>(token);
 
-    r->row = new ConfigPairNode*[ParsingTblCols];
-    for (int i = 0; i < ParsingTblCols; i++) {
+    r->row = new ConfigPairNode*[ParsingTblColHdr.size()];
+    for (size_t i = 0; i < ParsingTblColHdr.size(); i++) {
         r->row[i] = nullptr; // initialize to nullptr.
     }
 
@@ -528,11 +391,9 @@ lrk_pt_add_row(LRkPT* t,
     return r;
 }
 
-/*
- * Get the entry [(state, token), col_token] in t.
- *
- * Assumptions: t != nullptr.
- */
+/// Get the entry [(state, token), col_token] in t.
+///
+/// Assumptions: t != nullptr.
 auto
 LRkPT::get_entry(int state,
                  std::shared_ptr<SymbolTableNode> token,
@@ -633,7 +494,7 @@ LRkPTArray::add(LRkPT* t) noexcept
  * Get the LR(k) parsing table for k.
  */
 auto
-LRkPTArray::get(int k) const noexcept -> LRkPT*
+LRkPTArray::get(size_t k) const noexcept -> LRkPT*
 {
     if (k < 2 || k > this->max_k())
         return nullptr;
@@ -647,10 +508,10 @@ LRkPTArray::get(int k) const noexcept -> LRkPT*
 static void
 write_parsing_tbl_col_hdr()
 {
-    std::cout << "--Parsing Table Column Header [Total: " << ParsingTblCols
-              << "]--" << std::endl;
-    for (int i = 0; i < ParsingTblCols; i++) {
-        std::cout << ParsingTblColHdr[i]->symbol << " ";
+    std::cout << "--Parsing Table Column Header [Total: "
+              << ParsingTblColHdr.size() << "]--" << std::endl;
+    for (const auto& i : ParsingTblColHdr) {
+        std::cout << i->symbol << " ";
     }
     std::cout << std::endl;
 }
@@ -658,10 +519,10 @@ write_parsing_tbl_col_hdr()
 static void
 write_parsing_tbl_col_hdr_file(std::ostream& fp)
 {
-    fp << "--Parsing Table Column Header [Total: " << ParsingTblCols << "]--"
-       << std::endl;
-    for (int i = 0; i < ParsingTblCols; i++) {
-        fp << ParsingTblColHdr[i]->symbol << " ";
+    fp << "--Parsing Table Column Header [Total: " << ParsingTblColHdr.size()
+       << "]--" << std::endl;
+    for (const auto& i : ParsingTblColHdr) {
+        fp << i->symbol << " ";
     }
     fp << std::endl;
 }
@@ -723,10 +584,7 @@ auto
 CfgCtxt::create(Configuration* c, SymbolList s, Configuration* tail) noexcept
   -> CfgCtxt*
 {
-    auto* cc = new CfgCtxt;
-    cc->c = c;
-    cc->ctxt = s;
-    cc->tail = tail;
+    auto* cc = new CfgCtxt(c, s, tail);
     return cc;
 }
 
@@ -741,8 +599,8 @@ CfgCtxt::dump() const noexcept
 {
     std::cout << "CfgCtxt: " << this->c->owner->state_no << "."
               << this->c->ruleID << " { ";
-    for (SymbolList a = this->ctxt; a != nullptr; a = a->next) {
-        std::cout << a->snode->symbol << " ";
+    for (const auto& a : this->ctxt) {
+        std::cout << a.snode->symbol << " ";
     }
     std::cout << "}[tail: ";
     if (this->tail != nullptr) {
@@ -759,112 +617,96 @@ CfgCtxt::dump() const noexcept
 // Functions for LR(k) theads. START.
 //////////////////////////////////////////////////////////////////
 
-constexpr bool DEBUG_LRK_THEADS_CYCLE = true;
 constexpr bool DEBUG_LRK_THEADS = false;
 
-//
-// Get the head of string alpha up to the k-th symbol that
-// does not vanish, or the entire alpha if less than k symbols
-// do not vanish.
-// Note: k >= 2.
-// @Return: a COPY of the head of the original string is returned.
-//
-auto
-get_string_with_k_non_vanish_symbol(SymbolList alpha, int k) -> SymbolList
+/// Get the head of string alpha up to the k-th symbol that
+/// does not vanish, or the entire alpha if less than k symbols
+/// do not vanish.
+/// @note k >= 2.
+/// @return a COPY of the head of the original string is returned.
+static auto
+get_string_with_k_non_vanish_symbol(SymbolList& alpha, size_t k) -> SymbolList
 {
-    if (nullptr == alpha || k <= 0)
-        return nullptr;
+    if (alpha.empty() || k <= 0)
+        return SymbolList{};
 
-    SymbolNode* pt = alpha;
-    SymbolNode* cpy_tail = SymbolNode::create(pt->snode);
-    SymbolNode* cpy = cpy_tail;
-    int i = (is_vanish_symbol(*pt->snode) == false) ? 1 : 0;
+    auto it = alpha.begin();
+    SymbolList cpy_tail{};
+    cpy_tail.emplace_back(it->snode);
+    size_t i = (it->snode->is_vanish_symbol()) ? 0 : 1;
     if (i == k)
-        return cpy;
+        return cpy_tail;
 
-    for (pt = alpha->next; pt != nullptr; pt = pt->next) {
-        cpy_tail->next = SymbolNode::create(pt->snode);
-        cpy_tail = cpy_tail->next;
-        if (is_vanish_symbol(*pt->snode) == false)
+    ++it;
+    for (; it != alpha.end(); ++it) {
+        cpy_tail.emplace_back(it->snode);
+        if (!it->snode->is_vanish_symbol())
             i++;
         if (i == k)
             break;
     }
 
-    return cpy;
+    return cpy_tail;
 }
 
-//
-// n is a node in list new_list,
-// replace symbol n->next with the RHS of rule numbered ruleID.
-// return the new list.
-//
-auto
+/// n is a node in list new_list,
+/// replace symbol n+1 with the RHS of rule numbered ruleID.
+/// return the new list.
+static void
 replace_with_rhs(const Grammar& grammar,
-                 SymbolList new_list,
-                 SymbolNode* n_prev,
-                 int rule_id) -> SymbolNode*
+                 SymbolList& new_list,
+                 SymbolList::iterator& n,
+                 int rule_id)
 {
-    SymbolNode *rhs_tail = nullptr, *tmp = nullptr;
-
-    SymbolList rhs = clone_symbol_list(grammar.rules[rule_id]->nRHS_head);
-    if (rhs == nullptr) {
-        rhs_tail = nullptr;
+    SymbolList rhs = clone_symbol_list(grammar.rules[rule_id]->nRHS);
+    if (rhs.empty()) {
         // in this case, rhs is empty list,
         // just remove n_prev->next from new_list.
-        if (nullptr == n_prev) {
-            tmp = new_list;
-            new_list = new_list->next;
+        if (n == new_list.end()) {
+            new_list.pop_front();
         } else {
-            tmp = n_prev->next;
-            n_prev->next = tmp->next;
+            ++n;
+            new_list.erase(n);
         }
-        free_symbol_node(tmp);
-        return new_list;
+        return;
     }
 
-    // else, rhs is NOT nullptr.
-    for (rhs_tail = rhs; rhs_tail->next != nullptr; rhs_tail = rhs_tail->next)
-        ;
-
-    if (n_prev == nullptr) { // replace the first symbol with rhs list.
-        tmp = new_list;
-        rhs_tail->next = tmp->next;
-        free_symbol_node(tmp);
+    if (n == new_list.end()) { // replace the first symbol with rhs list.
+        SymbolList tmp = new_list;
+        rhs.splice(rhs.end(), new_list);
         new_list = rhs;
     } else { // replace symbol n_prev->next in the middle.
-        tmp = n_prev->next;
-        rhs_tail->next = tmp->next;
-        free_symbol_node(tmp);
-        n_prev->next = rhs;
+        n++;
+        new_list.splice(n, rhs);
     }
-
-    return new_list;
 }
 
-auto
-is_same_symbol_list(SymbolList a, SymbolList b) -> bool
+static auto
+is_same_symbol_list(const SymbolList& a, const SymbolList& b) -> bool
 {
-    for (; (a != nullptr) && (b != nullptr); a = a->next, b = b->next) {
-        if (a->snode != b->snode)
+    if (a.size() != b.size()) {
+        return false;
+    }
+    auto ita = a.begin();
+    auto itb = b.begin();
+    for (; (ita != a.end()) && (itb != b.end()); ++ita, ++itb) {
+        if (ita->snode != itb->snode)
             return false;
     }
-    if ((nullptr == a) && (nullptr == b))
-        return true;
     return false;
 }
 
-// assumption: new_list != nullptr, t != nullptr.
-auto
-lrk_thead_in_list(List* t, SymbolList new_list) -> bool
+/// assumption: new_list != nullptr, t != nullptr.
+static auto
+lrk_thead_in_list(const List* t, const SymbolList& new_list) -> bool
 {
-    if (nullptr == t || new_list == nullptr) {
+    if (t == nullptr || new_list.empty()) {
         throw std::runtime_error(
-          "lrk_thead_in_list ERROR: t or new_list is nullptr");
+          "lrk_thead_in_list ERROR: t is nullptr or new_list is empty");
     }
 
-    for (ObjectItem* o = t->head; o != nullptr; o = o->next) {
-        if (is_same_symbol_list(new_list, static_cast<SymbolList>(o->object))) {
+    for (const auto& o : t->inner) {
+        if (is_same_symbol_list(new_list, o)) {
             return true;
         }
     }
@@ -872,229 +714,185 @@ lrk_thead_in_list(List* t, SymbolList new_list) -> bool
     return false;
 }
 
-//
-// Assumption: k >= 2.
-// Truncate list s so it contains up to k non-vanishable symbols.
-//
-static auto
-lrk_theads_truncate_list_by_k(SymbolList s, int k) -> SymbolList
+/// Assumption: k >= 2.
+/// Truncate list s so it contains up to k non-vanishable symbols.
+static void
+lrk_theads_truncate_list_by_k(SymbolList& s, int k)
 {
-    if (nullptr == s)
-        return nullptr;
-
     int i = 0;
-    for (SymbolNode* t = s; t != nullptr; t = t->next) {
-        if (t->snode->vanishable == false)
+    size_t total = 0;
+    for (const auto& t : s) {
+        if (!t.snode->vanishable)
             i++;
-        if (i >= k) { // truncate from after this point.
-                      // std::cout << "--Yes truncate" << std::endl;
-            SymbolNode* tmp = t->next;
-            t->next = nullptr;
-            if (nullptr != tmp) {
-                free_symbol_node_list(tmp);
-            }
+        if (i >= k) {
             break;
         }
+        total += 1;
     }
-
-    return s;
+    while (s.size() > total) {
+        s.pop_back();
+    }
 }
 
 void
-List::add_derivatives(const Grammar& grammar, ObjectItem* o, int j, int k)
+List::add_derivatives(const Grammar& grammar,
+                      const SymbolList& m,
+                      const size_t j,
+                      const size_t k)
 {
     // get the (j)-th symbol.
-    auto* m = static_cast<SymbolNode*>(o->object);
-    for (int i = 0; i < j; i++) {
-        if (nullptr == m) {
+    auto m_it = m.begin();
+    for (size_t i = 0; i < j; i++) {
+        if (m_it == m.end()) {
             return;
         }
-        m = m->next;
+        ++m_it;
     }
-    if (nullptr == m) {
+    if (m_it == m.end()) {
         return;
     }
 
-    for (RuleIDNode* r = m->snode->ruleIDList; r != nullptr; r = r->next) {
-        SymbolList new_list =
-          clone_symbol_list(static_cast<SymbolNode*>(o->object));
+    for (RuleIDNode* r = m_it->snode->ruleIDList; r != nullptr; r = r->next) {
+        SymbolList new_list = clone_symbol_list(m);
         // get the (j-1)-th symbol and store as n_prev.
-        SymbolNode* n_prev = nullptr;
-        SymbolNode* n = new_list;
-        for (int i = 0; i < j; i++) {
-            n_prev = n;
-            n = n->next;
-        }
-
-        new_list = replace_with_rhs(grammar, new_list, n_prev, r->rule_id);
-        // assumption: new_list != nullptr, t != nullptr.
-        if (nullptr != new_list) {
-            new_list = lrk_theads_truncate_list_by_k(new_list, k);
-            if (lrk_thead_in_list(this, new_list) == false) {
-                this->insert_tail((void*)new_list);
+        auto n_prev = new_list.begin();
+        if (j != 0) {
+            for (size_t i = 0; i < j - 1; i++) {
+                n_prev++;
             }
-        } // end if
-    }     // end for
+        } else {
+            n_prev = new_list.end(); // really ?
+        }
+        // TODO: this logic might be simpler :)
+        replace_with_rhs(grammar, new_list, n_prev, r->rule_id);
+        // assumption: !new_list.empty(), t != nullptr.
+        if (!new_list.empty()) {
+            lrk_theads_truncate_list_by_k(new_list, k);
+            if (!lrk_thead_in_list(this, new_list)) {
+                this->insert_tail(new_list);
+            }
+        }
+    }
 }
 
-//
-// Assumption: s.length >= j.
-//
-// Return true is the j-th symbol of s exists and is Non-terminal.
-// otherwise return false.
-//
-auto
-j_th_symbol_is_nt(SymbolList s, int j) -> bool
+/// Assumption: s.length >= j.
+///
+/// Return true is the j-th symbol of s exists and is Non-terminal.
+/// otherwise return false.
+static auto
+j_th_symbol_is_nt(const SymbolList& s, const size_t j) -> bool
 {
-    for (int i = 0; i < j; i++) {
-        if (s == nullptr)
+    auto it = s.begin();
+    for (size_t i = 0; i < j; i++) {
+        if (it == s.end())
             return false;
-        s = s->next;
+        it++;
     }
-    if (s == nullptr)
+    if (it == s.end())
         return false;
 
-    return (s->snode->type == symbol_type::NONTERMINAL);
+    return (it->snode->type == symbol_type::NONTERMINAL);
 }
 
 void
-List::lrk_theads_rm_nt(int j)
+List::lrk_theads_rm_nt(const size_t j)
 {
     if constexpr (DEBUG_LRK_THEADS) {
         std::cout << std::endl << "lrk_theads_rm_nt:" << std::endl;
     }
 
-    if (this->head == nullptr)
+    if (this->inner.empty())
         return;
 
-    ObjectItem* o_prev = nullptr;
-    ObjectItem* o = this->head;
-    while (o != nullptr) {
-        if (j_th_symbol_is_nt(static_cast<SymbolList>(o->object), j)) {
-            this->count--;
-            // remove o.
-            if (o_prev == nullptr) {
-                this->head = o->next;
-                if (this->head == nullptr) {
-                    this->tail = nullptr;
-                }
-                object_item_destroy(o);
-                o = this->head;
-            } else {
-                o_prev->next = o->next;
-                if (o_prev->next == nullptr) {
-                    this->tail = o_prev;
-                }
-                object_item_destroy(o);
-                o = o_prev->next;
-            }
+    for (auto it = this->inner.begin(); it != this->inner.end();) {
+        if (j_th_symbol_is_nt(*it, j)) {
+            this->inner.erase(it);
         } else {
-            o_prev = o;
-            o = o->next;
+            it++;
         }
     }
 }
 
-//
-// Assumption: k >= 2.
-//
-// Returns true if the first k symbols are s are all terminals.
-// Otherwise returns false.
-//
+/// Assumption: k >= 2.
+///
+/// Returns true if the first k symbols are s are all terminals.
+/// Otherwise returns false.
 static auto
-k_heads_are_t(SymbolList s, int k, int* len) -> bool
+k_heads_are_t(const SymbolList& s, size_t k)
+  -> std::pair<bool, std::optional<size_t>>
 {
-    *len = -1;
+    if (s.empty())
+        return { false, std::nullopt };
 
-    if (s == nullptr)
-        return false;
-
-    int i = 0;
-    for (; (i < k) && (nullptr != s); i++) {
-        if (s->snode->type == symbol_type::NONTERMINAL)
-            return false;
-        s = s->next;
+    size_t i = 0;
+    auto it = s.cbegin();
+    for (; it != s.cend(); it++) {
+        if (i == k) {
+            break;
+        }
+        if (it->snode->type == symbol_type::NONTERMINAL) {
+            return { false, std::nullopt };
+        }
+        i += 1;
     }
-
-    *len = i;
 
     // s contains less than k symbols, and these are all terminals.
-    if ((i < k) && (nullptr == s)) {
-        return false;
+    if ((i < k) && (it == s.cend())) {
+        return { false, i };
     }
 
-    return true;
+    return { true, i };
 }
 
 void
-List::lrk_theads_rm_theads(int k, List* t_heads)
+List::lrk_theads_rm_theads(size_t k, List* t_heads)
 {
-    int len = 0;
-
-    if (this->head == nullptr)
+    if (this->inner.empty())
         return;
 
-    ObjectItem* o_prev = nullptr;
-    ObjectItem* o = this->head;
-    while (o != nullptr) {
-        if (k_heads_are_t(static_cast<SymbolList>(o->object), k, &len) ||
-            (len > 0 && len < k)) {
-            this->count--;
+    auto o = this->inner.begin();
+    for (; o != this->inner.end();) {
+        auto [k_heads_are_t_res, len] = k_heads_are_t(*o, k);
+        if (k_heads_are_t_res || (len > 0 && len < k)) {
+            this->count--; // TODO: what is this ???
             if (len < k) {
                 // k'-thead, where k' < k. do nothing
                 if (len == k - 1) {
-                    t_heads->insert_tail(o->object);
+                    t_heads->insert_tail(*o);
                 }
-            } else if (false ==
-                       lrk_thead_in_list(t_heads, (SymbolList)o->object)) {
+            } else if (false == lrk_thead_in_list(t_heads, *o)) {
                 // k-thead.
-                t_heads->insert_tail(o->object);
+                t_heads->insert_tail(*o);
             }
             // remove o.
-            if (o_prev == nullptr) {
-                this->head = o->next;
-                if (this->head == nullptr) {
-                    this->tail = nullptr;
-                }
-                object_item_destroy(o);
-                o = this->head;
-            } else {
-                o_prev->next = o->next;
-                if (o_prev->next == nullptr) {
-                    this->tail = o_prev;
-                }
-                object_item_destroy(o);
-                o = o_prev->next;
-            }
+            this->inner.erase(o);
         } else {
-            o_prev = o;
-            o = o->next;
+            o++;
         }
     }
 }
 
-/*
- * Find theads of length k for string alpha.
- * This is a set of strings.
- */
+/// Find theads of length k for string alpha.
+/// This is a set of strings.
 auto
-lrk_theads(const Grammar& grammar, SymbolList alpha, int k)
+lrk_theads(const Grammar& grammar, SymbolList& alpha, const size_t k)
   -> std::shared_ptr<List>
 {
-    if (alpha == nullptr)
+    if (alpha.empty())
         return nullptr;
 
     SymbolList s = get_string_with_k_non_vanish_symbol(alpha, k);
 
-    std::shared_ptr<List> t_heads = List::create(); // set of LR(k) theads.
-    std::shared_ptr<List> t = List::create();
-    t->insert_tail((void*)s);
+    std::shared_ptr<List> t_heads =
+      std::make_shared<List>(); // set of LR(k) theads.
+    std::shared_ptr<List> t = std::make_shared<List>();
+    t->insert_tail(s);
 
-    for (int j = 0; j < k; j++) {
-        ObjectItem* o = t->head;
-        while (o != nullptr) {
-            t->add_derivatives(grammar, o, j, k);
-            o = o->next;
+    for (size_t j = 0; j < k; j++) {
+        auto o = t->inner.begin();
+        while (o != t->inner.end()) {
+            t->add_derivatives(grammar, *o, j, k);
+            o++;
         }
 
         t->lrk_theads_rm_nt(j);

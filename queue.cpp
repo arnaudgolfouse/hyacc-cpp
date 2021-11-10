@@ -79,7 +79,7 @@ Queue::pop() noexcept -> std::optional<size_t>
     this->start += 1;
     if ((this->size() < this->array.size() / 2) &&
         (this->array.size() >= Queue::QUEUE_INIT_SIZE)) {
-        this->shrink();
+        this->set_start_to_0();
     }
     return item;
 }
@@ -126,14 +126,14 @@ Queue::info() const noexcept
     }
 }
 
+/// Move all elements to the start of the backing vector.
 void
-Queue::shrink()
+Queue::set_start_to_0()
 {
-    std::vector<size_t> new_array;
-    new_array.reserve(this->size());
-    for (size_t i = this->start; i < this->array.size(); i++) {
-        new_array.push_back(this->get_no_check(i));
+    if (this->start != 0) {
+        for (size_t i = 0; i < this->size(); i++) {
+            this->array[i] = this->array[i + this->start];
+        }
+        this->start = 0;
     }
-    this->array = new_array;
-    this->start = 0;
 }
