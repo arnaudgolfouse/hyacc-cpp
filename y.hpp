@@ -40,9 +40,11 @@
 #include <ostream>
 #include <queue>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 class YAlgorithm; // forward-declaration
@@ -115,6 +117,8 @@ class Options
     std::atomic_bool show_originators;
 };
 
+using StateHandle = size_t;
+
 /// Names of various files.
 struct FileNames
 {
@@ -163,6 +167,127 @@ struct TerminalProperty
     int precedence;
     associativity assoc;
 };
+
+class ParsingAction
+{
+  public:
+    ~ParsingAction() = default;
+    ParsingAction(const ParsingAction&) = default;
+    ParsingAction(ParsingAction&&) = default;
+    auto operator=(const ParsingAction&) -> ParsingAction& = default;
+    auto operator=(ParsingAction&&) -> ParsingAction& = default;
+    auto operator==(const ParsingAction&) const noexcept -> bool = default;
+    auto operator!=(const ParsingAction&) const noexcept -> bool = default;
+
+    enum class Kind
+    {
+        Accept,
+        Reduce,
+        Shift,
+        Error,
+    };
+
+    constexpr static auto new_shift(const StateHandle state) noexcept
+      -> ParsingAction
+    {
+        auto new_action = ParsingAction();
+        new_action.data = state;
+        new_action.m_kind = Kind::Shift;
+        return new_action;
+    }
+    constexpr static auto new_reduce(const StateHandle state) noexcept
+      -> ParsingAction
+    {
+        auto new_action = ParsingAction();
+        new_action.data = state;
+        new_action.m_kind = Kind::Reduce;
+        return new_action;
+    }
+    constexpr static auto new_accept() noexcept -> ParsingAction
+    {
+        auto new_action = ParsingAction();
+        new_action.m_kind = Kind::Accept;
+        return new_action;
+    }
+    constexpr static auto new_error() noexcept -> ParsingAction
+    {
+        auto new_action = ParsingAction();
+        new_action.m_kind = Kind::Error;
+        return new_action;
+    }
+    [[nodiscard]] constexpr auto kind() const noexcept -> Kind
+    {
+        return this->m_kind;
+    }
+    [[nodiscard]] auto is_accept() const noexcept -> bool
+    {
+        return this->m_kind == Kind::Accept;
+    }
+    [[nodiscard]] constexpr auto is_reduce() const noexcept -> bool
+    {
+        return this->m_kind == Kind::Reduce;
+    }
+    [[nodiscard]] constexpr auto is_shift() const noexcept -> bool
+    {
+        return this->m_kind == Kind::Shift;
+    }
+    [[nodiscard]] constexpr auto shift_value() const -> StateHandle
+    {
+        if (this->m_kind != Kind::Shift) {
+            throw std::runtime_error(
+              std::string("Invalid call to shift_value: action is ") +
+              this->to_string());
+        }
+        return this->data;
+    }
+    [[nodiscard]] constexpr auto reduce_value() const -> StateHandle
+    {
+        if (this->m_kind != Kind::Reduce) {
+            throw std::runtime_error(
+              std::string("Invalid call to reduce_value: action is ") +
+              this->to_string());
+        }
+        return this->data;
+    }
+    [[nodiscard]] auto to_string() const -> std::string
+    {
+        switch (this->m_kind) {
+            case Kind::Accept:
+                return "Accept";
+            case Kind::Reduce:
+                return "Reduce";
+            case Kind::Shift:
+                return std::string("Shift(") + std::to_string(this->data) + ')';
+            case Kind::Error:
+                return "Error";
+        };
+    }
+
+  private:
+    ParsingAction() noexcept = default;
+    /// Only used if `m_kind == Shift` or `m_kind == Reduce`.
+    StateHandle data = 0;
+    Kind m_kind = Kind::Accept;
+};
+
+inline auto
+operator<<(std::ostream& os, ParsingAction action) -> std::ostream&
+{
+    switch (action.kind()) {
+        case ParsingAction::Kind::Accept:
+            os << "Accept";
+            return os;
+        case ParsingAction::Kind::Reduce:
+            os << "Reduce(" << action.reduce_value() << ")";
+            return os;
+        case ParsingAction::Kind::Shift:
+            os << "Shift(" << action.shift_value() << ")";
+            return os;
+        case ParsingAction::Kind::Error:
+            os << "Error";
+            return os;
+    }
+}
 
 /* contains a symbol. */
 struct SymbolTableNode
@@ -350,7 +475,7 @@ struct Production
      * In general, marker == -1 only when print grammar rules.
      * marker >= 0 when print configuration production.
      */
-    void write(std::ostream& os, int marker) const noexcept;
+    void write(std::ostream& os, std::optional<size_t> marker) const noexcept;
 };
 
 /*
@@ -373,9 +498,9 @@ using TransitorList = OriginatorList;
 using Configuration = struct ConfigurationNode;
 struct ConfigurationNode
 {
-    int ruleID;         // index of rule in grammar.rules[].
+    size_t ruleID;      // index of rule in grammar.rules[].
     SymbolList nMarker; // point to scanned symbol.
-    int marker;         // redundant to nMarker, but make processing easier.
+    size_t marker;      // redundant to nMarker, but make processing easier.
     Context* context;
     std::shared_ptr<struct StateNode> owner;
 
@@ -401,19 +526,19 @@ struct ConfigurationNode
 using Conflict = struct ConflictNode;
 struct ConflictNode
 {
-    int state;
+    StateHandle state;
     std::shared_ptr<SymbolTableNode> lookahead;
-    int r;          // reduce, neg, and is always the smaller one.
-    int s;          // reduce or shift, neg or pos.
-    int decision{}; // final decision.
+    ParsingAction r; // reduce, and is always the smaller one.
+    ParsingAction s; // reduce or shift.
+    ParsingAction decision = ParsingAction::new_accept(); // final decision.
     std::shared_ptr<ConflictNode> next;
 
-    explicit ConflictNode(int state,
-                          std::shared_ptr<SymbolTableNode> lookahead,
-                          int r,
-                          int s) noexcept
+    explicit ConflictNode(const StateHandle state,
+                          const std::shared_ptr<SymbolTableNode> lookahead,
+                          const ParsingAction r,
+                          const ParsingAction s) noexcept
       : state(state)
-      , lookahead(lookahead)
+      , lookahead(std::move(lookahead))
       , r(r)
       , s(s)
       , next(nullptr)
@@ -457,7 +582,7 @@ struct StateNode
     std::vector<Configuration*> config{};
     size_t core_config_count;
 
-    int state_no;
+    StateHandle state_no;
     std::shared_ptr<SymbolNode> trans_symbol;
 
     std::shared_ptr<StateList> parents_list;
@@ -541,7 +666,7 @@ struct Grammar
     void write(std::ostream& os,
                bool before_rm_unit_prod,
                bool use_remove_unit_production) const noexcept;
-    [[nodiscard]] auto is_unit_production(size_t rule_no) const -> bool;
+    [[nodiscard]] auto is_unit_production(StateHandle rule_no) const -> bool;
 };
 
 // extern Grammar grammar; /* Used by the entire program. */
@@ -674,16 +799,16 @@ struct NewStates
     StateCollection* states_new{ nullptr };
     ConflictsCount conflicts_count{};
 
-    void inc_conflict_count(int s, size_t state) noexcept;
+    void inc_conflict_count(ParsingAction s, size_t state) noexcept;
     /// insert in increasing order by conflict's state no.
     ///
     /// @note no need to check size of conflict arrays,
     /// which is handled in expand_parsing_table().
     /// TODO: this is no longer true :)
-    auto add_to_conflict_array(int state,
+    auto add_to_conflict_array(StateHandle state,
                                std::shared_ptr<SymbolTableNode> lookahead,
-                               int action1,
-                               int action2) noexcept
+                               ParsingAction action1,
+                               ParsingAction action2)
       -> std::shared_ptr<ConflictNode>;
     void write_grammar_conflict_list(std::ostream& os) const noexcept;
     /// Used when USE_REMOVE_UNIT_PROD is used.
@@ -733,8 +858,8 @@ class LR0
     void output_parsing_table_lalr();
     void generate_lr0_parsing_machine(Queue& config_queue);
     void insert_action(std::shared_ptr<SymbolTableNode> lookahead,
-                       int row,
-                       int state_dest);
+                       StateHandle row,
+                       ParsingAction action);
 
     const Grammar&
       grammar; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -750,15 +875,15 @@ class LR0
       state_hash_table{}; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
 
   private:
-    void add_transition_states2_new_lr0(StateCollection* coll,
+    void add_transition_states2_new_lr0(const StateCollection& coll,
                                         std::shared_ptr<State> src_state);
     void transition_lr0(std::shared_ptr<State> s) noexcept;
     void output_parsing_table() noexcept;
-    void insert_reduction_to_parsing_table_lr0(const Configuration* c,
-                                               int state_no);
+    void insert_reduction_to_parsing_table_lr0(const Configuration& c,
+                                               StateHandle state_no);
     void output_parsing_table_row(std::shared_ptr<const State> s);
-    void insert_reduction_to_parsing_table_lalr(const Configuration* c,
-                                                int state_no);
+    void insert_reduction_to_parsing_table_lalr(const Configuration& c,
+                                                StateHandle state_no);
     void output_parsing_table_row_lalr(std::shared_ptr<const State>);
 };
 
@@ -802,7 +927,7 @@ class YAlgorithm : public LR0
     void init_start_state();
     void update_state_parsing_tbl_entry(const State& s);
     void insert_reduction_to_parsing_table(const Configuration* c,
-                                           int state_no);
+                                           StateHandle state_no);
     void propagate_context_change(const State& s);
     auto add_transition_states2_new(StateCollection* coll,
                                     std::shared_ptr<State> rc_state) -> bool;
@@ -811,11 +936,12 @@ class YAlgorithm : public LR0
     void remove_unit_production_step1and2(
       const std::vector<std::shared_ptr<struct MRTreeNode>>& mr_leaves);
     void insert_action_of_symbol(std::shared_ptr<SymbolTableNode> symbol,
-                                 int new_state,
+                                 StateHandle new_state,
                                  size_t old_state_index,
-                                 const std::vector<int>& old_states);
-    void insert_actions_of_combined_states(int new_state,
-                                           const std::vector<int>& old_states);
+                                 const std::vector<StateHandle>& old_states);
+    void insert_actions_of_combined_states(
+      StateHandle new_state,
+      const std::vector<StateHandle>& old_states);
     void show_state_config_info(std::ostream& os) const noexcept;
 };
 
@@ -824,7 +950,7 @@ class YAlgorithm : public LR0
 constexpr int CONST_ACC = -10000000; /* for ACC in parsing table */
 
 extern std::atomic_size_t PARSING_TABLE_SIZE;
-extern std::vector<int> ParsingTable;
+extern std::vector<std::optional<ParsingAction>> ParsingTable;
 extern size_t ParsingTblRows;
 /*
  * For parsing table column header names.
@@ -836,17 +962,15 @@ extern std::vector<std::shared_ptr<SymbolTableNode>> ParsingTblColHdr;
  */
 extern SymbolList F_ParsingTblColHdr;
 
-/*
- * Used by step 4 of remove unit production in y.c,
- * and by get_yy_arrays() in gen_compiler.c.
- */
-extern std::vector<int> states_reachable;
+/// Used by step 4 of remove unit production in y.c,
+/// and by get_yy_arrays() in gen_compiler.c.
+extern std::vector<size_t> states_reachable;
 
 /*
  * For condensed parsing table after removing unit productions.
  * Used by function getActualState() in y.c and gen_compiler.c.
  */
-extern std::vector<int> actual_state_no;
+extern std::vector<StateHandle> actual_state_no;
 
 /* Statistical values. */
 extern int n_symbol;
@@ -866,14 +990,14 @@ create_context() -> Context*;
 // extern Configuration * createConfig();
 extern auto
 create_config(const Grammar& grammar,
-              int rule_id,
-              int marker,
+              size_t rule_id,
+              size_t marker,
               uint is_core_config) -> Configuration*;
 extern auto
 is_goal_symbol(const Grammar& grammar,
                std::shared_ptr<const SymbolTableNode> snode) -> bool;
 extern auto
-get_actual_state(int virtual_state) -> int;
+get_actual_state(StateHandle virtual_state) -> std::optional<StateHandle>;
 /// Given a state and a transition symbol, find the
 /// action and the destination state.
 ///
@@ -888,12 +1012,13 @@ get_actual_state(int virtual_state) -> int;
 /// auto [action, state_dest] = get_action(SymbolType::TERMINAL, 1, 1);
 /// ```
 extern auto
-get_action(symbol_type symbol_type, int col, int row) -> std::pair<char, int>;
+get_action(symbol_type symbol_type, int col, StateHandle row)
+  -> std::pair<char, StateHandle>;
 // extern bool isVanishSymbol(SymbolTableNode * n);
 extern auto
 is_parent_symbol(std::shared_ptr<const SymbolTableNode> s) -> bool;
 extern auto
-is_reachable_state(int state) -> bool;
+is_reachable_state(StateHandle state) -> bool;
 extern auto
 is_same_state(const State& s1, const State& s2) -> bool;
 extern auto
@@ -907,7 +1032,7 @@ extern auto
 add_symbol2_context(std::shared_ptr<SymbolTableNode> snode, Context& c) -> bool;
 extern auto
 is_compatible_successor_config(const std::shared_ptr<const State>& s,
-                               int rule_id) -> std::optional<size_t>;
+                               size_t rule_id) -> std::optional<size_t>;
 extern void
 copy_config(Configuration& c_dest, const Configuration& c_src);
 extern void
@@ -932,10 +1057,6 @@ mandatory_update_action(std::shared_ptr<SymbolTableNode> lookahead,
                         int state_dest);
 extern void
 free_context(Context* c);
-extern void
-get_reachable_states(const Grammar& grammar,
-                     int cur_state,
-                     std::vector<int>& states_reachable);
 extern void
 print_parsing_table_note(std::ostream& os);
 /// Insert snode to the list, no repetition allowed, increasing order.
@@ -981,7 +1102,9 @@ get_col(const SymbolTableNode& n) -> int
  * Used in y.c and upe.c.
  */
 inline void
-update_action(size_t col, size_t row, int state_dest)
+update_action(const size_t col,
+              const size_t row,
+              const ParsingAction state_dest)
 {
     ParsingTable.at(row * ParsingTblColHdr.size() + col) = state_dest;
 }
@@ -1012,7 +1135,7 @@ get_options(std::span<const std::string_view> args,
 
 /* Defined in gen_compiler.cpp */
 // Length is ParsingTblRows (?)
-extern std::vector<int> final_state_list; // for final states.
+extern std::vector<StateHandle> final_state_list; // for final states.
 extern void
 generate_compiler(GetYaccGrammarOutput& yacc_grammar_output,
                   const std::optional<struct LRkPTArray>& lrk_pt_array,
@@ -1097,7 +1220,7 @@ find_state_for_scanned_symbol(const StateCollection* c,
 struct StateNoArray
 {
     // list of state_no
-    std::vector<int> states;
+    std::vector<StateHandle> states;
     // SymbolNode ** conflictSymbolList; // conflict symbols for each state
     size_t count_unresolved; /* unresolved after lane tracing phase 1. */
 };
@@ -1110,7 +1233,7 @@ create_originator_list() -> OriginatorList*;
 extern auto
 create_state_no_array() -> StateNoArray*;
 extern void
-add_state_no_array(StateNoArray* sa, int state_no);
+add_state_no_array(StateNoArray* sa, StateHandle state_no);
 extern void
 stdout_write_config(const Grammar& grammar, const Configuration* c);
 extern auto

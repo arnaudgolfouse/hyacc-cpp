@@ -43,11 +43,6 @@ constexpr int INTEGER_PADDING = 6;
 constexpr int ITEM_PER_LINE = 10;
 
 std::string yystype_definition = "typedef int YYSTYPE;";
-constexpr std::string_view YYSTYPE_FORMAT =
-  "#if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED\n"
-  "%s\n"
-  "#define YYSTYPE_IS_DECLARED 1\n"
-  "#endif\n";
 
 static void
 prepare_outfile(std::ofstream& fp, std::ofstream& fp_h, const FileNames& files)
@@ -762,7 +757,7 @@ print_yyreds(std::ofstream& fp, const Grammar& grammar)
 {
     fp << "char * yyreds[] = {" << std::endl;
     fp << "\t\"-no such reduction-\"" << std::endl;
-    for (int i = 1; i < grammar.rules.size(); i++) {
+    for (size_t i = 1; i < grammar.rules.size(); i++) {
         fp << "\t\"" << grammar.rules[i]->nLHS->snode->symbol << " : ";
 
         auto a = grammar.rules[i]->nRHS.begin();
@@ -789,7 +784,7 @@ print_yyreds(std::ofstream& fp, const Grammar& grammar)
 static void
 print_parsing_tbl_entry(std::ofstream& fp,
                         const char action,
-                        const int state_no,
+                        const StateHandle state_no,
                         int& count)
 {
     bool is_entry = false;
@@ -845,7 +840,7 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
                         is_parent_symbol(n) == false) {
                         auto [action, state_no] = get_action(n->type, col, row);
                         if (action == 's' || action == 'g')
-                            state_no = get_actual_state(state_no);
+                            state_no = *get_actual_state(state_no);
                         // std::cout  <<  action <<  state_no<< "\t";
                         print_parsing_tbl_entry(fp, action, state_no, count);
                     } // end of if.
@@ -856,7 +851,7 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
             } // end of if.
         }
     } else {
-        for (int i = 0; i < ParsingTblRows; i++) {
+        for (size_t i = 0; i < ParsingTblRows; i++) {
 
             if constexpr (USE_REM_FINAL_STATE) {
                 if (final_state_list[i] < 0) {
@@ -1071,7 +1066,7 @@ write_lrk_table_arrays(std::ofstream& fp,
     fp << std::endl
        << "/* Values of parsing table column tokens. */" << std::endl;
     fp << "static YYCONST yytabelem yyPTC[] = {" << std::endl;
-    for (int i = 0; i < ParsingTblColHdr.size(); i++) {
+    for (size_t i = 0; i < ParsingTblColHdr.size(); i++) {
         if (i > 0)
             fp << ", ";
         if (i % ITEM_PER_LINE == 0) {

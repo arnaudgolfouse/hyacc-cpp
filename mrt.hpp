@@ -61,7 +61,8 @@ struct MRTreeNode
     void insert_parent(std::shared_ptr<SymbolTableNode> symbol);
     // Returns the index in array MRLeaves[] if given node
     // is a leaf, otherwise returns -1.
-    auto is_mr_leaf(const MRLeaves& mr_leaves) noexcept -> int const;
+    [[nodiscard]] auto is_mr_leaf(const MRLeaves& mr_leaves) const noexcept
+      -> std::optional<size_t>;
     // Both parent and child nodes are in the Multi-rooted
     // forest already, just add the link between them.
     static void insert_parent_child_relation(std::shared_ptr<MRTreeNode> parent,
@@ -112,7 +113,7 @@ extern std::shared_ptr<MRParents> all_parents;
  *
  * Has the same size as all_parents->capacity().
  */
-extern std::vector<int> leaf_index_for_parent;
+extern std::vector<size_t> leaf_index_for_parent;
 
 /*
  * leafIndexForParent[] array is build in function

@@ -41,7 +41,7 @@
 using MRLeaves = std::vector<std::shared_ptr<MRTreeNode>>;
 
 std::shared_ptr<MRParents> all_parents;
-std::vector<int> leaf_index_for_parent;
+std::vector<size_t> leaf_index_for_parent;
 bool leaf_index_for_parent_done;
 
 /* Function declarations. */
@@ -180,8 +180,8 @@ MRTreeNode::create(std::shared_ptr<SymbolTableNode> symbol)
  */
 void
 insert_new_tree(MRLeaves& mr_leaves,
-                std::shared_ptr<SymbolTableNode> parent,
-                std::shared_ptr<SymbolTableNode> child)
+                const std::shared_ptr<SymbolTableNode> parent,
+                const std::shared_ptr<SymbolTableNode> child)
 {
     std::shared_ptr<MRTreeNode> leaf = MRTreeNode::create(child);
     leaf->parent.push_back(MRTreeNode::create(parent));
@@ -197,13 +197,14 @@ MRTreeNode::insert_parent(std::shared_ptr<SymbolTableNode> symbol)
 }
 
 auto
-MRTreeNode::is_mr_leaf(const MRLeaves& mr_leaves) noexcept -> int const
+MRTreeNode::is_mr_leaf(const MRLeaves& mr_leaves) const noexcept
+  -> std::optional<size_t>
 {
     for (size_t i = 0; i < mr_leaves.size(); i++) {
         if (this == mr_leaves[i].get())
             return i;
     }
-    return -1;
+    return std::nullopt;
 }
 
 static void
@@ -265,14 +266,14 @@ MRTreeNode::insert_child(const std::shared_ptr<MRTreeNode> self,
                          std::shared_ptr<SymbolTableNode> symbol)
 {
     std::shared_ptr<MRTreeNode> child = MRTreeNode::create(symbol);
-    int leaf_index = self->is_mr_leaf(mr_leaves);
+    std::optional<size_t> leaf_index = self->is_mr_leaf(mr_leaves);
 
-    if (leaf_index == -1) {
+    if (!leaf_index.has_value()) {
         // treeNode not a leaf, just insert child as a leaf.
         mr_leaves.push_back(child);
     } else {
         // change the pointer to treeNode to point to child
-        mr_leaves[leaf_index] = child;
+        mr_leaves[*leaf_index] = child;
     }
     child->parent.push_back(self);
 }
@@ -286,9 +287,10 @@ MRTreeNode::insert_parent_child_relation(
     child->parent.push_back(parent);
 
     // if parent node is a leaf, remove it from the leaves array.
-    int leaf_index = parent->is_mr_leaf(mr_leaves);
-    if (leaf_index != -1) {
-        mr_leaves.erase(mr_leaves.begin() + leaf_index);
+    std::optional<size_t> leaf_index = parent->is_mr_leaf(mr_leaves);
+    if (leaf_index.has_value()) {
+        mr_leaves.erase(mr_leaves.begin() +
+                        static_cast<ptrdiff_t>(*leaf_index));
     }
 }
 
@@ -335,14 +337,12 @@ build_multirooted_tree(const Grammar& grammar) -> MRLeaves
     return mr_leaves;
 }
 
-/*
- * Adds node itself and all its parent nodes to array
- * parents[] if not already in the array.
- *
- * Called by function getParentsForMRLeaf() only.
- */
-void
-get_node(int leaf_index, MRTreeNode* node, MRParents* parents)
+/// Adds node itself and all its parent nodes to array
+/// parents[] if not already in the array.
+///
+/// Called by function getParentsForMRLeaf() only.
+static void
+get_node(const size_t leaf_index, MRTreeNode* node, MRParents* parents)
 {
     if (node == nullptr) {
         // std::cout << "getNode warning: node is nullptr" << std::endl;

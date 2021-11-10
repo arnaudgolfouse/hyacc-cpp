@@ -67,10 +67,6 @@ SymbolList EDGE_PUSHING_CONTEXT_GENERATED;
 static void
 get_originators(const Grammar& grammar, Configuration* c0, Configuration& c);
 static auto
-find_successor_state_no(int state_no,
-                        const StateArray& states_new_array,
-                        std::shared_ptr<const SymbolTableNode> snode) -> int;
-static auto
 inherit_parent_context(const Grammar& grammar,
                        std::shared_ptr<State>,
                        State* parent) -> bool;
@@ -172,75 +168,27 @@ llist_context_set_clone(const LlistContextSet* c) -> LlistContextSet*
 
 // LlistInt functions. START.
 
-auto
-llist_int_create(int n) -> LlistInt*
-{
-    auto* item = new LlistInt;
-    item->n = n;
-    item->next = nullptr;
-    return item;
-}
-
 void
-llist_int_destroy(LlistInt* list)
+LlistState::add_inc(const StateHandle n)
 {
-    while (list != nullptr) {
-        LlistInt* tmp = list;
-        list = list->next;
-        delete tmp;
-    }
-}
-
-/*
- * Add n to the list in INC order.
- */
-auto
-LlistInt::add_inc(int n) noexcept -> LlistInt*
-{
-    LlistInt* list = this;
-    // else, list is not empty. insert in INC order.
-
-    int cmp = 0;
-    LlistInt *t = list, *t_prev = nullptr;
-    for (; t != nullptr; t_prev = t, t = t->next) {
-        cmp = t->n - n;
-        if (cmp == 0)
-            return list;             // exists already.
-        if (cmp > 0) {               // insert before t.
-            if (t_prev == nullptr) { // insert as the head.
-                list = llist_int_create(n);
-                list->next = t;
-            } else { // insert in the middle
-                t_prev->next = llist_int_create(n);
-                t_prev->next->next = t;
-            }
-            return list;
+    auto it = this->begin();
+    for (; it != this->end(); it++) {
+        if (*it == n)
+            return; // exists already.
+        if (*it > n) {
+            this->insert(it, n); // insert before t.
+            return;
         }
         // else, go on to the next state in list.
     }
-    // now is at the end of the list. Add to list tail.
-    t_prev->next = llist_int_create(n);
-
-    return list;
-}
-
-/*
- * Add n to the head of list.
- * Return: pointer to the head of the list.
- */
-auto
-llist_int_add_head(LlistInt* list, int n) -> LlistInt*
-{
-    LlistInt* t = llist_int_create(n);
-    t->next = list;
-    return t;
+    this->push_back(n);
 }
 
 void
-LlistInt::dump() const noexcept
+LlistState::dump() const
 {
-    for (const LlistInt* x = this; x != nullptr; x = x->next) {
-        std::cout << x->n << ' ';
+    for (const auto& n : *this) {
+        std::cout << n << ' ';
     }
 }
 
@@ -248,111 +196,67 @@ LlistInt::dump() const noexcept
 
 // LlistInt2 functions. START.
 
-auto
-llist_int2_create(int n1, int n2) -> LlistInt2*
-{
-    auto* item = new LlistInt2;
-    item->n1 = n1;
-    item->n2 = n2;
-    item->next = nullptr;
-    return item;
-}
-
 void
-llist_int2_destroy(LlistInt2* list)
+LlistState2::add_inc(const StateHandle n1, const StateHandle n2)
 {
-    while (list != nullptr) {
-        LlistInt2* tmp = list;
-        list = list->next;
-        delete tmp;
-    }
-}
-
-/*
- * Add n1, n2 to the list in INC order of n1.
- */
-auto
-llist_int2_add_inc(LlistInt2* list, int n1, int n2) -> LlistInt2*
-{
-    if (list == nullptr) {
-        return llist_int2_create(n1, n2);
-    }
-    // else, list is not empty. insert in INC order.
-
-    int cmp = 0;
-    LlistInt2 *t = list, *t_prev = nullptr;
-    for (; t != nullptr; t_prev = t, t = t->next) {
-        cmp = t->n1 - n1;
-        if (cmp == 0)
-            return list;             // exists already.
-        if (cmp > 0) {               // insert before t.
-            if (t_prev == nullptr) { // insert as the head.
-                t_prev = list = llist_int2_create(n1, n2);
-                list->next = t;
-            } else { // insert in the middle
-                t_prev->next = llist_int2_create(n1, n2);
-                t_prev->next->next = t;
-            }
-            return list;
+    auto it = this->begin();
+    for (; it != this->end(); it++) {
+        if (it->first == n1)
+            return; // exists already.
+        if (it->first > n1) {
+            this->insert(it, { n1, n2 });
+            return;
         }
         // else, go on to the next state in list.
     }
-    // now is at the end of the list. Add to list tail.
-    t_prev->next = llist_int2_create(n1, n2);
-
-    return list;
-}
-
-/*
- * Add n to the head of list.
- * Return: pointer to teh head of the list.
- */
-auto
-llist_int2_add_head(LlistInt2* list, int n1, int n2) -> LlistInt2*
-{
-    LlistInt2* t = llist_int2_create(n1, n2);
-    t->next = list;
-    return t;
-}
-
-/*
- * Find the node in a LlistInt list whose first entry is n1.
- */
-auto
-llist_int2_find_n1(LlistInt2* list, int n1) -> LlistInt2*
-{
-    for (LlistInt2* t = list; t != nullptr; t = t->next) {
-        if (t->n1 == n1)
-            return t;
-    }
-    return nullptr;
-}
-
-auto
-LlistInt2::find_n2(int n2) noexcept -> LlistInt2*
-{
-    for (LlistInt2* t = this; t != nullptr; t = t->next) {
-        if (t->n2 == n2)
-            return t;
-    }
-    return nullptr;
+    this->push_back({ n1, n2 });
 }
 
 void
-llist_int2_dump(LlistInt2* list)
+LlistState2::add_head(const StateHandle n1, const StateHandle n2)
 {
-    if (list == nullptr)
+    this->push_front({ n1, n2 });
+}
+
+auto
+LlistState2::find_n1(const StateHandle n1) const noexcept
+  -> LlistState2::const_iterator
+{
+    auto it = this->begin();
+    for (; it != this->end(); it++) {
+        if (it->first == n1)
+            return it;
+    }
+    return it;
+}
+
+auto
+LlistState2::find_n2(const StateHandle n2) const noexcept
+  -> LlistState2::const_iterator
+{
+    auto it = this->begin();
+    for (; it != this->end(); it++) {
+        if (it->second == n2)
+            return it;
+    }
+    return it;
+}
+
+void
+LlistState2::dump() const noexcept
+{
+    if (this->empty())
         return;
 
-    for (LlistInt2* x = list; x != nullptr; x = x->next) {
-        std::cout << '(' << x->n1 << ", " << x->n2 << ") ";
+    for (const auto& [n1, n2] : *this) {
+        std::cout << '(' << n1 << ", " << n2 << ") ";
     }
 }
 
 // LlistInt2 functions, END.
 
 static auto
-lt_tbl_entry_create(int from_state,
+lt_tbl_entry_create(StateHandle from_state,
                     const std::shared_ptr<const State>& to,
                     const StateArray& states_new_array) noexcept(false)
   -> LtTblEntry*
@@ -367,7 +271,7 @@ lt_tbl_entry_create(int from_state,
 
     e->processed = false;
     e->ctxt_set = nullptr;
-    e->to_states = (to == nullptr) ? nullptr : llist_int_create(to->state_no);
+    e->to_states = (to == nullptr) ? LlistState() : LlistState(to->state_no);
     e->next = nullptr;
     return e;
 }
@@ -381,7 +285,7 @@ lt_tbl_entry_add_to_state(LtTblEntry* e, const std::shared_ptr<const State>& to)
 {
     if (to == nullptr || e == nullptr)
         return;
-    e->to_states = e->to_states->add_inc(to->state_no);
+    e->to_states.add_inc(to->state_no);
 }
 
 /*
@@ -389,7 +293,7 @@ lt_tbl_entry_add_to_state(LtTblEntry* e, const std::shared_ptr<const State>& to)
  * don't add the (config, context) information here.
  */
 void
-LaneTracing::lt_tbl_entry_add(const int from_state,
+LaneTracing::lt_tbl_entry_add(const StateHandle from_state,
                               const std::shared_ptr<const State>& to)
 {
     if (this->LT_tbl == nullptr) {
@@ -426,7 +330,8 @@ LaneTracing::lt_tbl_entry_add(const int from_state,
 /// Find from state in the LT_tbl.
 /// If not found, insert it.
 auto
-LaneTracing::lt_tbl_entry_find_insert(const int from_state) -> LtTblEntry*
+LaneTracing::lt_tbl_entry_find_insert(const StateHandle from_state)
+  -> LtTblEntry*
 {
     if (this->LT_tbl == nullptr) { // insert as the first
         this->LT_tbl = lt_tbl_entry_create(
@@ -464,7 +369,7 @@ LaneTracing::lt_tbl_entry_find_insert(const int from_state) -> LtTblEntry*
 ///
 /// There can be at most one entry found.
 auto
-LaneTracing::lt_tbl_entry_find(const int from_state) -> LtTblEntry*
+LaneTracing::lt_tbl_entry_find(const StateHandle from_state) -> LtTblEntry*
 {
     if (this->LT_tbl == nullptr) { // insert as the first
         this->LT_tbl = lt_tbl_entry_create(
@@ -544,7 +449,7 @@ llist_context_set_get(LtTblEntry* e) noexcept(false) -> LlistContextSet*
  * The current config is "cur_red_config" defined at the top.
  */
 void
-LaneTracing::lt_tbl_entry_add_context(const int from_state,
+LaneTracing::lt_tbl_entry_add_context(const StateHandle from_state,
                                       SymbolList& context) noexcept(false)
 {
     if (context.empty())
@@ -575,7 +480,7 @@ dump_lt_tbl_entry(const LtTblEntry* e)
     // dump_config_context.
     dump_llist_context_set(e->ctxt_set);
     std::cout << "\t| ";
-    e->to_states->dump();
+    e->to_states.dump();
     std::cout << std::endl;
 }
 
@@ -652,7 +557,7 @@ cluster_create(LtTblEntry* e) -> LtCluster*
     auto* c = new LtCluster;
 
     // by default, n1 and n2 are the same.
-    c->states = llist_int2_create(e->from_state, e->from_state);
+    c->states = LlistState2(e->from_state, e->from_state);
     c->ctxt_set = llist_context_set_clone(e->ctxt_set);
     c->pairwise_disjoint = pairwise_disjoint(e->ctxt_set);
     c->next = nullptr;
@@ -669,7 +574,6 @@ cluster_create(LtTblEntry* e) -> LtCluster*
 static void
 cluster_destroy(LtCluster* c)
 {
-    llist_int2_destroy(c->states);
     llist_context_set_destroy(c->ctxt_set);
     delete c;
 }
@@ -680,13 +584,14 @@ LtCluster::dump(LtTblEntry& lane_tracing_table) const noexcept
     LtTblEntry* e = nullptr;
 
     std::cout << "states: " << std::endl;
-    for (LlistInt2* n = this->states; n != nullptr; n = n->next) {
-        std::cout << n->n1 << "/" << n->n2 << " [to: ";
-        e = lane_tracing_table.find_entry(n->n1);
+    for (const auto& [n1, n2] : this->states) {
+        std::cout << n1 << "/" << n2 << " [to: ";
+        e = lane_tracing_table.find_entry(n1);
         if (e != nullptr) {
-            for (LlistInt* s = e->to_states; s != nullptr; s = s->next) {
-                LlistInt2* m = llist_int2_find_n1(this->states, s->n);
-                std::cout << s->n << "/" << ((m == nullptr) ? -1 : m->n2)
+            for (const auto& n : e->to_states) {
+                auto m = this->states.find_n1(n);
+                std::cout << n << "/"
+                          << ((m == this->states.end()) ? -1 : m->second)
                           << " ";
             }
         }
@@ -709,63 +614,53 @@ all_clusters_dump(LtTblEntry& lane_tracing_table)
 }
 
 auto
-LtCluster::contain_state(int state_no) const noexcept -> int
+LtCluster::contain_state(std::optional<StateHandle> state_no) const noexcept
+  -> std::optional<StateHandle>
 {
 
-    if (state_no < 0)
-        return -1;
-    // std::cout << "cluster_cotain_state(state_no: " <<  state_no<< ")" <<
-    // std::endl;
-    if (this->states == nullptr)
-        return -1;
+    if (!state_no.has_value())
+        return std::nullopt;
+    if (this->states.empty())
+        return std::nullopt;
 
-    for (const LlistInt2* s = this->states; s != nullptr; s = s->next) {
-        if (s->n1 == state_no) {
-            // std::cout << "found" << std::endl;
-            return s->n2;
+    for (const auto& [n1, n2] : this->states) {
+        if (n1 == state_no) {
+            return n2;
         }
     }
-    // std::cout << "NOT found" << std::endl;
 
-    return -1;
+    return std::nullopt;
 }
 
-/*
- * Return:
- *   the splitted state's no if state_no is in c->states list
- *   -1 otherwise.
- *
- * Note state_no here is the actual state_no.
- * There could be only one cluster contains it.
- */
-auto
-cluster_contain_actual_state(LtCluster* c, int state_no) -> int
+/// Return:
+///   the splitted state's no if state_no is in c->states list
+///   -1 otherwise.
+///
+/// Note state_no here is the actual state_no.
+/// There could be only one cluster contains it.
+static auto
+cluster_contain_actual_state(LtCluster* c, std::optional<StateHandle> state_no)
+  -> std::optional<StateHandle>
 {
-    if (state_no < 0)
-        return -1;
-    // std::cout << "cluster_cotain_state(state_no: " <<  state_no<< ")" <<
-    // std::endl;
-    if (c == nullptr || c->states == nullptr)
-        return -1;
+    if (!state_no.has_value())
+        return std::nullopt;
+    if (c == nullptr)
+        return std::nullopt;
 
-    for (LlistInt2* s = c->states; s != nullptr; s = s->next) {
-        if (s->n2 == state_no) {
-            // std::cout << "found" << std::endl;
-            return s->n1;
+    for (const auto& [n1, n2] : c->states) {
+        if (n2 == state_no) {
+            return n1;
         }
     }
-    // std::cout << "NOT found" << std::endl;
 
-    return -1;
+    return std::nullopt;
 }
 
-/*
- * Combine the two chains dst and src:
- *   if src contains a LlistContextSet node whose config is NOT in dst,
- *     add it in INC order.
- *   if src contains a LlistContextSet node whose config is in dst,
- *     combine the context.
- */
+/// Combine the two chains dst and src:
+///   if src contains a LlistContextSet node whose config is NOT in dst,
+///     add it in INC order.
+///   if src contains a LlistContextSet node whose config is in dst,
+///     combine the context.
 static auto
 llist_context_set_merge_chain(LlistContextSet* dst, const LlistContextSet* src)
   -> LlistContextSet*
@@ -858,7 +753,7 @@ clone_state(const Grammar& grammar, const State& s) -> std::shared_ptr<State>
     t->core_config_count = s.core_config_count;
 
     for (size_t i = 0; i < t->config.size(); i++) {
-        t->config[i] = create_config(grammar, -1, 0, 1);
+        t->config[i] = create_config(grammar, s.config[i]->ruleID, 0, 1);
         copy_config_lalr(t->config[i], s.config[i]);
         t->config[i]->owner = t;
     }
@@ -935,11 +830,11 @@ replace_successor(std::shared_ptr<State> src_state,
  */
 static void
 lane_head_tail_pairs_replace(LtCluster* c,
-                             Configuration* end_config,
+                             Configuration& end_config,
                              const State* s,
                              State* s_copy)
 {
-    if (end_config->owner.get() != s)
+    if (end_config.owner.get() != s)
         return;
 
     // std::cout << "LHTPR: end_config: " <<
@@ -953,7 +848,7 @@ lane_head_tail_pairs_replace(LtCluster* c,
         // covers the situation where n->start->owner is a
         // splitted state.
         if (n->end->owner.get() == s &&
-            c->states->find_n2(n->start->owner->state_no) != nullptr) {
+            c->states.find_n2(n->start->owner->state_no) != c->states.end()) {
             // do replacement for n->end: from that in s to s_copy.
             for (size_t i = 0; i < s->config.size(); i++) {
                 if (s->config[i] == n->end) {
@@ -965,21 +860,19 @@ lane_head_tail_pairs_replace(LtCluster* c,
     }
 }
 
-/*
- * Add the LtTblEntry e->from_state to c.
- *
- * Return: the parent state_no:
- *   if a splitted state is created, return it's state_no.
- *   else, return the old state_no.
- */
+/// Add the LtTblEntry e->from_state to c.
+///
+/// Return: the parent state_no:
+///   if a splitted state is created, return it's state_no.
+///   else, return the old state_no.
 auto
 LaneTracing::cluster_add_lt_tbl_entry(LtCluster* c,
-                                      const int from_state,
+                                      const StateHandle from_state,
                                       LlistContextSet* e_ctxt,
                                       const size_t e_parent_state_no,
-                                      bool copy) const -> int
+                                      const bool copy) const -> StateHandle
 {
-    int state_no = from_state;
+    StateHandle state_no = from_state;
 
     if (copy) {
         // make a new state by copying e->from_state,
@@ -1004,49 +897,50 @@ LaneTracing::cluster_add_lt_tbl_entry(LtCluster* c,
 
         if (this->options.use_lr_k) {
             // For LR(k), replace entry in lane_head_tail_pairs!
-            // std::cout << "parrent state: " <<  e_parent_state_no <<
-            // std::endl;
+            // std::cout << "parrent state: " << e_parent_state_no << std::endl;
             lane_head_tail_pairs_replace(
-              c, cur_red_config, s.get(), s_copy.get());
+              c, *cur_red_config, s.get(), s_copy.get());
         }
     }
 
     // add state_no.
     // n1: original state, n2: splitted state.
-    c->states = llist_int2_add_inc(c->states, from_state, state_no);
+    c->states.add_inc(from_state, state_no);
     // combine context sets.
     c->ctxt_set = llist_context_set_merge_chain(c->ctxt_set, e_ctxt);
 
     return state_no;
 }
 
-/*
- * From all_clusters, find the one(s) that contains
- * the state (whose state number is state_no).
- *
- * Note there could be more than one such cluster if the
- * given state was splitted before.
- *
- * This function is like a iterator. To use this function,
- * initialized c = nullptr, then call in a loop:
- *   c = nullptr;
- *   while ((c = find_containing_cluster(c, state_no) != nullptr) {
- *     ...
- *   }
- */
-auto
-find_containing_cluster(LtCluster* c, int state_no) -> LtCluster*
+/// From all_clusters, find the one(s) that contains
+/// the state (whose state number is state_no).
+///
+/// Note there could be more than one such cluster if the
+/// given state was splitted before.
+///
+/// This function is like a iterator. To use this function,
+/// initialized c = nullptr, then call in a loop:
+///   c = nullptr;
+///   while ((c = find_containing_cluster(c, state_no) != nullptr) {
+///     ...
+///   }
+static auto
+find_containing_cluster(LtCluster* c, StateHandle state_no) -> LtCluster*
 {
-    c = (nullptr == c) ? all_clusters : c->next;
+    if (c == nullptr) {
+        c = all_clusters;
+    } else {
+        c = c->next;
+    }
 
     if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-        if (nullptr != c)
-            std::cout << "c: current state: " << c->states->n1 << "/"
-                      << c->states->n2 << std::endl;
+        if (c != nullptr)
+            std::cout << "c: current state: " << c->states.front().first << "/"
+                      << c->states.front().second << std::endl;
     }
 
     for (; c != nullptr; c = c->next) {
-        if (c->contain_state(state_no) >= 0) {
+        if (c->contain_state(state_no).has_value()) {
             return c;
         }
     }
@@ -1076,42 +970,39 @@ LtCluster::find_actual_containing_cluster(int state_no) -> LtCluster*
  * Note that in LT_tbl, the entries are in INC order of state_no.
  */
 auto
-LtTblEntry::find_entry(int from_state) noexcept -> LtTblEntry*
+LtTblEntry::find_entry(StateHandle from_state) noexcept -> LtTblEntry*
 {
     for (LtTblEntry* e = this; e != nullptr; e = e->next) {
-        int cmp = e->from_state - from_state;
-        if (cmp == 0)
+        if (e->from_state == from_state)
             return e;
-        if (cmp > 0)
+        if (e->from_state > from_state)
             break;
     }
 
     return nullptr; // not found.
 }
 
-/*
- * Combine new_part into old_part which is already in all_clusters list.
- *
- * Add each state in new_part to old_part, also merge context sets.
- */
-void
-combine_cluster(LtCluster* c_new, LtCluster* c_old)
+/// Combine new_part into old_part which is already in all_clusters list.
+///
+/// Add each state in new_part to old_part, also merge context sets.
+static void
+combine_cluster(const LtCluster& c_new, LtCluster& c_old)
 {
     // merge states.
-    for (LlistInt2* a = c_new->states; a != nullptr; a = a->next) {
-        c_old->states = llist_int2_add_inc(c_old->states, a->n1, a->n2);
+    for (const auto& [n1, n2] : c_new.states) {
+        c_old.states.add_inc(n1, n2);
     }
     // merge context sets.
-    c_old->ctxt_set =
-      llist_context_set_merge_chain(c_old->ctxt_set, c_new->ctxt_set);
+    c_old.ctxt_set =
+      llist_context_set_merge_chain(c_old.ctxt_set, c_new.ctxt_set);
 }
 
 /// functions for updating context in phase 2 regeneration. START.
 
 /// Called by cluster_trace_new_chain() only.
 void
-LaneTracing::inherit_propagate(const int state_no,
-                               const int parent_state_no,
+LaneTracing::inherit_propagate(const StateHandle state_no,
+                               const StateHandle parent_state_no,
                                LtCluster* container,
                                const LtTblEntry* e)
 {
@@ -1126,8 +1017,8 @@ LaneTracing::inherit_propagate(const int state_no,
 }
 
 void
-LaneTracing::clear_inherit_regenerate(const int state_no,
-                                      const int parent_state_no)
+LaneTracing::clear_inherit_regenerate(const StateHandle state_no,
+                                      const StateHandle parent_state_no)
 {
     std::shared_ptr<State> s =
       this->new_states.states_new_array[state_no].state;
@@ -1144,7 +1035,7 @@ LaneTracing::clear_inherit_regenerate(const int state_no,
 /// Note that if it is state 0, then should add $end
 /// to the goal rule before get_closure() !
 void
-LaneTracing::clear_regenerate(const int state_no)
+LaneTracing::clear_regenerate(const StateHandle state_no)
 {
     std::shared_ptr<State> s =
       this->new_states.states_new_array[state_no].state;
@@ -1157,15 +1048,13 @@ LaneTracing::clear_regenerate(const int state_no)
     this->get_state_closure(s);
 }
 
-/*
- * Function to propagate context change until a state where
- * there is no more context change.
- *
- * Here the children states are those defined in the
- * LtTblEntry's to_states list.
- */
+/// Function to propagate context change until a state where
+/// there is no more context change.
+///
+/// Here the children states are those defined in the
+/// LtTblEntry's to_states list.
 void
-LaneTracing::lt_phase2_propagate_context_change(int state_no,
+LaneTracing::lt_phase2_propagate_context_change(const StateHandle state_no,
                                                 LtCluster* c,
                                                 const LtTblEntry* e)
 {
@@ -1181,24 +1070,24 @@ LaneTracing::lt_phase2_propagate_context_change(int state_no,
                   << std::endl;
     }
 
-    for (const LlistInt* t = e->to_states; t != nullptr; t = t->next) {
-        const LtTblEntry* f = this->LT_tbl->find_entry(t->n);
+    for (const auto& n : e->to_states) {
+        const LtTblEntry* f = this->LT_tbl->find_entry(n);
         if (f != nullptr) {
             // need to replace t->n with the true state_no in cluster c.
-            const LlistInt2* t2 = llist_int2_find_n1(c->states, t->n);
-            if (t2 == nullptr) {
+            auto t2 = c->states.find_n1(n);
+            if (t2 == c->states.end()) {
                 if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-                    std::cout << "--to state " << t->n
-                              << ", not found in cluster." << std::endl;
+                    std::cout << "--to state " << n << ", not found in cluster."
+                              << std::endl;
                     // cluster_dump(c);
                 }
                 continue; // if not found, just ignore this to state.
             }
             if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-                std::cout << "--to state: " << t->n << ", actual: " << t2->n2
+                std::cout << "--to state: " << n << ", actual: " << t2->second
                           << std::endl;
             }
-            this->inherit_propagate(t2->n2, state_no, c, f);
+            this->inherit_propagate(t2->second, state_no, c, f);
         }
     }
 }
@@ -1249,35 +1138,31 @@ inherit_parent_context(const Grammar& grammar,
     return is_changed;
 }
 
-/*
- * Set a state's all configs' context to empty.
- */
+/// Set a state's all configs' context to empty.
 void
 clear_state_context(State* s)
 {
-    if (nullptr == s)
+    if (s == nullptr)
         return;
 
-    for (const auto& i : s->config) {
+    for (auto& i : s->config) {
         i->context->clear(); // defined in y.c.
     }
 }
 
-/// functions for updating context in phase 2 regeneration. END.
+// functions for updating context in phase 2 regeneration. END.
 
-/*
- * Recursively add states to LtCluster c along the chain in LT_tbl.
- *
- * Parameters:
- *  @ c - The new cluster,
- *  @ parent_state_no - the parent state no.
- *  @ state_no - the state no of the from_state LT_tbl.
- * Return:
- *  false - combined with a cluster in all_clusters..
- *  true - NOT combined with another cluster in all_clusters.
- */
+/// Recursively add states to LtCluster c along the chain in LT_tbl.
+///
+/// @param c - The new cluster,
+/// @param parent_state_no - the parent state no.
+/// @param state_no - the state no of the from_state LT_tbl.
+/// @return
+///  false - combined with a cluster in all_clusters..
+///  true - NOT combined with another cluster in all_clusters.
 auto
-LaneTracing::cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
+LaneTracing::cluster_trace_new_chain(StateHandle parent_state_no,
+                                     StateHandle state_no) -> bool
 {
     bool is_new_chain = true;
     LtCluster* c = new_cluster;
@@ -1297,20 +1182,20 @@ LaneTracing::cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
     LlistContextSet* e_ctxt = (e == nullptr) ? nullptr : e->ctxt_set;
 
     // state in in cluster c.
-    int ret_state = c->contain_state(state_no);
-    if (ret_state >= 0) {
+    std::optional<StateHandle> ret_state_opt = c->contain_state(state_no);
+    if (ret_state_opt.has_value()) {
         if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-            std::cout << "=>2. state " << ret_state
+            std::cout << "=>2. state " << *ret_state_opt
                       << ": inherit context from state " << parent_state_no
                       << " & propagate" << std::endl;
         }
-        this->inherit_propagate(ret_state, parent_state_no, c, e);
+        this->inherit_propagate(*ret_state_opt, parent_state_no, c, e);
 
         std::shared_ptr<State> old_state =
           this->new_states.states_new_array[state_no].state;
         replace_successor(
           this->new_states.states_new_array[parent_state_no].state,
-          this->new_states.states_new_array[ret_state].state,
+          this->new_states.states_new_array[*ret_state_opt].state,
           old_state.get());
         return true; // NOTE here it returns true.
     }
@@ -1347,8 +1232,8 @@ LaneTracing::cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
                       << "3. combine 2 clusters result is pairwise disjoint"
                       << std::endl;
                 }
-                combine_cluster(c, container); // container is the result.
-                is_new_chain = false;          // not a new chain.
+                combine_cluster(*c, *container); // container is the result.
+                is_new_chain = false;            // not a new chain.
 
                 // This is used so cluster_contain_state() at the beginning
                 // of this function can return correct value once c is changed.
@@ -1369,6 +1254,7 @@ LaneTracing::cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
         // else, NOT pairwise disjoint, continue to find the next match.
     } // end of while.
 
+    StateHandle ret_state{};
     if (container_not_found) {
         if (first_container == nullptr) { // always add.
             if constexpr (DEBUG_PHASE_2_REGENERATE2) {
@@ -1411,8 +1297,8 @@ LaneTracing::cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
             this->clear_inherit_regenerate(ret_state, parent_state_no);
         }
 
-        if (nullptr != e) { // recursively trace the chain.
-            is_new_chain = this->cluster_trace_new_chain_all(ret_state, e);
+        if (e != nullptr) { // recursively trace the chain.
+            is_new_chain = this->cluster_trace_new_chain_all(ret_state, *e);
         }
     }
 
@@ -1423,14 +1309,14 @@ LaneTracing::cluster_trace_new_chain(int parent_state_no, int state_no) -> bool
  * parent_state: state_no of the parent state.
  */
 auto
-LaneTracing::cluster_trace_new_chain_all(int parent_state, const LtTblEntry* e)
-  -> bool
+LaneTracing::cluster_trace_new_chain_all(const StateHandle parent_state,
+                                         const LtTblEntry& e) -> bool
 {
     bool is_new_chain = true;
 
     // recursively trace the chain.
-    for (const LlistInt* s = e->to_states; s != nullptr; s = s->next) {
-        if (false == this->cluster_trace_new_chain(parent_state, s->n)) {
+    for (const auto& n : e.to_states) {
+        if (!this->cluster_trace_new_chain(parent_state, n)) {
             is_new_chain = false;
         }
     }
@@ -1461,23 +1347,23 @@ LaneTracing::phase2_regeneration2()
     all_clusters = all_clusters_tail = nullptr; // initialize all_clusters.
     all_pairwise_disjoint = true;
 
-    for (LtTblEntry* e = LT_tbl; e != nullptr; e = e->next) {
-        if (e->processed)
+    for (LtTblEntry* e_ptr = LT_tbl; e_ptr != nullptr; e_ptr = e_ptr->next) {
+        LtTblEntry& e = *e_ptr;
+        if (e.processed)
             continue;
 
-        LtTblEntry* x = e; // start state of another chain/cluster of states.
-        new_cluster = cluster_create(x);
+        new_cluster = cluster_create(&e);
 
         if constexpr (DEBUG_PHASE_2_REGENERATE2) {
-            std::cout << "== chain head state: " << e->from_state << std::endl;
+            std::cout << "== chain head state: " << e.from_state << std::endl;
             std::cout << "=>1. clear and regenerate context for state "
-                      << x->from_state << std::endl;
+                      << e.from_state << std::endl;
         }
-        this->clear_regenerate(x->from_state);
+        this->clear_regenerate(e.from_state);
 
-        x->processed = true;
+        e.processed = true;
 
-        is_new_chain = this->cluster_trace_new_chain_all(x->from_state, x);
+        is_new_chain = this->cluster_trace_new_chain_all(e.from_state, e);
 
         // add new_cluster to the all_clusters list.
         if (is_new_chain) {
@@ -1524,30 +1410,8 @@ destroy_lane_head_node(laneHead* h)
     delete h;
 }
 
-/*
- * Add n to the contexts list of h in INC order.
- *
- * Called by addLaneHeadList() only, h and n are Not nullptr.
- */
-static void
-add_context_to_lane_head(laneHead* h, std::shared_ptr<SymbolTableNode> n)
-{
-    auto sn = h->contexts.begin();
-    for (; sn != h->contexts.end(); sn++) {
-        if (sn->snode == n)
-            return; // already in list, don't add.
-        if (sn->snode->symbol > n->symbol) {
-            // add n before sn, after sn_prev.
-            break;
-        }
-    }
-    h->contexts.emplace(sn, n);
-}
-
-/*
- * Add another pair of s to h.
- * lh_list is in INC order of state's state_no;
- */
+/// Add another pair of s to h.
+/// lh_list is in INC order of state's state_no;
 static auto
 add_lane_head_list(laneHead* lh_list, std::shared_ptr<State> s) noexcept(false)
   -> laneHead*
@@ -1676,13 +1540,11 @@ create_state_no_array() -> StateNoArray*
     return sa;
 }
 
-/*
- * If state_no is not in the inadequate states list, add it.
- */
+/// If state_no is not in the inadequate states list, add it.
 void
-add_state_no_array(StateNoArray* sa, int state_no)
+add_state_no_array(StateNoArray* sa, StateHandle state_no)
 {
-    for (int s : sa->states) {
+    for (StateHandle s : sa->states) {
         if (s == state_no) {
             return;
         } // exists.
@@ -1857,7 +1719,7 @@ LaneTracing::phase1()
                   << " inadequate states: " << std::endl;
     }
 
-    for (const int state_no : states_inadequate->states) {
+    for (const StateHandle state_no : states_inadequate->states) {
         const State* s =
           this->new_states.states_new_array[state_no].state.get();
         this->get_inadequate_state_reduce_config_context(s);
@@ -1870,10 +1732,10 @@ LaneTracing::phase1()
  * called by update_action_table().
  */
 static auto
-find_successor_state_no(const int state_no,
+find_successor_state_no(const StateHandle state_no,
                         const StateArray& states_new_array,
                         const std::shared_ptr<const SymbolTableNode> snode)
-  -> int
+  -> StateHandle
 {
     const State& state = *states_new_array[state_no].state;
     auto it = state.successor_list.rbegin();
@@ -1894,13 +1756,13 @@ find_successor_state_no(const int state_no,
  * Clear a parsing table row where lookahead is terminal.
  */
 inline void
-clear_state_terminal_transitions(const Grammar& grammar, int state_no)
+clear_state_terminal_transitions(const Grammar& grammar, StateHandle state_no)
 {
-    size_t start = (static_cast<size_t>(state_no) * ParsingTblColHdr.size());
+    size_t start = state_no * ParsingTblColHdr.size();
     size_t end =
       (state_no * ParsingTblColHdr.size()) + (grammar.terminal_list.size() + 1);
     for (size_t i = start; i < end; ++i) {
-        ParsingTable.at(i) = 0;
+        ParsingTable.at(i) = std::nullopt;
     }
 }
 
@@ -1908,7 +1770,7 @@ clear_state_terminal_transitions(const Grammar& grammar, int state_no)
  * clear all the conflicts from states_new_array->conflict_list.
  */
 static void
-clear_state_conflicts(int state_no, StateArray& states_new_array)
+clear_state_conflicts(StateHandle state_no, StateArray& states_new_array)
 {
     states_new_array[state_no].conflict = nullptr;
 }
@@ -1935,7 +1797,7 @@ LaneTracing::resolve_lalr1_conflicts()
 
     const size_t ct = states_inadequate->states.size();
     for (size_t i = 0; i < ct; i++) {
-        const int state_no = states_inadequate->states[i];
+        const StateHandle state_no = states_inadequate->states[i];
         if (state_no < 0)
             continue; // should never happen.
 
@@ -1961,7 +1823,9 @@ LaneTracing::resolve_lalr1_conflicts()
                 // insert reduce
                 for (const auto& contxt : config->context->context) {
                     this->insert_action(
-                      contxt.snode, state_no, (-1) * config->ruleID);
+                      contxt.snode,
+                      state_no,
+                      ParsingAction::new_reduce(config->ruleID));
                 }
             } else if (!config->nMarker.empty() &&
                        config->nMarker.front().snode->is_terminal()) {
@@ -1969,9 +1833,10 @@ LaneTracing::resolve_lalr1_conflicts()
                 this->insert_action(
                   config->nMarker.front().snode,
                   state_no,
-                  find_successor_state_no(state_no,
-                                          new_states.states_new_array,
-                                          config->nMarker.front().snode));
+                  ParsingAction::new_shift(
+                    find_successor_state_no(state_no,
+                                            new_states.states_new_array,
+                                            config->nMarker.front().snode)));
             }
         }
         std::shared_ptr<Conflict>& c =
@@ -2097,7 +1962,8 @@ get_state_successors(const Grammar& grammar, const State& s) -> StateCollection*
                 coll->add_state2(new_state);
             }
             // create a new core config for new_state.
-            Configuration& new_config = *create_config(grammar, -1, 0, 1);
+            Configuration& new_config =
+              *create_config(grammar, c->ruleID, 0, 1);
 
             new_config.owner = new_state;
             copy_config(new_config, *c);
@@ -2160,8 +2026,9 @@ LaneTracing::add_split_state(std::shared_ptr<State> y,
         this->new_states.states_new->add_state2(y);
         this->new_states.states_new_array.add_state(y);
         // update shift action.
-        update_action(
-          get_col(*y->trans_symbol->snode), s.state_no, y->state_no);
+        update_action(get_col(*y->trans_symbol->snode),
+                      s.state_no,
+                      ParsingAction::new_shift(y->state_no));
         // update the Y0 successor link of S to Y.
         s.successor_list[successor_index] = y;
         while (this->new_states.states_new->state_count >=
@@ -2172,7 +2039,9 @@ LaneTracing::add_split_state(std::shared_ptr<State> y,
         return true;
     } // same or compatible with an existing state.
     // std::cout << "split - old state" << std::endl;
-    update_action(get_col(*os->trans_symbol->snode), s.state_no, os->state_no);
+    update_action(get_col(*os->trans_symbol->snode),
+                  s.state_no,
+                  ParsingAction::new_shift(os->state_no));
     s.successor_list[successor_index] = os;
     return false;
 }
@@ -2268,10 +2137,12 @@ LaneTracing::update_state_reduce_action(State& s)
                     if (action == '\0' || action == 'r') {
                         update_action(get_col(*lookahead.snode),
                                       s.state_no,
-                                      (-1) * c->ruleID);
+                                      ParsingAction::new_reduce(c->ruleID));
                     } else { // else, is "s" or "acc".
                         this->insert_action(
-                          lookahead.snode, s.state_no, (-1) * c->ruleID);
+                          lookahead.snode,
+                          s.state_no,
+                          ParsingAction::new_reduce(c->ruleID));
                     }
                 }
             }
@@ -2908,7 +2779,7 @@ void
 LaneTracing::move_markers(const Configuration* o) noexcept
 {
     int r = 0;
-    int ct = static_cast<int>(lane.count()) - 1;
+    int ct = static_cast<int>(this->lane.count()) - 1;
 
     for (; ct >= 0; ct--) {
         const auto c = this->lane.array[ct];

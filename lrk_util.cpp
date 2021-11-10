@@ -31,6 +31,8 @@
 #include "lane_tracing.hpp"
 #include "y.hpp"
 #include <any>
+#include <compare>
+#include <cstddef>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -66,37 +68,29 @@ config_pair_node_destroy(ConfigPairNode* n)
  */
 static auto
 config_pair_cmp(Configuration* end1,
-                Configuration* start1,
+                Configuration& start1,
                 Configuration* end2,
-                Configuration* start2) -> int
+                Configuration& start2) -> int
 {
-    int cmp = start1->owner->state_no - start2->owner->state_no;
-    if (cmp > 0)
+    if (start1.owner->state_no > start2.owner->state_no)
         return 1;
-    if (cmp < 0)
+    if (start1.owner->state_no < start2.owner->state_no)
         return -1;
-    // else, == 0.
 
-    cmp = start1->ruleID - start2->ruleID;
-    if (cmp > 0)
+    if (start1.ruleID > start2.ruleID)
         return 1;
-    if (cmp < 0)
+    if (start1.ruleID < start2.ruleID)
         return -1;
-    // else, == 0.
 
-    cmp = end1->owner->state_no - end2->owner->state_no;
-    if (cmp > 0)
+    if (end1->owner->state_no > end2->owner->state_no)
         return 1;
-    if (cmp < 0)
+    if (end1->owner->state_no < end2->owner->state_no)
         return -1;
-    // else, == 0.
 
-    cmp = end1->ruleID - end2->ruleID;
-    if (cmp > 0)
+    if (end1->ruleID > end2->ruleID)
         return 1;
-    if (cmp < 0)
+    if (end1->ruleID < end2->ruleID)
         return -1;
-    // else, == 0.
 
     return 0;
 }
@@ -138,8 +132,8 @@ ConfigPairNode::list_insert(ConfigPairList list,
     }
 
     for (n_prev = nullptr, n = list; n != nullptr; n_prev = n, n = n->next) {
-        int cmp =
-          config_pair_cmp(n->end, n->start, conflict_config, lane_start_config);
+        int cmp = config_pair_cmp(
+          n->end, *n->start, conflict_config, *lane_start_config);
         if (cmp < 0) {
             continue;
         }
@@ -331,7 +325,7 @@ lrk_pt_dump_file(const LRkPT* t, std::ofstream& fp)
 ///          If found is true, return the row.
 ///          otherwise, return the row before the insertion point.
 auto
-LRkPT::find(int state,
+LRkPT::find(StateHandle state,
             std::shared_ptr<SymbolTableNode> token,
             bool* found) const noexcept -> LRkPTRow*
 {
@@ -367,7 +361,7 @@ LRkPT::find(int state,
 static auto
 lrk_pt_add_row(LRkPT* t,
                LRkPTRow* r_prev,
-               int state,
+               StateHandle state,
                std::shared_ptr<SymbolTableNode> token) -> LRkPTRow*
 {
     auto* r = new LRkPTRow;
@@ -395,7 +389,7 @@ lrk_pt_add_row(LRkPT* t,
 ///
 /// Assumptions: t != nullptr.
 auto
-LRkPT::get_entry(int state,
+LRkPT::get_entry(StateHandle state,
                  std::shared_ptr<SymbolTableNode> token,
                  const std::shared_ptr<const SymbolTableNode> col_token,
                  bool* exist) noexcept -> ConfigPairNode*
@@ -421,7 +415,7 @@ LRkPT::get_entry(int state,
  * Return: true is confilct occurs, false otherwise.
  */
 auto
-LRkPT::add_reduction(int state,
+LRkPT::add_reduction(StateHandle state,
                      std::shared_ptr<SymbolTableNode> token,
                      const std::shared_ptr<const SymbolTableNode> s,
                      Configuration* c,
@@ -656,7 +650,7 @@ static void
 replace_with_rhs(const Grammar& grammar,
                  SymbolList& new_list,
                  SymbolList::iterator& n,
-                 int rule_id)
+                 size_t rule_id)
 {
     SymbolList rhs = clone_symbol_list(grammar.rules[rule_id]->nRHS);
     if (rhs.empty()) {
@@ -717,9 +711,9 @@ lrk_thead_in_list(const List* t, const SymbolList& new_list) -> bool
 /// Assumption: k >= 2.
 /// Truncate list s so it contains up to k non-vanishable symbols.
 static void
-lrk_theads_truncate_list_by_k(SymbolList& s, int k)
+lrk_theads_truncate_list_by_k(SymbolList& s, size_t k)
 {
-    int i = 0;
+    size_t i = 0;
     size_t total = 0;
     for (const auto& t : s) {
         if (!t.snode->vanishable)

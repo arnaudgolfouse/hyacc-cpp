@@ -29,6 +29,7 @@
 #include "y.hpp"
 #include <fstream>
 #include <memory>
+#include <optional>
 
 /// Add a new `Configuration` to `s.config`.
 static void
@@ -37,15 +38,13 @@ add_successor_config_to_state_lr0(const Grammar& grammar,
                                   size_t rule_id)
 {
     // marker = 0, isCoreConfig = 0.
-    Configuration* c = create_config(grammar, static_cast<int>(rule_id), 0, 0);
+    Configuration* c = create_config(grammar, rule_id, 0, 0);
     c->owner = s;
     s->config.push_back(c);
 }
 
-/*
- * Assumption: public variable config_queue contains
- * the configurations to be processed.
- */
+/// Assumption: public variable config_queue contains
+/// the configurations to be processed.
 static void
 get_config_successors_lr0(const Grammar& grammar,
                           Queue& config_queue,
@@ -94,83 +93,71 @@ get_closure_lr0(const Grammar& grammar,
     get_config_successors_lr0(grammar, config_queue, s);
 }
 
-/*
- * For LR(0). Insert a/r actions to the ENTIRE row.
- */
+/// For LR(0). Insert a/r actions to the ENTIRE row.
 void
-LR0::insert_reduction_to_parsing_table_lr0(const Configuration* c, int state_no)
+LR0::insert_reduction_to_parsing_table_lr0(const Configuration& c,
+                                           const StateHandle state_no)
 {
     size_t max_col = this->grammar.terminal_list.size() + 1;
 
-    if (grammar.rules[c->ruleID]->nLHS->snode ==
+    if (grammar.rules.at(c.ruleID)->nLHS->snode ==
         grammar.goal_symbol->snode) { // accept, action = "a";
         // note this should happen only if the end is $end.
-        this->insert_action(hash_tbl_find(STR_END), state_no, CONST_ACC);
+        this->insert_action(
+          hash_tbl_find(STR_END), state_no, ParsingAction::new_accept());
     } else { // reduct, action = "r";
         for (size_t col = 0; col < max_col; col++) {
-            std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
-            this->insert_action(n, state_no, (-1) * c->ruleID);
+            std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr.at(col);
+            this->insert_action(
+              n, state_no, ParsingAction::new_reduce(c.ruleID));
         }
     }
 }
 
-// for (const auto& config : s->config) {
-//     const  std::shared_ptr<SymbolTableNode> scanned_symbol =
-//     get_scanned_symbol(config);
-
-//     // for final config and empty reduction.
-//     if (is_final_configuration(grammar, config) ||
-//         scanned_symbol->symbol->empty()) {
-//         this->insert_reduction_to_parsing_table(
-//           grammar, new_states, config, s->state_no);
-//     }
-// }
-
-/*
- * if context set is empty, fill all cells in the ENTIRE row;
- * otherwise, fill cells with lookaheads in the context set.
- */
+/// if context set is empty, fill all cells in the ENTIRE row;
+/// otherwise, fill cells with lookaheads in the context set.
 void
-LR0::insert_reduction_to_parsing_table_lalr(const Configuration* c,
-                                            int state_no)
+LR0::insert_reduction_to_parsing_table_lalr(const Configuration& c,
+                                            const StateHandle state_no)
 {
     size_t max_col = this->grammar.terminal_list.size() + 1;
 
-    if (this->grammar.rules[c->ruleID]->nLHS->snode ==
+    if (this->grammar.rules[c.ruleID]->nLHS->snode ==
         this->grammar.goal_symbol->snode) { // accept, action = "a";
         // note this should happen only if the end is $end.
-        this->insert_action(hash_tbl_find(STR_END), state_no, CONST_ACC);
+        this->insert_action(
+          hash_tbl_find(STR_END), state_no, ParsingAction::new_accept());
     } else { // reduct, action = "r";
-        if (!c->context->context.empty()) {
-            for (const auto& a : c->context->context) {
-                this->insert_action(a.snode, state_no, (-1) * c->ruleID);
+        if (!c.context->context.empty()) {
+            for (const auto& a : c.context->context) {
+                this->insert_action(
+                  a.snode, state_no, ParsingAction::new_reduce(c.ruleID));
             }
         } else {
             for (size_t col = 0; col < max_col; col++) {
                 std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
-                this->insert_action(n, state_no, (-1) * c->ruleID);
+                this->insert_action(
+                  n, state_no, ParsingAction::new_reduce(c.ruleID));
             }
         }
     }
 }
 
-/*
- * For each of the new temp states,
- *   If it is not one of the existing states in
- *     states_new, then add it to states_new.
- *   Also always add the transition to parsing table.
- *
- * Note:
- * The "is_compatible" variable is of NO use here,
- * since configurations don't have contexts. So such
- * states are always the "same", but not compatible.
- */
+/// For each of the new temp states,
+///   If it is not one of the existing states in
+///     states_new, then add it to states_new.
+///   Also always add the transition to parsing table.
+///
+/// Note:
+/// The "is_compatible" variable is of NO use here,
+/// since configurations don't have contexts. So such
+/// states are always the "same", but not compatible.
 void
-LR0::add_transition_states2_new_lr0(StateCollection* coll,
+LR0::add_transition_states2_new_lr0(const StateCollection& coll,
                                     std::shared_ptr<State> src_state)
 {
     std::shared_ptr<State> next = nullptr;
-    std::shared_ptr<State> s = coll->states_head;
+    std::shared_ptr<State> s = coll.states_head;
 
     while (s != nullptr) {
         next = s->next;
@@ -189,22 +176,20 @@ LR0::add_transition_states2_new_lr0(StateCollection* coll,
     } // end of while.
 }
 
-/*
- * Perform transition operation on a state to get successors.
- *
- * For each config c in the state s,
- *   If c is a final config, stop
- *   Else, get the scanned symbol x,
- *     If a new temp state for x does not exist yet, create it.
- *     add x to the temp state.
- * (Now get several new temp states)
- * Add these new temp states to states_new if not existed,
- * and add transition to parsing table as well.
- */
+/// Perform transition operation on a state to get successors.
+///
+/// For each config c in the state s,
+///   If c is a final config, stop
+///   Else, get the scanned symbol x,
+///     If a new temp state for x does not exist yet, create it.
+///     add x to the temp state.
+/// (Now get several new temp states)
+/// Add these new temp states to states_new if not existed,
+/// and add transition to parsing table as well.
 void
 LR0::transition_lr0(std::shared_ptr<State> s) noexcept
 {
-    StateCollection* coll = create_state_collection();
+    StateCollection& coll = *create_state_collection();
 
     for (const auto& c : s->config) {
         if (is_final_configuration(this->grammar, c)) {
@@ -216,16 +201,17 @@ LR0::transition_lr0(std::shared_ptr<State> s) noexcept
                 continue;
             }
             std::shared_ptr<State> new_state =
-              find_state_for_scanned_symbol(coll, scanned_symbol);
+              find_state_for_scanned_symbol(&coll, scanned_symbol);
             if (new_state == nullptr) {
                 new_state = std::make_shared<State>();
                 // record which symbol this state is a successor by.
                 new_state->trans_symbol =
                   std::make_shared<SymbolNode>(scanned_symbol);
-                coll->add_state2(new_state);
+                coll.add_state2(new_state);
             }
             // create a new core config for new_state.
-            Configuration& new_config = *create_config(this->grammar, -1, 0, 1);
+            Configuration& new_config =
+              *create_config(this->grammar, c->ruleID, 0, 1);
 
             new_config.owner = new_state;
             copy_config(new_config, *c);
@@ -236,18 +222,16 @@ LR0::transition_lr0(std::shared_ptr<State> s) noexcept
 
             add_core_config2_state(this->grammar, new_state, &new_config);
         }
-    } // end for
+    }
 
-    if (coll->state_count > 0) {
+    if (coll.state_count > 0) {
         this->add_transition_states2_new_lr0(coll, s);
     }
 }
 
-/*
- * First fill acc, s, g.
- * Then fill r. r is filled to terminal symbols only. And if
- * a cell is already a/s/g, don't fill this r.
- */
+/// First fill acc, s, g.
+/// Then fill r. r is filled to terminal symbols only. And if
+/// a cell is already a/s/g, don't fill this r.
 void
 LR0::output_parsing_table_row(const std::shared_ptr<const State> s)
 {
@@ -255,13 +239,15 @@ LR0::output_parsing_table_row(const std::shared_ptr<const State> s)
     for (const auto& c : s->config) {
         if (is_final_configuration(this->grammar, c) ||
             is_empty_production(this->grammar, c)) {
-            this->insert_reduction_to_parsing_table_lr0(c, s->state_no);
+            this->insert_reduction_to_parsing_table_lr0(*c, s->state_no);
         }
     }
 
     // insert s/g actions.
-    for (auto& t : s->successor_list) {
-        this->insert_action(t->trans_symbol->snode, s->state_no, t->state_no);
+    for (const auto& t : s->successor_list) {
+        this->insert_action(t->trans_symbol->snode,
+                            s->state_no,
+                            ParsingAction::new_shift(t->state_no));
     }
 }
 
@@ -274,13 +260,15 @@ LR0::output_parsing_table_row_lalr(const std::shared_ptr<const State> s)
 
         if (is_final_configuration(this->grammar, c) ||
             is_empty_production(this->grammar, c)) {
-            this->insert_reduction_to_parsing_table_lalr(c, s->state_no);
+            this->insert_reduction_to_parsing_table_lalr(*c, s->state_no);
         }
     }
 
     // insert s/g actions.
-    for (auto& t : s->successor_list) {
-        this->insert_action(t->trans_symbol->snode, s->state_no, t->state_no);
+    for (const auto& t : s->successor_list) {
+        this->insert_action(t->trans_symbol->snode,
+                            s->state_no,
+                            ParsingAction::new_shift(t->state_no));
     }
 }
 
@@ -304,7 +292,7 @@ LR0::output_parsing_table() noexcept
     }
 
     for (size_t i = 0; i < cols * rows; ++i) {
-        ParsingTable.at(i) = 0;
+        ParsingTable.at(i) = std::nullopt;
     }
 
     for (size_t i = 0; i < rows; i++) {
@@ -327,7 +315,7 @@ LR0::output_parsing_table_lalr()
     }
 
     for (size_t i = 0; i < cols * rows; ++i) {
-        ParsingTable.at(i) = 0;
+        ParsingTable.at(i) = std::nullopt;
     }
 
     for (size_t i = 0; i < rows; i++) {

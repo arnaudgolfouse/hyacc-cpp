@@ -38,10 +38,10 @@ constexpr bool DEBUG_GEN_GVIZ = false;
 
 struct GvNode
 {
-    int target_state;
+    StateHandle target_state;
     std::list<SymbolNode> labels{};
 
-    explicit GvNode(int target_state)
+    explicit GvNode(StateHandle target_state)
       : target_state(target_state)
     {}
 };
@@ -49,7 +49,7 @@ struct GvNode
 using GvNodeList = std::list<GvNode>;
 
 static auto
-find_gv_node_in_list(GvNodeList& list, int target_state) -> GvNode*
+find_gv_node_in_list(GvNodeList& list, StateHandle target_state) -> GvNode*
 {
     for (auto& elem : list) {
         if (elem.target_state == target_state) {
@@ -88,7 +88,7 @@ insert_label_to_list(GvNode* n, std::shared_ptr<SymbolTableNode> snode)
  */
 static void
 add_gv_node_to_list(GvNodeList& list,
-                    int target_state,
+                    const StateHandle target_state,
                     std::shared_ptr<SymbolTableNode> snode)
 {
     GvNode* n = find_gv_node_in_list(list, target_state);
@@ -112,7 +112,9 @@ add_gv_node_to_list(GvNodeList& list,
 
 /// dump r list
 static void
-dump_gv_node_list_r(const GvNodeList& list, int src_state, std::ostream& out)
+dump_gv_node_list_r(const GvNodeList& list,
+                    const StateHandle src_state,
+                    std::ostream& out)
 {
     for (const auto& elem : list) {
         out << "  " << src_state << " -> r" << elem.target_state
@@ -133,7 +135,9 @@ dump_gv_node_list_r(const GvNodeList& list, int src_state, std::ostream& out)
 
 /// dump s list
 static void
-dump_gv_node_list_s(const GvNodeList& list, int src_state, std::ostream& out)
+dump_gv_node_list_s(const GvNodeList& list,
+                    const StateHandle src_state,
+                    std::ostream& out)
 {
     for (const auto& elem : list) {
         out << "  " << src_state << " -> " << elem.target_state
@@ -168,7 +172,7 @@ update_r_list(GvNodeList& r_list,
 {
     if (((options.use_lr0 || options.use_lalr) && r_list.size() == 1) ||
         (s_list.empty() && r_list.size() == 1)) {
-        const int state = r_list.front().target_state;
+        const StateHandle state = r_list.front().target_state;
         r_list.clear();
         // "(any)" means: any terminal can cause reduction.
         add_gv_node_to_list(r_list, state, hash_tbl_insert("(any)"));
@@ -251,7 +255,7 @@ gen_graphviz_input2(const Grammar& grammar,
                 if (!is_goal_symbol(grammar, n) && !is_parent_symbol(n)) {
                     auto [action, state] = get_action(n->type, col, row);
                     if (action == 's' || action == 'g')
-                        state = get_actual_state(state);
+                        state = *get_actual_state(state);
                     /* yyprintf("%c%d\t", action, state); */
                     if (action == 0) {
                         /* do nothing */
@@ -269,7 +273,7 @@ gen_graphviz_input2(const Grammar& grammar,
 
             update_r_list(r_list, s_list, options);
 
-            int src_state = get_actual_state(row);
+            StateHandle src_state = *get_actual_state(row);
             dump_gv_node_list_r(r_list, src_state, fp_gviz);
             dump_gv_node_list_s(s_list, src_state, fp_gviz);
         }

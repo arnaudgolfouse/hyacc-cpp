@@ -43,6 +43,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -55,16 +56,16 @@ std::atomic_int MAX_K;
 std::array<HashTblNode, HT_SIZE> HashTbl;
 // Grammar grammar;
 std::atomic_size_t PARSING_TABLE_SIZE;
-std::vector<int> ParsingTable;
+std::vector<std::optional<ParsingAction>> ParsingTable;
 size_t ParsingTblRows;
 std::vector<std::shared_ptr<SymbolTableNode>> ParsingTblColHdr;
 SymbolList F_ParsingTblColHdr;
-std::vector<int> states_reachable;
-std::vector<int> actual_state_no;
+std::vector<StateHandle> states_reachable;
+std::vector<StateHandle> actual_state_no;
 int n_symbol;
 size_t n_rule;
 size_t n_rule_opt;
-std::vector<int> final_state_list;
+std::vector<StateHandle> final_state_list;
 StateNoArray* states_inadequate;
 
 /* Declaration of functions. */
@@ -144,12 +145,12 @@ operator<<(std::ostream& os, const StateList& state_list) -> std::ostream&
  */
 
 void
-Production::write(std::ostream& os, int marker) const noexcept
+Production::write(std::ostream& os, std::optional<size_t> marker) const noexcept
 {
     os << *this->nLHS->snode->symbol << " ";
     os << "-> ";
 
-    int i = 0;
+    size_t i = 0;
     for (const auto& n : this->nRHS) {
         if (i == marker)
             os << ". ";
@@ -159,17 +160,17 @@ Production::write(std::ostream& os, int marker) const noexcept
     if (i == marker)
         os << ". ";
 
-    // print this only when marker = -1.
-    // i.e. called from writeGrammar().
-    if (marker == -1 && this->isUnitProduction)
+    // print this only when marker = nullopt.
+    // i.e. called from write_grammar().
+    if (!marker.has_value() && this->isUnitProduction)
         os << "(unit production)";
 
-    if (marker == -1 && this->lastTerminal != nullptr)
+    if (!marker.has_value() && this->lastTerminal != nullptr)
         os << " (Precedence Terminal: " << *this->lastTerminal->symbol << ")";
 
-    // if write configration, then don't go to new line.
+    // if write configuration, then don't go to new line.
     // since the context has not been written.
-    if (marker < 0)
+    if (!marker.has_value())
         os << std::endl;
 }
 
@@ -268,12 +269,13 @@ Grammar::write(std::ostream& os,
 }
 
 void
-NewStates::inc_conflict_count(const int s, const size_t state) noexcept
+NewStates::inc_conflict_count(const ParsingAction s,
+                              const size_t state) noexcept
 {
-    if (s > 0) {
+    if (s.is_shift()) {
         this->conflicts_count.rs++;
         this->states_new_array.at(state).rs_count++;
-    } else {
+    } else if (s.is_reduce()) {
         this->conflicts_count.rr++;
         this->states_new_array.at(state).rr_count++;
     }
@@ -281,15 +283,20 @@ NewStates::inc_conflict_count(const int s, const size_t state) noexcept
 
 auto
 NewStates::add_to_conflict_array(
-  const int state,
+  const StateHandle state,
   const std::shared_ptr<SymbolTableNode> lookahead,
-  const int action1,
-  const int action2) noexcept -> std::shared_ptr<ConflictNode>
+  const ParsingAction action1,
+  const ParsingAction action2) -> std::shared_ptr<ConflictNode>
 {
-    int r = 0, s = 0; // r < s
+    ParsingAction r = ParsingAction::new_accept(),
+                  s = ParsingAction::new_accept(); // r < s
     Conflict* b_prev = nullptr;
 
-    if (action1 < action2) {
+    if ((action1.is_reduce() && action2.is_shift()) ||
+        (action1.is_reduce() && action2.is_reduce() &&
+         action1.reduce_value() < action2.reduce_value()) ||
+        (action1.is_shift() && action2.is_shift() &&
+         action1.shift_value() < action2.shift_value())) {
         r = action1;
         s = action2;
     } else {
@@ -327,7 +334,7 @@ NewStates::add_to_conflict_array(
             this->inc_conflict_count(s, state);
             return c;
         }
-    } // end of for.
+    }
 
     std::shared_ptr<ConflictNode> c =
       std::make_shared<ConflictNode>(state, lookahead, r, s);
@@ -431,29 +438,30 @@ write_successor_list(std::ostream& os, State& s)
 
 static void
 write_state_conflict_list(std::ostream& os,
-                          int state,
+                          std::optional<StateHandle> state,
                           const StateArray& states_array)
 {
-    if (Options::get().use_remove_unit_production) {
-        state = get_actual_state(state);
+    if (Options::get().use_remove_unit_production && state.has_value()) {
+        state = get_actual_state(*state);
     }
 
-    if (state < 0)
+    if (!state.has_value())
+        return;
+    StateHandle state_unwrapped = *state;
+
+    if (states_array.at(state_unwrapped).rr_count == 0 &&
+        states_array.at(state_unwrapped).rs_count == 0)
         return;
 
-    if (states_array.at(state).rr_count == 0 &&
-        states_array.at(state).rs_count == 0)
-        return;
-
-    auto c = states_array.at(state).conflict;
+    auto c = states_array.at(state_unwrapped).conflict;
     for (; c != nullptr; c = c->next) {
         os << c->state << ": ";
-        if (c->s > 0) {
+        if (c->s.is_shift()) {
             os << "shift/reduce conflict ";
-            os << "(shift " << c->s << ", red'n " << (-1) * c->r << ")";
+            os << "( " << c->s << ", red'n " << c->r << ")";
         } else {
             os << "reduce/reduce conflict ";
-            os << "red'n " << (-1) * c->s << ", red'n " << (-1) * c->r << "]";
+            os << "red'n " << c->s << ", red'n " << c->r << "]";
         } // end if
         os << " on '" << *c->lookahead->symbol << "'" << std::endl;
     } // end for
@@ -507,7 +515,7 @@ NewStates::write_grammar_conflict_list2(std::ostream& os) const noexcept
         if (!is_reachable_state(i))
             continue;
 
-        int state = get_actual_state(i);
+        StateHandle state = *get_actual_state(i);
         const auto& a_i = a.at(i);
         if (a_i.rs_count > 0) {
             os << "  state " << state << ": " << a_i.rs_count
@@ -871,7 +879,7 @@ is_same_config(const Configuration& config1, const Configuration& config2)
 /// Note that a successor config's marker = 0.
 static auto
 is_existing_successor_config(const State& s,
-                             const int rule_id,
+                             const size_t rule_id,
                              const Context& con) -> bool
 {
     for (const auto& config : s.config) {
@@ -886,7 +894,7 @@ is_existing_successor_config(const State& s,
 static void
 add_successor_config_to_state(const Grammar& grammar,
                               const std::shared_ptr<StateNode> s,
-                              const int rule_id,
+                              const size_t rule_id,
                               const Context& con)
 {
     // marker = 0, is_core_config = 0.
@@ -955,7 +963,8 @@ config_cmp(const Grammar& grammar,
         b++;
     }
 
-    cmp_val = c1_production->nRHS.size() - c2_production->nRHS.size();
+    cmp_val = static_cast<int>(c1_production->nRHS.size()) -
+              static_cast<int>(c2_production->nRHS.size());
     if (cmp_val > 0) {
         return 1;
     } // c1 RHS is longer.
@@ -965,7 +974,7 @@ config_cmp(const Grammar& grammar,
 
     // If productions are the same, go on to compare context.
     // std::cout << "compare marker" << std::endl;
-    cmp_val = c1->marker - c2->marker;
+    cmp_val = static_cast<int>(c1->marker) - static_cast<int>(c2->marker);
     if (cmp_val > 0) {
         return 1;
     }
@@ -986,12 +995,10 @@ config_cmp(const Grammar& grammar,
         b++;
     }
 
-    // std::cout << "compare context count" << std::endl;
-    cmp_val = c1->context->context.size() - c2->context->context.size();
-    if (cmp_val > 0) {
+    if (c1->context->context.size() > c2->context->context.size()) {
         return 1;
     }
-    if (cmp_val < 0) {
+    if (c1->context->context.size() < c2->context->context.size()) {
         return -1;
     }
 
@@ -1028,13 +1035,11 @@ add_core_config2_state(const Grammar& grammar,
 // Use config_queue when get closure for a state.
 /////////////////////////////////////////////////////
 
-/*
- * Note that a successor config's marker = 0.
- * Returns the index of the compatible config in the state.
- */
+/// Note that a successor config's marker = 0.
+/// Returns the index of the compatible config in the state.
 auto
 is_compatible_successor_config(const std::shared_ptr<const State>& s,
-                               const int rule_id) -> std::optional<size_t>
+                               const size_t rule_id) -> std::optional<size_t>
 {
     for (size_t i = 0; i < s->config.size(); i++) {
         const Configuration* c = s->config.at(i);
@@ -1044,10 +1049,8 @@ is_compatible_successor_config(const std::shared_ptr<const State>& s,
     return std::nullopt;
 }
 
-/*
- * Assumption: public variable config_queue contains
- * the configurations to be processed.
- */
+/// Assumption: public variable config_queue contains
+/// the configurations to be processed.
 static void
 get_config_successors(const Grammar& grammar,
                       Queue& config_queue,
@@ -1150,7 +1153,7 @@ get_successor_for_config(const Grammar& grammar,
  * Compatible configurations are those that have the same
  * production and marker, but different in contexts.
  */
-static void
+[[maybe_unused]] static void
 combine_compatible_config(std::shared_ptr<State> s,
                           const bool debug_comb_comp_config,
                           std::ofstream& fp_v)
@@ -1333,11 +1336,9 @@ get_scanned_symbol(const Configuration& c) -> std::shared_ptr<SymbolTableNode>
     return c.nMarker.front().snode;
 }
 
-/*
- * Used by function transition.
- * Returns the successor state that is the result of
- * transition following the given symbol.
- */
+/// Used by function transition.
+/// Returns the successor state that is the result of
+/// transition following the given symbol.
 auto
 find_state_for_scanned_symbol(
   const StateCollection* c,
@@ -1365,8 +1366,8 @@ create_context() -> Context*
 
 auto
 create_config(const Grammar& grammar,
-              const int rule_id,
-              const int marker,
+              const size_t rule_id,
+              const size_t marker,
               const uint is_core_config) -> Configuration*
 {
     auto* c = new Configuration;
@@ -1405,10 +1406,8 @@ copy_context(Context& dest, const Context& src)
     dest.context = src.context;
 }
 
-/*
- * return the copy of a config.
- * used by function transition when creating new state.
- */
+/// return the copy of a config.
+/// used by function transition when creating new state.
 void
 copy_config(Configuration& c_dest, const Configuration& c_src)
 {
@@ -1745,16 +1744,17 @@ StateNode::StateNode()
 
 void
 YAlgorithm::insert_reduction_to_parsing_table(const Configuration* c,
-                                              const int state_no)
+                                              const StateHandle state_no)
 {
     if (this->grammar.rules.at(c->ruleID)->nLHS->snode ==
         this->grammar.goal_symbol->snode) { // accept, action = "a";
         for (const auto& a : c->context->context) {
-            this->insert_action(a.snode, state_no, CONST_ACC);
+            this->insert_action(a.snode, state_no, ParsingAction::new_accept());
         }
     } else { // reduct, action = "r";
         for (const auto& a : c->context->context) {
-            this->insert_action(a.snode, state_no, (-1) * c->ruleID);
+            this->insert_action(
+              a.snode, state_no, ParsingAction::new_reduce(c->ruleID));
         }
     }
 }
@@ -1835,13 +1835,15 @@ YAlgorithm::add_transition_states2_new(StateCollection* coll,
             add_successor(src_state, s);
 
             // insert shift.
-            this->insert_action(
-              s->trans_symbol->snode, src_state->state_no, s->state_no);
+            this->insert_action(s->trans_symbol->snode,
+                                src_state->state_no,
+                                ParsingAction::new_shift(s->state_no));
 
         } else { // same or compatible with an existing state.
                  // insert shift.
-            this->insert_action(
-              os->trans_symbol->snode, src_state->state_no, os->state_no);
+            this->insert_action(os->trans_symbol->snode,
+                                src_state->state_no,
+                                ParsingAction::new_shift(os->state_no));
 
             add_successor(src_state, os);
 
@@ -1896,7 +1898,8 @@ YAlgorithm::state_transition(std::shared_ptr<State> state)
                 coll->add_state2(new_state);
             }
             // create a new core config for new_state.
-            Configuration& new_config = *create_config(this->grammar, -1, 0, 1);
+            Configuration& new_config =
+              *create_config(this->grammar, c->ruleID, 0, 1);
 
             new_config.owner = new_state;
             copy_config(new_config, *c);
@@ -1999,35 +2002,38 @@ dump_state_collections(const Grammar& grammar, const NewStates& new_states)
  * 1) updateDestState, 2) getAction, 3) insertAction.
  */
 
-/*
- * Use a one-dimension array to store the matrix and
- * calculate the row and column number myself:
- * row i, col j is ParsingTable.at(col_no * i + j);
- *
- * Here we have:
- * 0 <= i < total states count
- * 0 <= j < col_no
- */
+/// Use a one-dimension array to store the matrix and
+/// calculate the row and column number myself:
+/// row i, col j is ParsingTable.at(col_no * i + j);
+///
+/// Here we have:
+/// 0 <= i < total states count
+/// 0 <= j < col_no
 void
 init_parsing_table()
 {
     PARSING_TABLE_SIZE = PARSING_TABLE_INIT_SIZE;
     size_t total_cells = PARSING_TABLE_SIZE * ParsingTblColHdr.size();
-    ParsingTable = std::vector<int>(4 * total_cells, 0);
+    ParsingTable.clear();
+    ParsingTable.reserve(4 * total_cells);
+    for (size_t i = 0; i < 4 * total_cells; i++) {
+        ParsingTable.emplace_back(std::nullopt);
+    }
 }
 
 auto
-get_action(symbol_type symbol_type, int col, int row) -> std::pair<char, int>
+get_action(symbol_type symbol_type, int col, StateHandle row)
+  -> std::pair<char, StateHandle>
 {
-    char action = '\0';
-    int state_dest = 0;
-    const int x = ParsingTable.at(row * ParsingTblColHdr.size() + col);
+    const std::optional<ParsingAction> x_opt =
+      ParsingTable.at(row * ParsingTblColHdr.size() + col);
 
-    if (x == 0) {
-        state_dest = 0;
-        return { action, state_dest };
+    if (!x_opt.has_value()) {
+        return { '\0', 0 };
     }
-    if (x > 0) { // 's' or 'g'
+    auto x = *x_opt;
+    if (x.is_shift()) { // 's' or 'g'
+        char action = '\0';
         if (symbol_type == symbol_type::TERMINAL) {
             action = 's';
         } else if (symbol_type == symbol_type::NONTERMINAL) {
@@ -2039,17 +2045,12 @@ get_action(symbol_type symbol_type, int col, int row) -> std::pair<char, int>
               to_string(static_cast<int>(symbol_type)) +
               ", col:" + to_string(col));
         }
-        state_dest = x;
-        return { action, state_dest };
+        return { action, x.shift_value() };
     }
-    if (x == CONST_ACC) { // 'a'
-        action = 'a';
-        state_dest = 0;
-        return { action, state_dest };
-    } // x < 0, 'r'
-    action = 'r';
-    state_dest = (-1) * x;
-    return { action, state_dest };
+    if (x.is_accept()) { // 'a'
+        return { 'a', 0 };
+    }                  // x < 0, 'r'
+    return { 'r', 1 }; // TODO: ???
 }
 
 /*
@@ -2074,55 +2075,54 @@ get_action(symbol_type symbol_type, int col, int row) -> std::pair<char, int>
  */
 void
 LR0::insert_action(std::shared_ptr<SymbolTableNode> lookahead,
-                   int row,
-                   int state_dest)
+                   StateHandle row,
+                   ParsingAction action)
 {
-    int reduce = 0, shift = 0; // for shift/reduce conflict.
     struct TerminalProperty *tp_s = nullptr, *tp_r = nullptr;
 
-    int cell = row * ParsingTblColHdr.size() + get_col(*lookahead);
+    const size_t cell = row * ParsingTblColHdr.size() + get_col(*lookahead);
 
-    if (ParsingTable.at(cell) == 0) {
-        ParsingTable.at(cell) = state_dest;
+    auto& previous_action_opt = ParsingTable.at(cell);
+    if (!previous_action_opt.has_value()) {
+        previous_action_opt = action;
         return;
     }
+    auto previous_action = *previous_action_opt;
 
-    if (ParsingTable.at(cell) == state_dest)
+    if (action.is_shift() && action == previous_action)
         return;
 
     // ParsingTable.at(cell) != 0 && ParsingTable.at(cell) !=
     // state_dest. The following code process shift/reduce and
     // reduce/reduce conflicts.
 
-    if (ParsingTable.at(cell) == CONST_ACC || state_dest == CONST_ACC) {
-        if (options.use_lr0 && (ParsingTable.at(cell) < 0 || state_dest < 0)) {
-            ParsingTable.at(cell) = CONST_ACC; // ACC wins over reduce.
+    if (previous_action.is_accept() || action.is_accept()) {
+        if (options.use_lr0) {
             return;
         }
         throw std::runtime_error(
           std::string("warning: conflict between ACC and an action: ") +
-          std::to_string(ParsingTable.at(cell)) + ", " +
-          std::to_string(state_dest));
+          previous_action.to_string() + ", " + action.to_string());
     }
 
     // std::cout << "conflict (state " <<
     //         row << ", lookahead " << *lookahead->symbol << "): " <<
-    //         ParsingTable.at(cell)<< " v.s. " << state_dest << std::endl;
+    //         previous_action << " v.s. " << state_dest << std::endl;
 
     // reduce/reduce conflict, use the rule appears first.
     // i.e., the ruleID is smaller, or when negated, is bigger.
-    if (ParsingTable.at(cell) < 0 && state_dest < 0) {
+    if (previous_action.is_reduce() && action.is_reduce()) {
         // std::cout << "r/r conflict: [" <<
         //         row << ", " << *lookahead->symbol << "] - " <<
-        //         ParsingTable.at(cell)<< " v.s. " << state_dest << std::endl;
+        //         previous_action << " v.s. " << state_dest << std::endl;
         std::shared_ptr<Conflict> c = this->new_states.add_to_conflict_array(
-          row, lookahead, ParsingTable.at(cell), state_dest);
+          row, lookahead, previous_action, action);
 
-        if (state_dest > ParsingTable.at(cell))
-            ParsingTable.at(cell) = state_dest;
+        if (action.reduce_value() < previous_action.reduce_value())
+            previous_action = action;
 
         if (c != nullptr) {
-            c->decision = ParsingTable.at(cell);
+            c->decision = previous_action;
         }
 
         // include r/r conflict for inadequate states.
@@ -2134,44 +2134,46 @@ LR0::insert_action(std::shared_ptr<SymbolTableNode> lookahead,
     }
 
     // shift/shift conflict.
-    if (ParsingTable.at(cell) > 0 && state_dest > 0) {
+    if (previous_action.is_shift() && action.is_shift()) {
         if (this->options.show_ss_conflicts) {
-            std::cerr << "warning: shift/shift conflict: " << state_dest
-                      << " v.s. " << ParsingTable.at(cell) << " @ (" << row
-                      << ", " << *lookahead->symbol << ")" << std::endl;
+            std::cerr << "warning: shift/shift conflict: " << action << " v.s. "
+                      << previous_action << " @ (" << row << ", "
+                      << *lookahead->symbol << ")" << std::endl;
         }
         // exit(1);
-        // ParsingTable.at(cell) = state_dest; // change causes
+        // previous_action = action; // change causes
         // infinite loop.
         this->new_states.conflicts_count.ss++;
         return;
     }
 
-    if (ParsingTable.at(cell) < 0) {
-        reduce = ParsingTable.at(cell);
-        shift = state_dest;
+    StateHandle reduce = 0, shift = 0; // for shift/reduce conflict.
+    if (previous_action.is_reduce()) {
+        reduce = previous_action.reduce_value();
+        shift = action.shift_value();
     } else {
-        reduce = state_dest;
-        shift = ParsingTable.at(cell);
+        reduce = action.reduce_value();
+        shift = previous_action.shift_value();
     }
 
     tp_s = lookahead->TP;
-    if (this->grammar.rules.at((-1) * reduce)->lastTerminal != nullptr)
-        tp_r = this->grammar.rules.at((-1) * reduce)->lastTerminal->TP;
+    if (this->grammar.rules.at(reduce)->lastTerminal != nullptr)
+        tp_r = this->grammar.rules.at(reduce)->lastTerminal->TP;
 
     if (tp_s == nullptr || tp_r == nullptr || tp_s->precedence == 0 ||
         tp_r->precedence == 0) {
         // std::cout << "s/r conflict: [" <<
         //         row << ", " << *lookahead->symbol << "] - " <<
-        //         ParsingTable.at(cell) << " v.s. " << state_dest << std::endl;
+        //         previous_action << " v.s. " << action << std::endl;
         std::shared_ptr<Conflict> c = new_states.add_to_conflict_array(
-          row, lookahead, ParsingTable.at(cell), state_dest);
+          row, lookahead, previous_action, action);
 
-        ParsingTable.at(cell) = shift; // use shift over reduce by default.
-        // std::cout << "default using " <<  ParsingTable.at(cell) << std::endl;
+        previous_action =
+          ParsingAction::new_shift(shift); // use shift over reduce by default.
+        // std::cout << "default using " << previous_action << std::endl;
 
         if (c != nullptr) {
-            c->decision = ParsingTable.at(cell);
+            c->decision = previous_action;
         }
 
         // include s/r conflicts not handled by
@@ -2186,9 +2188,9 @@ LR0::insert_action(std::shared_ptr<SymbolTableNode> lookahead,
     if (tp_r->precedence > tp_s->precedence ||
         (tp_r->precedence == tp_s->precedence &&
          tp_r->assoc == associativity::LEFT)) {
-        ParsingTable.at(cell) = reduce;
+        previous_action = ParsingAction::new_reduce(reduce);
         // std::cout << "resolved by using " <<
-        //  ParsingTable.at(cell) << std::endl;
+        //  previous_action << std::endl;
         return;
     }
 
@@ -2198,8 +2200,8 @@ LR0::insert_action(std::shared_ptr<SymbolTableNode> lookahead,
         add_state_no_array(states_inadequate, row);
     }
 
-    ParsingTable.at(cell) = shift;
-    // std::cout << "resolved by using " <<  ParsingTable.at(cell) << std::endl;
+    previous_action = ParsingAction::new_shift(shift);
+    // std::cout << "resolved by using " <<  previous_action << std::endl;
 }
 
 auto
@@ -2222,27 +2224,23 @@ print_parsing_table_note(std::ostream& os)
     os << "5. 0 means error" << std::endl;
 }
 
-/*
- * Print the parsing table after LR(1) parsing machine
- * is generated, by before removing unit productions.
- *
- * Note: The value of variable ParsingTblRows is
- * assigned at the end of function generate_parsing_table().
- *
- * Parsing table: Ref. Aho&Ullman p219.
- */
+/// Print the parsing table after LR(1) parsing machine
+/// is generated, by before removing unit productions.
+///
+/// Note: The value of variable ParsingTblRows is
+/// assigned at the end of function generate_parsing_table().
+///
+/// Parsing table: Ref. Aho&Ullman p219.
 void
 print_parsing_table(std::ostream& os, const Grammar& grammar)
 {
-    int row_size = ParsingTblRows;
-
     os << std::endl << "--Pars" << std::endl << "g Table--\n";
     os << "State\t";
     write_parsing_table_col_header(os, grammar);
 
-    for (int row = 0; row < row_size; row++) {
+    for (size_t row = 0; row < ParsingTblRows; row++) {
         os << row << "\t";
-        for (int col = 0; col < ParsingTblColHdr.size(); col++) {
+        for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
             const std::shared_ptr<const SymbolTableNode> n =
               ParsingTblColHdr.at(col);
             if (!is_goal_symbol(grammar, n)) {
@@ -2256,14 +2254,12 @@ print_parsing_table(std::ostream& os, const Grammar& grammar)
     print_parsing_table_note(os);
 }
 
-/*
- * Create a state based on the goal production (first
- * production of grammmar) and insert it to states_new.
- *
- * Called by function init() only.
- *
- * Assumption: grammar.rules[0] is the goal production.
- */
+/// Create a state based on the goal production (first
+/// production of grammmar) and insert it to states_new.
+///
+/// Called by function init() only.
+///
+/// Assumption: grammar.rules[0] is the goal production.
 void
 YAlgorithm::init_start_state()
 {
@@ -2285,18 +2281,16 @@ YAlgorithm::init_start_state()
     auto ignore = this->state_hash_table.search(state0, *this);
 }
 
-/*
- * Get a list of those states in the ParsingTable whose only
- * actions are a single reduction. Such states are called
- * final states.
- *
- * Use final state default reduction in the hyaccpar parse
- * engine. This significantly decreases the size of the
- * generated parser and overcomes the problem of always need to
- * get the new lookahead token to proceed parsing. Array
- * final_state_list is used in gen_compiler.c, and function
- * writeParsingTblRow() of y.c.
- */
+/// Get a list of those states in the ParsingTable whose only
+/// actions are a single reduction. Such states are called
+/// final states.
+///
+/// Use final state default reduction in the hyaccpar parse
+/// engine. This significantly decreases the size of the
+/// generated parser and overcomes the problem of always need to
+/// get the new lookahead token to proceed parsing. Array
+/// final_state_list is used in gen_compiler.c, and function
+/// writeParsingTblRow() of y.c.
 static void
 get_final_state_list(const Grammar& grammar)
 {
@@ -2304,58 +2298,61 @@ get_final_state_list(const Grammar& grammar)
 
     final_state_list.clear();
     final_state_list.reserve(ParsingTblRows);
-    for (int i = 0; i < ParsingTblRows; i++) {
+    for (size_t i = 0; i < ParsingTblRows; i++) {
         final_state_list.push_back(0);
     }
 
     if constexpr (USE_REM_FINAL_STATE) {
         if (Options::get().use_remove_unit_production) {
-
-            for (int i = 0; i < ParsingTblRows; i++) {
+            for (size_t i = 0; i < ParsingTblRows; i++) {
                 if (!is_reachable_state(i))
                     continue;
 
-                int row_start = i * ParsingTblColHdr.size();
-                int action = 0, new_action = 0;
-                int j = 0;
+                size_t row_start = i * ParsingTblColHdr.size();
+                std::optional<StateHandle> action = std::nullopt;
+                size_t j = 0;
                 for (; j < ParsingTblColHdr.size(); j++) {
                     n = ParsingTblColHdr.at(j);
 
                     if (is_goal_symbol(grammar, n) || is_parent_symbol(n))
                         continue;
 
-                    new_action = ParsingTable.at(row_start + j);
-                    if (new_action > 0 || new_action == CONST_ACC)
-                        break;
-                    if (new_action == 0)
+                    auto new_action_opt = ParsingTable.at(row_start + j);
+                    if (!new_action_opt.has_value()) {
                         continue;
-                    if (action == 0)
-                        action = new_action;
-                    if (action != new_action)
+                    }
+                    auto new_action = *new_action_opt;
+                    if (new_action.is_shift() || new_action.is_accept())
+                        break;
+                    if (!action.has_value())
+                        action = new_action.reduce_value();
+                    if (action != new_action.reduce_value())
                         break;
                 }
                 if (j == ParsingTblColHdr.size())
-                    final_state_list.at(i) = action;
+                    final_state_list.at(i) = *action;
             }
 
         } else {
-            for (int i = 0; i < ParsingTblRows; i++) {
-                int row_start = i * ParsingTblColHdr.size();
-                int action = 0, new_action = 0;
-                int j = 0;
+            for (size_t i = 0; i < ParsingTblRows; i++) {
+                size_t row_start = i * ParsingTblColHdr.size();
+                std::optional<StateHandle> action = std::nullopt;
+                size_t j = 0;
                 for (; j < ParsingTblColHdr.size(); j++) {
-                    new_action = ParsingTable.at(row_start + j);
-                    if (new_action > 0 || new_action == CONST_ACC)
-                        break;
-                    if (new_action == 0)
+                    auto new_action_opt = ParsingTable.at(row_start + j);
+                    if (!new_action_opt.has_value()) {
                         continue;
-                    if (action == 0)
-                        action = new_action;
-                    if (action != new_action)
+                    }
+                    auto new_action = *new_action_opt;
+                    if (new_action.is_shift() || new_action.is_accept())
+                        break;
+                    if (!action.has_value())
+                        action = new_action.reduce_value();
+                    if (action != new_action.reduce_value())
                         break;
                 }
                 if (j == ParsingTblColHdr.size())
-                    final_state_list.at(i) = action;
+                    final_state_list.at(i) = *action;
             }
         }
     }
@@ -2529,10 +2526,10 @@ YAlgorithm::show_stat(std::ostream& os) const noexcept
  * Under such situation use_lr0 or use_lalr is true.
  */
 static void
-write_parsing_tbl_row_lalr(std::ostream& os, int state)
+write_parsing_tbl_row_lalr(std::ostream& os, StateHandle state)
 {
-    int row_start = state * ParsingTblColHdr.size();
-    int reduction = 1;
+    size_t row_start = state * ParsingTblColHdr.size();
+    std::optional<StateHandle> reduction = std::nullopt;
     int only_one_reduction = true;
 
     auto& options = Options::get();
@@ -2541,25 +2538,30 @@ write_parsing_tbl_row_lalr(std::ostream& os, int state)
     // note if a state has acc action, then that's the only
     // action. so don't have to put acc in a separate loop.
     for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
-        int v = ParsingTable.at(row_start + col);
+        std::optional<ParsingAction> v_opt = ParsingTable.at(row_start + col);
+        if (!v_opt.has_value()) {
+            continue;
+        }
+        auto v = *v_opt;
         const std::shared_ptr<const SymbolTableNode> s =
           ParsingTblColHdr.at(col);
-        if (v > 0) {
+        if (v.is_shift()) {
             if (options.use_remove_unit_production)
-                v = get_actual_state(v);
+                v =
+                  ParsingAction::new_shift(*get_actual_state(v.shift_value()));
 
             if (ParsingTblColHdr.at(col)->type == symbol_type::TERMINAL) {
-                os << "  " << *s->symbol << " [" << s->value << "] shift " << v
+                os << "  " << *s->symbol << " [" << s->value << "] " << v
                    << std::endl;
             }
-        } else if (v == CONST_ACC) {
+        } else if (v.is_accept()) {
             os << "  " << *s->symbol << " [" << s->value << "] Accept"
                << std::endl;
-        } else if (v < 0) {
-            if (reduction > 0) {
-                reduction = v;
+        } else if (v.is_reduce()) {
+            if (!reduction.has_value()) {
+                reduction = 1;
             } // first reduction.
-            else if (reduction != v) {
+            else if (reduction != v.reduce_value()) {
                 only_one_reduction = false;
             }
             // else, is the same as first reduction. do
@@ -2569,46 +2571,56 @@ write_parsing_tbl_row_lalr(std::ostream& os, int state)
 
     // write reduce actions.
     if (only_one_reduction) {
-        if (reduction < 0) {
-            os << "  . reduce (" << (-1) * reduction << ")" << std::endl;
+        if (reduction.has_value()) {
+            os << "  . reduce (" << *reduction << ")" << std::endl;
         } else {
-            os << "  . error " << reduction << std::endl;
+            os << "  . error " << std::endl;
         } // no reduction.
     } else {
-        for (int col = 0; col < ParsingTblColHdr.size(); col++) {
-            int v = ParsingTable.at(row_start + col);
+        for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
+            std::optional<ParsingAction> v_opt =
+              ParsingTable.at(row_start + col);
+            if (!v_opt.has_value()) {
+                continue;
+            }
+            auto v = *v_opt;
             const std::shared_ptr<const SymbolTableNode> s =
               ParsingTblColHdr.at(col);
-            if (v < 0 && v != CONST_ACC) {
-                os << "  " << *s->symbol << " [" << s->value << "] reduce ("
-                   << (-1) * v << ")" << std::endl;
+            if (v.is_reduce()) {
+                os << "  " << *s->symbol << " [" << s->value << "] " << v
+                   << std::endl;
             }
         }
     }
 
     // write goto action.
     os << std::endl;
-    for (int col = 0; col < ParsingTblColHdr.size(); col++) {
-        int v = ParsingTable.at(row_start + col);
+    for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
+        std::optional<ParsingAction> v_opt = ParsingTable.at(row_start + col);
+        if (!v_opt.has_value()) {
+            continue;
+        }
+        auto v = *v_opt;
         const std::shared_ptr<const SymbolTableNode> s =
           ParsingTblColHdr.at(col);
-        if (v > 0) {
+        if (v.is_shift()) {
             if (options.use_remove_unit_production)
-                v = get_actual_state(v);
+                v =
+                  ParsingAction::new_shift(*get_actual_state(v.shift_value()));
 
             if (ParsingTblColHdr.at(col)->type == symbol_type::NONTERMINAL) {
-                os << "  " << *s->symbol << " [" << s->value << "] goto " << v
-                   << std::endl;
+                os << "  " << *s->symbol << " [" << s->value << "] goto "
+                   << v.shift_value() << std::endl;
             }
         }
     }
 }
 
 static void
-write_parsing_tbl_row(std::ostream& os, int state)
+write_parsing_tbl_row(std::ostream& os, StateHandle state)
 {
     const auto& options = Options::get();
-    int row_start = state * ParsingTblColHdr.size();
+    size_t row_start = state * ParsingTblColHdr.size();
 
     os << std::endl;
 
@@ -2623,27 +2635,32 @@ write_parsing_tbl_row(std::ostream& os, int state)
         return;
     }
 
-    for (int col = 0; col < ParsingTblColHdr.size(); col++) {
-        int v = ParsingTable.at(row_start + col);
+    for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
+        std::optional<ParsingAction> v_opt = ParsingTable.at(row_start + col);
+        if (!v_opt.has_value()) {
+            continue;
+        }
+        auto v = *v_opt;
         const std::shared_ptr<const SymbolTableNode> s =
           ParsingTblColHdr.at(col);
-        if (v > 0) {
+        if (v.is_shift()) {
             if (options.use_remove_unit_production)
-                v = get_actual_state(v);
+                v =
+                  ParsingAction::new_shift(*get_actual_state(v.shift_value()));
 
             if (ParsingTblColHdr.at(col)->type == symbol_type::NONTERMINAL) {
-                os << "  " << *s->symbol << " [" << s->value << "] goto " << v
-                   << std::endl;
+                os << "  " << *s->symbol << " [" << s->value << "] goto "
+                   << v.shift_value() << std::endl;
             } else {
-                os << "  " << *s->symbol << " [" << s->value << "] shift " << v
-                   << std::endl;
+                os << "  " << *s->symbol << " [" << s->value << "] shift "
+                   << v.shift_value() << std::endl;
             }
-        } else if (v == CONST_ACC) {
+        } else if (v.is_accept()) {
             os << "  " << *s->symbol << " [" << s->value << "] Accept"
                << std::endl;
-        } else if (v < 0) {
-            os << "  " << *s->symbol << " [" << s->value << "] reduce ("
-               << (-1) * v << ")" << std::endl;
+        } else if (v.is_reduce()) {
+            os << "  " << *s->symbol << " [" << s->value << "] " << v
+               << std::endl;
         }
     }
 }
@@ -2702,9 +2719,10 @@ write_state_collection_info(std::ostream& os,
 static void
 write_state_info_from_parsing_tbl(std::ostream& os)
 {
-    for (int row = 0; row < ParsingTblRows; row++) {
+    for (size_t row = 0; row < ParsingTblRows; row++) {
         if (is_reachable_state(row)) {
-            os << std::endl << "\nstate " << get_actual_state(row) << std::endl;
+            os << std::endl
+               << "\nstate " << *get_actual_state(row) << std::endl;
             write_parsing_tbl_row(os, row);
         }
     }
@@ -2968,7 +2986,7 @@ main(int argc, const char* argv[]) -> int
 
         if (false) { // for reading memory.
             std::cout << "press ENTER to end... ";
-            int keyval = std::cin.get(); // stop here for reading memory.
+            std::cin.get(); // stop here for reading memory.
         }
     } catch (std::runtime_error error) {
         std::cerr << error.what() << std::endl;

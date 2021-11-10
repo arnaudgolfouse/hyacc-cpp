@@ -35,6 +35,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <stdexcept>
 #include <string>
@@ -50,37 +51,25 @@
  */
 struct UnitProdState
 {
-    std::vector<int> combined_states{};
-    int state_no{ 0 }; // state_no of this new state.
+    std::vector<StateHandle> combined_states{};
+    StateHandle state_no{ 0 }; // state_no of this new state.
 };
 
 /* assume 500 new states maximal. */
 constexpr size_t UPS_SIZE = 64;
 constexpr size_t UPS_MAX_SIZE = 65536;
 
-/*
- * sort an integer array increasingly.
- * Uses insertion sort.
- */
-// void
-// sort_int(int array[], int array_len)
-// {
-//     for (int i = 1; i < array_len; i++) {
-//         int tmp = array[i];
-//         int j = i;
-//         for (; j > 0 && array[j - 1] > tmp; j--) {
-//             array[j] = array[j - 1];
-//         }
-//         array[j] = tmp;
-//     }
-// }
+static void
+get_reachable_states(const Grammar& grammar,
+                     const StateHandle cur_state,
+                     std::vector<StateHandle>& states_reachable);
 
 void
-print_int_array(std::ostream& os, const std::vector<int>& a)
+print_int_array(std::ostream& os, const std::vector<StateHandle>& a)
 {
     os << "count = " << a.size() << std::endl;
     bool first = true;
-    for (int elem : a) {
+    for (const StateHandle elem : a) {
         if (!first)
             os << ", ";
         first = false;
@@ -89,38 +78,36 @@ print_int_array(std::ostream& os, const std::vector<int>& a)
     os << std::endl;
 }
 
-/*
- * Called by function remove_unit_production_step1and2() only.
- *
- * This function does this:
- *
- * For given state s and leaf x, we have
- * non-terminal symbols y such that y => x.
- * if goto actions exist for some y's, then
- * get target state numbers of all y's goto actions,
- * as well as the target state number of x's shift/goto
- * actions if any.
- *
- * The number of such target states numbers is unitProdCount.
- * Note that it's bounded by non_terminal_count + 1, where 1
- * is for the leaf itself. This is because in the extreme
- * case all non terminals y => x.
- *
- * BASICALLY, unitProdCount == 0 or unitProdCount >= 2!
- * It is NOT possible that unitProdCount == 1.
- * This is because if there is a y successor of state s,
- * then y => x means there will also be x successors for s.
- *
- * unitProdCount >= 2. This also suggests that any
- * new state is not one from 0 to total states count - 1.
- *
- * These target states are to be combined in the next step.
- */
+/// Called by function remove_unit_production_step1and2() only.
+///
+/// This function does this:
+///
+/// For given state s and leaf x, we have
+/// non-terminal symbols y such that y => x.
+/// if goto actions exist for some y's, then
+/// get target state numbers of all y's goto actions,
+/// as well as the target state number of x's shift/goto
+/// actions if any.
+///
+/// The number of such target states numbers is unitProdCount.
+/// Note that it's bounded by non_terminal_count + 1, where 1
+/// is for the leaf itself. This is because in the extreme
+/// case all non terminals y => x.
+///
+/// BASICALLY, unitProdCount == 0 or unitProdCount >= 2!
+/// It is NOT possible that unitProdCount == 1.
+/// This is because if there is a y successor of state s,
+/// then y => x means there will also be x successors for s.
+///
+/// unitProdCount >= 2. This also suggests that any
+/// new state is not one from 0 to total states count - 1.
+///
+/// These target states are to be combined in the next step.
 static void
-get_unit_prod_shift(size_t state,
+get_unit_prod_shift(StateHandle state,
                     std::shared_ptr<SymbolTableNode> leaf,
                     const MRParents& parents,
-                    std::vector<int>& unit_prod_dest_states)
+                    std::vector<StateHandle>& unit_prod_dest_states)
 {
     // std::cout << "getUnitProdShift for '" <<  leaf<< "'" << std::endl;
     unit_prod_dest_states.clear();
@@ -149,15 +136,15 @@ get_unit_prod_shift(size_t state,
 
 static void
 write_unit_prod_shift(std::ostream& os,
-                      int state,
+                      StateHandle state,
                       std::shared_ptr<SymbolTableNode> leaf,
-                      const std::vector<int>& unit_prod_dest_states,
-                      int new_ups_state)
+                      const std::vector<StateHandle>& unit_prod_dest_states,
+                      StateHandle new_ups_state)
 {
     os << "state " << state << ", leaf '" << leaf->symbol << "' -";
     os << " combine these states to new state " << new_ups_state << ":"
        << std::endl;
-    for (int i = 0; i < unit_prod_dest_states.size(); i++) {
+    for (size_t i = 0; i < unit_prod_dest_states.size(); i++) {
         if (i > 0)
             os << ", ";
         os << unit_prod_dest_states[i];
@@ -185,41 +172,34 @@ write_ups_states(std::ostream& os, const std::vector<UnitProdState>& ups)
 
 static void
 create_new_ups_state(std::vector<UnitProdState>& ups,
-                     int new_state,
-                     const std::vector<int>& old_states)
+                     StateHandle new_state,
+                     const std::vector<StateHandle>& old_states)
 {
     UnitProdState new_ups;
     new_ups.state_no = new_state;
     new_ups.combined_states = old_states;
     ups.push_back(new_ups);
-
-    // std::cout << "ups_count = " <<  ups_count << std::endl;
-    // std::cout << "new UPS state " <<  ups_count - 1<< ", is combination of
-    // states: " << std::endl;
-    //  printIntArray(old_states, old_states_count);
 }
 
-/*
- * find the new state which combines states in a[].
- * Return:
- *   state no. if found, or -1 if not found.
- */
-auto
-get_ups_state(const std::vector<UnitProdState>& ups, const std::vector<int>& a)
-  -> int
+/// find the new state which combines states in a[].
+/// Return:
+///   state no. if found, or -1 if not found.
+static auto
+get_ups_state(const std::vector<UnitProdState>& ups,
+              const std::vector<StateHandle>& a) -> std::optional<StateHandle>
 {
     if (ups.empty())
-        return -1;
+        return std::nullopt;
     for (const auto& up : ups) {
         if (a == up.combined_states) {
             return up.state_no;
         }
     }
-    return -1;
+    return std::nullopt;
 }
 
 auto
-Grammar::is_unit_production(size_t rule_no) const -> bool
+Grammar::is_unit_production(StateHandle rule_no) const -> bool
 {
     if (rule_no >= this->rules.size()) {
         throw std::runtime_error(
@@ -237,9 +217,9 @@ Grammar::is_unit_production(size_t rule_no) const -> bool
  */
 void
 YAlgorithm::insert_action_of_symbol(std::shared_ptr<SymbolTableNode> symbol,
-                                    const int new_state,
+                                    const StateHandle new_state,
                                     const size_t old_state_index,
-                                    const std::vector<int>& old_states)
+                                    const std::vector<StateHandle>& old_states)
 {
     auto [action, state_dest] =
       get_action(symbol->type, get_col(*symbol), old_states[old_state_index]);
@@ -251,12 +231,14 @@ YAlgorithm::insert_action_of_symbol(std::shared_ptr<SymbolTableNode> symbol,
   //%d on symbol %s\n", action, state_dest, new_state, symbol->symbol);
 
     if (action == 'a') {
-        this->insert_action(symbol, new_state, CONST_ACC);
+        this->insert_action(symbol, new_state, ParsingAction::new_accept());
     } else if (action == 's' || action == 'g') {
-        this->insert_action(symbol, new_state, state_dest);
+        this->insert_action(
+          symbol, new_state, ParsingAction::new_shift(state_dest));
     } else if (action == 'r') {
         if (!grammar.is_unit_production(state_dest)) {
-            this->insert_action(symbol, new_state, (-1) * state_dest);
+            this->insert_action(
+              symbol, new_state, ParsingAction::new_reduce(state_dest));
         }
     }
 }
@@ -270,16 +252,10 @@ YAlgorithm::insert_action_of_symbol(std::shared_ptr<SymbolTableNode> symbol,
  */
 void
 YAlgorithm::insert_actions_of_combined_states(
-  const int new_state,
-  const std::vector<int>& old_states)
+  const StateHandle new_state,
+  const std::vector<StateHandle>& old_states)
 {
-    // std::cout << "Source state: " <<  src_state<< ". ";
-    // std::cout << "Combine these states into state " <<  new_state<< ":" <<
-    // std::endl;
-    //  print_int_array(old_states, old_states_count);
-
     // copy actions of old_states to new_state.
-
     for (size_t i = 0; i < old_states.size(); i++) {
         // Copy action of end marker STR_END.
         this->insert_action_of_symbol(
@@ -294,66 +270,60 @@ YAlgorithm::insert_actions_of_combined_states(
         for (const auto& a : this->grammar.non_terminal_list) {
             this->insert_action_of_symbol(a.snode, new_state, i, old_states);
         }
-    } // end for
+    }
 }
 
-/*
- * step 3. Delete transitions wrt. LHS of unit productions.
- * equivalent to remove all non-terminal goto actions.
- * new states don't have these, so just remove those
- * of the old state.
- *
- * Actually, THIS IS NOT EVEN NECESSARY if all is needed
- * is stdout output. This is because after getting all
- * parent symbols we can ignore to output them in the
- * step writeFinalParsingTable!
- */
+/// step 3. Delete transitions wrt. LHS of unit productions.
+/// equivalent to remove all non-terminal goto actions.
+/// new states don't have these, so just remove those
+/// of the old state.
+///
+/// Actually, THIS IS NOT EVEN NECESSARY if all is needed
+/// is stdout output. This is because after getting all
+/// parent symbols we can ignore to output them in the
+/// step writeFinalParsingTable!
 static void
 remove_unit_production_step3(const Grammar& grammar)
 {
     for (size_t i = 0; i < ParsingTblRows; i++) {
         for (const auto& a : grammar.non_terminal_list) {
-            // use "" as action and 0 as dest state clears it.
+            // use "" as action and Error as dest state clears it.
             // Only those non-terminals y => x are cleared.
             if (is_parent_symbol(a.snode)) {
-                update_action(get_col(*a.snode), i, 0);
+                update_action(get_col(*a.snode), i, ParsingAction::new_error());
             }
         }
     }
 }
 
-/*
- * Check if n is in integer array a.
- * Returns true if exists, false if not exists.
- */
-auto
-in_int_array(int n, const std::vector<int>& states_reachable) -> bool
+/// Check if elem is in vector v.
+template<std::integral T>
+static auto
+vector_contains(const std::vector<T>& v, const T elem) -> bool
 {
-    for (const int elem : states_reachable) {
-        if (n == elem) {
+    for (const auto& x : v) {
+        if (x == elem) {
             return true;
         }
     }
     return false;
 }
 
-/*
- * Note that action 'g' applies to non-terminals only.
- * But include it does not affect the cases for STR_END
- * and terminals, which have only action 's'. So just
- * include checking for 'g' for all three situations.
- */
+/// Note that action 'g' applies to non-terminals only.
+/// But include it does not affect the cases for STR_END
+/// and terminals, which have only action 's'. So just
+/// include checking for 'g' for all three situations.
 static void
 get_reachable_states_for_symbol(const Grammar& grammar,
                                 const std::string_view symbol,
-                                int cur_state,
-                                std::vector<int>& states_reachable)
+                                const size_t cur_state,
+                                std::vector<size_t>& states_reachable)
 {
     const std::shared_ptr<const SymbolTableNode> n = hash_tbl_find(symbol);
 
     auto [action, state_dest] = get_action(n->type, get_col(*n), cur_state);
     if ((action == 's' || action == 'g') &&
-        !in_int_array(state_dest, states_reachable)) {
+        !vector_contains(states_reachable, state_dest)) {
         states_reachable.push_back(state_dest);
         get_reachable_states(grammar, state_dest, states_reachable);
     }
@@ -364,8 +334,8 @@ get_reachable_states_for_symbol(const Grammar& grammar,
 /// states_reachable[].
 void
 get_reachable_states(const Grammar& grammar,
-                     const int cur_state,
-                     std::vector<int>& states_reachable)
+                     const size_t cur_state,
+                     std::vector<size_t>& states_reachable)
 {
     get_reachable_states_for_symbol(
       grammar, STR_END, cur_state, states_reachable);
@@ -454,9 +424,9 @@ remove_unit_production_step4(const Grammar& grammar)
 }
 
 auto
-is_reachable_state(int state) -> bool
+is_reachable_state(StateHandle state) -> bool
 {
-    if (state == 0 || in_int_array(state, states_reachable)) {
+    if (state == 0 || vector_contains(states_reachable, state)) {
         return true;
     }
     return false;
@@ -469,17 +439,14 @@ is_reachable_state(int state) -> bool
 void
 print_final_parsing_table(const Grammar& grammar)
 {
-    int col_size = ParsingTblColHdr.size();
-    int row_size = ParsingTblRows;
-
     grammar.fp_v << std::endl << "--Pars" << std::endl << "g Table--\n";
     grammar.fp_v << "State\t";
     write_final_parsing_table_col_header(grammar.fp_v);
 
-    for (int row = 0; row < row_size; row++) {
+    for (size_t row = 0; row < ParsingTblRows; row++) {
         if (is_reachable_state(row)) {
             grammar.fp_v << row << "\t";
-            for (int col = 0; col < ParsingTblColHdr.size(); col++) {
+            for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
                 std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
                 if (is_goal_symbol(grammar, n) == false &&
                     is_parent_symbol(n) == false) {
@@ -520,7 +487,7 @@ get_actual_state_no()
 
     int i = 0;
     for (size_t row = 0; row < row_size; row++) {
-        if (row == 0 || in_int_array(row, states_reachable)) {
+        if (row == 0 || vector_contains(states_reachable, row)) {
             actual_state_no.push_back(row);
             actual_state_no.push_back(i);
             i++;
@@ -531,13 +498,13 @@ get_actual_state_no()
 }
 
 auto
-get_actual_state(int virtual_state) -> int
+get_actual_state(StateHandle virtual_state) -> std::optional<StateHandle>
 {
     for (size_t i = 0; i < actual_state_no.size(); i += 2) {
         if (virtual_state == actual_state_no[i])
             return actual_state_no[i + 1];
     }
-    return -1; // this should not happen.
+    return std::nullopt; // this should not happen.
 }
 
 void
@@ -548,7 +515,7 @@ write_actual_state_array(std::ostream& os)
         return;
 
     os << std::endl << "\n--actual state array [actual, pseudo]--" << std::endl;
-    for (int i = 0; i < actual_state_no.size(); i += 2) {
+    for (size_t i = 0; i < actual_state_no.size(); i += 2) {
         if (i > 0 && i % LINE_LENGTH == 0)
             os << std::endl;
         os << "[" << actual_state_no[i] << ", " << actual_state_no[i + 1]
@@ -564,9 +531,7 @@ write_actual_state_array(std::ostream& os)
 void
 print_condensed_final_parsing_table(const Grammar& grammar)
 {
-    int col_size = ParsingTblColHdr.size();
     // value assigned at the end of generate_parsing_table().
-    int row_size = ParsingTblRows;
 
     grammar.fp_v << std::endl
                  << "--F" << std::endl
@@ -576,16 +541,16 @@ print_condensed_final_parsing_table(const Grammar& grammar)
     write_final_parsing_table_col_header(grammar.fp_v);
 
     int i = 0;
-    for (int row = 0; row < row_size; row++) {
+    for (size_t row = 0; row < ParsingTblRows; row++) {
         if (is_reachable_state(row)) {
             grammar.fp_v << i << "\t";
-            for (int col = 0; col < ParsingTblColHdr.size(); col++) {
+            for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
                 std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
                 if (is_goal_symbol(grammar, n) == false &&
                     is_parent_symbol(n) == false) {
                     auto [action, state_no] = get_action(n->type, col, row);
                     if (action == 's' || action == 'g')
-                        state_no = get_actual_state(state_no);
+                        state_no = *get_actual_state(state_no);
                     grammar.fp_v << action << state_no << "\t";
                 }
             }
@@ -621,7 +586,7 @@ YAlgorithm::remove_unit_production_step1and2(const MRLeaves& mr_leaves)
     bool debug_remove_up_step_1_2 = this->options.debug_remove_up_step_1_2;
     // as discussed in the function comments of getUnitProdShift(),
     // unitProdDestStates array is bounded by number of non_terminals + 1.
-    std::vector<int> unit_prod_dest_states;
+    std::vector<StateHandle> unit_prod_dest_states;
     std::vector<UnitProdState> ups;
     ups.reserve(UPS_SIZE);
     std::vector<std::shared_ptr<MRParents>> leaf_parents;
@@ -650,31 +615,35 @@ YAlgorithm::remove_unit_production_step1and2(const MRLeaves& mr_leaves)
             get_unit_prod_shift(state, leaf, *parents, unit_prod_dest_states);
 
             if (!unit_prod_dest_states.empty()) { // unitProdCount >= 2
-                int ups_state = get_ups_state(ups, unit_prod_dest_states);
-                if (ups_state == -1) {
+                std::optional<StateHandle> ups_state =
+                  get_ups_state(ups, unit_prod_dest_states);
+                if (!ups_state.has_value()) {
                     ups_state = ParsingTblRows;
                     ParsingTblRows++;
                     if (ParsingTblRows >= PARSING_TABLE_SIZE) {
                         // TODO
                         // expand_parsing_table(this->new_states.states_new_array);
                     }
-                    create_new_ups_state(ups, ups_state, unit_prod_dest_states);
+                    create_new_ups_state(
+                      ups, *ups_state, unit_prod_dest_states);
 
                     // Combine actions of states into state ups_state.
                     // Do this only if this combined state does not exist yet.
                     this->insert_actions_of_combined_states(
-                      ups_state, unit_prod_dest_states);
+                      *ups_state, unit_prod_dest_states);
                 }
 
                 // Update the link from src_state to leaf transition state
-                update_action(get_col(*leaf), state, ups_state); // shift.
+                update_action(get_col(*leaf),
+                              state,
+                              ParsingAction::new_shift(*ups_state)); // shift.
 
                 if (debug_remove_up_step_1_2) {
                     write_unit_prod_shift(grammar.fp_v,
                                           state,
                                           leaf,
                                           unit_prod_dest_states,
-                                          ups_state);
+                                          *ups_state);
                 }
             }
         }
@@ -709,11 +678,9 @@ YAlgorithm::remove_unit_production()
 // Functions for further optimization. Start.
 /////////////////////////////////////////////////////
 
-/*
- * Determine if rows i and j in the parsing table are the same.
- */
-auto
-is_equal_row(const int i, const int j) -> bool
+/// Determine if rows i and j in the parsing table are the same.
+static auto
+is_equal_row(const StateHandle i, const StateHandle j) -> bool
 {
     for (const auto& n : ParsingTblColHdr) {
         auto [action_i, state_dest_i] = get_action(n->type, get_col(*n), i);
@@ -725,15 +692,13 @@ is_equal_row(const int i, const int j) -> bool
     return true;
 }
 
-/*
- * In parsing table row, replace entries whose
- * target state is old_state by new_state.
- */
+/// In parsing table row, replace entries whose
+/// target state is old_state by new_state.
 static void
 update_repeated_row(const Grammar& grammar,
-                    int new_state,
-                    int old_state,
-                    int row)
+                    const StateHandle new_state,
+                    const StateHandle old_state,
+                    const StateHandle row)
 {
     // std::cout << "In row " << row << ", replace " << old_state << " by "
     //           << new_state << std::endl;
@@ -742,14 +707,17 @@ update_repeated_row(const Grammar& grammar,
     std::shared_ptr<SymbolTableNode> n = hash_tbl_find(STR_END);
     auto [action, state_dest] = get_action(n->type, get_col(*n), row);
     if (state_dest == old_state)
-        update_action(get_col(*hash_tbl_find(STR_END)), row, new_state);
+        update_action(get_col(*hash_tbl_find(STR_END)),
+                      row,
+                      ParsingAction::new_shift(new_state));
 
     // for terminal columns
     for (const auto& a : grammar.terminal_list) {
         n = a.snode;
         auto [action, state_dest] = get_action(n->type, get_col(*n), row);
         if (state_dest == old_state)
-            update_action(get_col(*a.snode), row, new_state);
+            update_action(
+              get_col(*a.snode), row, ParsingAction::new_shift(new_state));
     }
 
     // for non-terminal columns
@@ -757,7 +725,8 @@ update_repeated_row(const Grammar& grammar,
         n = a.snode;
         auto [action, state_dest] = get_action(n->type, get_col(*n), row);
         if (state_dest == old_state)
-            update_action(get_col(*a.snode), row, new_state);
+            update_action(
+              get_col(*a.snode), row, ParsingAction::new_shift(new_state));
     }
 }
 
@@ -767,7 +736,9 @@ update_repeated_row(const Grammar& grammar,
  * whose target state is old_state by new_state.
  */
 static void
-update_repeated_rows(const Grammar& grammar, int new_state, int old_state)
+update_repeated_rows(const Grammar& grammar,
+                     const StateHandle new_state,
+                     const StateHandle old_state)
 {
     update_repeated_row(grammar, new_state, old_state, 0); // row 0.
 
@@ -805,8 +776,8 @@ void
 YAlgorithm::further_optimization()
 {
     for (size_t k = 0; k < states_reachable.size() - 1; k++) {
-        int i = states_reachable[k];
-        int j = states_reachable[k + 1];
+        StateHandle i = states_reachable[k];
+        StateHandle j = states_reachable[k + 1];
         // std::cout << "furtherOpt: i = " <<  i<< ", j = " <<  j << std::endl;
         do {
             if (is_equal_row(i, j) == false)
@@ -815,7 +786,8 @@ YAlgorithm::further_optimization()
             update_repeated_rows(grammar, i, j);
             // std::cout << "state " <<  states_reachable[k + 1]<< " removed" <<
             // std::endl;
-            states_reachable.erase(states_reachable.begin() + k + 1);
+            states_reachable.erase(states_reachable.begin() +
+                                   static_cast<ptrdiff_t>(k) + 1);
             if ((k + 1) == states_reachable.size())
                 break;
             j = states_reachable[k + 1];

@@ -54,34 +54,6 @@ print_symbol_list(const SymbolList& object)
 {
     write_symbol_list(object, "");
 }
-static void
-print_cfg_ctxt(void* object)
-{
-    if (object == nullptr)
-        return;
-
-    auto* cc = static_cast<CfgCtxt*>(object);
-    auto* c = cc->c;
-    const SymbolList& n = cc->ctxt;
-
-    if (c == nullptr) {
-        std::cout << "c is nullptr" << std::endl;
-        return;
-    }
-
-    std::cout << c->owner->state_no << "." << c->ruleID << ": ";
-    write_symbol_list(n, "");
-}
-
-static void
-dump_conflict_list(const Conflict* c)
-{
-    for (; c != nullptr; c = c->next.get()) {
-        std::cout << "state " << c->state << ", token " << c->lookahead->symbol
-                  << ", actions: [" << c->r << ", " << c->s
-                  << "], decision: " << c->decision << std::endl;
-    }
-}
 
 static auto
 get_start_config_from_tail(Configuration* c) -> Configuration*
@@ -116,7 +88,7 @@ insert_cfg_ctxt_to_set(const std::shared_ptr<CfgCtxt> cc,
 /// @param lrk_pt_array LR(k) parsing table array.
 static void
 insert_lrk_pt(LRkPTArray& lrk_pt_array,
-              const int state_no,
+              const StateHandle state_no,
               const SymbolList token_list,
               const std::shared_ptr<SymbolTableNode> col,
               Configuration* c,
@@ -189,7 +161,7 @@ get_config_conflict_context(Configuration* c,
     std::shared_ptr<const Conflict> n =
       states_new_array[c->owner->state_no].conflict;
     for (; n != nullptr; n = n->next) {
-        if (n->r < 0 && n->s < 0) { // is r/r conflict.
+        if (n->r.is_reduce() && n->s.is_reduce()) { // is r/r conflict.
             for (const auto& contxt : c->context->context) {
                 if (n->lookahead == contxt.snode) {
                     insert_inc_symbol_list(ret_list, n->lookahead);
@@ -211,7 +183,7 @@ fill_set_c2(LRkPTArray& lrk_pt_array,
             Configuration* c_tail,
             const int k1,
             Set<std::shared_ptr<CfgCtxt>>& set_c2,
-            const int state_no,
+            const StateHandle state_no,
             const CfgCtxt* cc)
 {
     // n->start is the next level lane head.
@@ -229,7 +201,7 @@ fill_set_c2(LRkPTArray& lrk_pt_array,
  * @Input: inadequate state no.: state_no.
  */
 void
-LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, int state_no)
+LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, StateHandle state_no)
 {
     std::shared_ptr<CfgCtxt> cc = nullptr;
     std::shared_ptr<const State> s =
@@ -348,9 +320,7 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, int state_no)
     }
 }
 
-/*
- * Remove r/r conflict nodes from list.
- */
+/// Remove r/r conflict nodes from list.
 static void
 remove_rr_conflict_from_list(size_t state_no, NewStates& new_states)
 {
@@ -358,8 +328,8 @@ remove_rr_conflict_from_list(size_t state_no, NewStates& new_states)
     std::shared_ptr<Conflict>& c =
       new_states.states_new_array[state_no].conflict;
     while (nullptr != c) {
-        if (c->r < 0 && c->s < 0) {  // remove this node.
-            if (c_prev == nullptr) { // remove at head.
+        if (c->r.is_reduce() && c->s.is_reduce()) { // remove this node.
+            if (c_prev == nullptr) {                // remove at head.
                 new_states.states_new_array[state_no].conflict = c->next;
                 c = new_states.states_new_array[state_no].conflict;
             } else { // remove in the middle.
@@ -376,8 +346,8 @@ remove_rr_conflict_from_list(size_t state_no, NewStates& new_states)
 
     // if list is empty, remove this conflict.
     if (new_states.states_new_array[state_no].conflict == nullptr) {
-        for (int& state : states_inadequate->states) {
-            if (static_cast<int>(state_no) == state) {
+        for (StateHandle& state : states_inadequate->states) {
+            if (state_no == state) {
                 state = -1;
                 states_inadequate->count_unresolved--;
             }
@@ -385,11 +355,9 @@ remove_rr_conflict_from_list(size_t state_no, NewStates& new_states)
     }
 }
 
-/*
- * Update LR(1) parsing table.
- * 1) set entry to -10000010.
- * 2) remove this conflict from conflict list.
- */
+/// Update LR(1) parsing table.
+/// 1) set entry to -10000010.
+/// 2) remove this conflict from conflict list.
 static void
 update_lr1_parsing_table(size_t state_no, NewStates& new_states)
 {
@@ -397,9 +365,8 @@ update_lr1_parsing_table(size_t state_no, NewStates& new_states)
            new_states.states_new_array[state_no].conflict;
          c != nullptr;
          c = c->next) {
-        update_action(get_col(*c->lookahead),
-                      state_no,
-                      static_cast<int>(CONST_CONFLICT_SYMBOL));
+        update_action(
+          get_col(*c->lookahead), state_no, ParsingAction::new_error());
     }
 
     // remove r/r conflict node from list.
@@ -418,7 +385,7 @@ LaneTracing::lane_tracing_lrk() -> std::optional<LRkPTArray>
               << "lane head/tail pairs:" << std::endl;
     ConfigPairNode::list_dump(lane_head_tail_pairs);
 
-    for (const int state_no : states_inadequate->states) {
+    for (const StateHandle state_no : states_inadequate->states) {
         size_t ct_rr = this->new_states.states_new_array[state_no].rr_count;
 
         if (state_no >= 0 && ct_rr > 0) {

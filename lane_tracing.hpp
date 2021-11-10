@@ -41,12 +41,10 @@
 
 constexpr bool DEBUG_EDGE_PUSHING = false;
 
-/*
- * A macro to determine if a config is the goal production
- * of state 0. Used for getting the "$end" context
- * before test_a() in lane-tracing.
- * Single it out and put here, so it's easier to understand.
- */
+/// Determine if a config is the goal production of state 0. Used for getting
+/// the "$end" context before test_a() in lane-tracing.
+///
+/// Single it out and put here, so it's easier to understand.
 constexpr inline auto
 is_goal(Configuration& o) -> bool
 {
@@ -55,27 +53,38 @@ is_goal(Configuration& o) -> bool
 
 /** Data structure for the state-combination in phase 2 table. START */
 
-struct LlistInt
+class LlistState : public std::list<StateHandle>
 {
-    int n;
-    LlistInt* next;
-
-    auto add_inc(int n) noexcept -> LlistInt*;
-    void dump() const noexcept;
+  public:
+    explicit LlistState() noexcept = default;
+    explicit LlistState(StateHandle n) { this->push_back(n); }
+    /// Add n to the list in INC order.
+    void add_inc(StateHandle n);
+    void dump() const;
 };
 
-/*
- * Similar to llist_int, but has two int fields.
- * Used by LT_cluster only.
- */
-struct LlistInt2
-{
-    int n1;
-    int n2;
-    LlistInt2* next;
+/// Similar to llist_int, but has two int fields.
+/// Used by LT_cluster only.
 
-    /// Find the node in a LlistInt list whose first entry is n2.
-    auto find_n2(int n2) noexcept -> LlistInt2*;
+class LlistState2 : public std::list<std::pair<StateHandle, StateHandle>>
+{
+  public:
+    explicit LlistState2() noexcept = default;
+    explicit LlistState2(StateHandle n1, StateHandle n2)
+    {
+        this->push_back({ n1, n2 });
+    }
+    /// Add n to the head of list.
+    void add_head(StateHandle n1, StateHandle n2);
+    /// Add n1, n2 to the list in INC order of n1.
+    void add_inc(StateHandle n1, StateHandle n2);
+    /// Find the node in a LlistInt list whose first entry is n1.
+    [[nodiscard]] auto find_n1(StateHandle n1) const noexcept
+      -> LlistState2::const_iterator;
+    /// Find the node in a LlistInt list whose second entry is n2.
+    [[nodiscard]] auto find_n2(StateHandle n2) const noexcept
+      -> LlistState2::const_iterator;
+    void dump() const noexcept;
 };
 
 struct LlistContextSet
@@ -92,9 +101,9 @@ struct LlistContextSet
 struct LtTblEntry
 {
     bool processed; // whether this entry was processed during regeration.
-    int from_state;
+    StateHandle from_state;
     LlistContextSet* ctxt_set; // in INC order of config->ruleID.
-    LlistInt* to_states;       // in INC order of state_no.
+    LlistState to_states{};    // in INC order of state_no.
     LtTblEntry* next;
 
     /*
@@ -102,18 +111,17 @@ struct LtTblEntry
      *
      * Note that in LT_tbl, the entries are in INC order of state_no.
      */
-    [[nodiscard]] auto find_entry(int from_state) noexcept -> LtTblEntry*;
+    [[nodiscard]] auto find_entry(StateHandle from_state) noexcept
+      -> LtTblEntry*;
 };
 
-/*
- * For state combining purpose.
- */
+/// For state combining purpose.
 struct LtCluster
 {
-    bool pairwise_disjoint;
-    LlistInt2* states;         // in INC order of state_no.
-    LlistContextSet* ctxt_set; // in INC order of config->ruleID.
-    LtCluster* next;
+    bool pairwise_disjoint = false;
+    LlistState2 states{};                // in INC order of state_no.
+    LlistContextSet* ctxt_set = nullptr; // in INC order of config->ruleID.
+    LtCluster* next = nullptr;
 
     static auto find_actual_containing_cluster(int state_no) -> LtCluster*;
     void dump(LtTblEntry& lane_tracing_table) const noexcept;
@@ -124,7 +132,8 @@ struct LtCluster
     /// Note state_no here is the virtual state_no: the one
     /// splitted from. So there could be more than one cluster
     /// contain it.
-    [[nodiscard]] auto contain_state(int state_no) const noexcept -> int;
+    [[nodiscard]] auto contain_state(std::optional<StateHandle> state_no)
+      const noexcept -> std::optional<StateHandle>;
 };
 
 extern LtCluster* all_clusters;
@@ -318,7 +327,7 @@ struct List
 constexpr uintptr_t CONST_CONFLICT_SYMBOL = -10000010;
 struct LRkPTRow
 {
-    int state;
+    StateHandle state;
     std::shared_ptr<SymbolNode> token;
     ConfigPairNode** row;
     LRkPTRow* next;
@@ -336,14 +345,14 @@ struct LRkPT
 
     static auto create(int k) noexcept -> LRkPT*;
     void dump() const noexcept;
-    auto find(int state,
+    auto find(StateHandle state,
               std::shared_ptr<SymbolTableNode> token,
               bool* found) const noexcept -> LRkPTRow*;
-    auto get_entry(int state,
+    auto get_entry(StateHandle state,
                    std::shared_ptr<SymbolTableNode> token,
                    std::shared_ptr<const SymbolTableNode> col_token,
                    bool* exist) noexcept -> ConfigPairNode*;
-    auto add_reduction(int state,
+    auto add_reduction(StateHandle state,
                        std::shared_ptr<SymbolTableNode> token,
                        std::shared_ptr<const SymbolTableNode> s,
                        Configuration* c,
@@ -423,11 +432,11 @@ class LaneTracing : public YAlgorithm
     void phase1();
     void phase2();
     void gpm(std::shared_ptr<State> new_state);
-    void lt_tbl_entry_add(int from_state,
+    void lt_tbl_entry_add(StateHandle from_state,
                           const std::shared_ptr<const State>& to);
-    auto lt_tbl_entry_find_insert(int from_state) -> LtTblEntry*;
-    auto lt_tbl_entry_find(int from_state) -> LtTblEntry*;
-    void lt_tbl_entry_add_context(int from_state,
+    auto lt_tbl_entry_find_insert(StateHandle from_state) -> LtTblEntry*;
+    auto lt_tbl_entry_find(StateHandle from_state) -> LtTblEntry*;
+    void lt_tbl_entry_add_context(StateHandle from_state,
                                   SymbolList& ctxt) noexcept(false);
     auto add_split_state(std::shared_ptr<State> y,
                          State& s,
@@ -437,23 +446,25 @@ class LaneTracing : public YAlgorithm
     void phase2_regeneration2();
     void set_transitors_pass_thru_on(const Configuration& cur_config,
                                      const Configuration& o) noexcept(false);
-    void inherit_propagate(int state_no,
-                           int parent_state_no,
+    void inherit_propagate(StateHandle state_no,
+                           StateHandle parent_state_no,
                            LtCluster* container,
                            const LtTblEntry* e);
-    void lt_phase2_propagate_context_change(int state_no,
+    void lt_phase2_propagate_context_change(StateHandle state_no,
                                             LtCluster* c,
                                             const LtTblEntry* e);
-    void clear_regenerate(int state_no);
-    void clear_inherit_regenerate(int state_no, int parent_state_no);
-    auto cluster_trace_new_chain_all(int parent_state, const LtTblEntry* e)
-      -> bool;
-    auto cluster_trace_new_chain(int parent_state_no, int state_no) -> bool;
+    void clear_regenerate(StateHandle state_no);
+    void clear_inherit_regenerate(StateHandle state_no,
+                                  StateHandle parent_state_no);
+    auto cluster_trace_new_chain_all(StateHandle parent_state,
+                                     const LtTblEntry& e) -> bool;
+    auto cluster_trace_new_chain(StateHandle parent_state_no,
+                                 StateHandle state_no) -> bool;
     auto cluster_add_lt_tbl_entry(LtCluster* c,
-                                  int from_state,
+                                  StateHandle from_state,
                                   LlistContextSet* e_ctxt,
                                   size_t e_parent_state_no,
-                                  bool copy) const -> int;
+                                  bool copy) const -> StateHandle;
     auto get_the_context(const Configuration* o) noexcept(false) -> SymbolList;
     auto trace_back(Configuration* c, laneHead* lh_list) noexcept(false)
       -> laneHead*;
@@ -481,7 +492,7 @@ class LaneTracing : public YAlgorithm
 
     // In `lrk.cpp`
     [[nodiscard]] auto lane_tracing_lrk() -> std::optional<LRkPTArray>;
-    void edge_pushing(LRkPTArray& lrk_pt_array, int state_no);
+    void edge_pushing(LRkPTArray& lrk_pt_array, StateHandle state_no);
     void lrk_config_lane_tracing(Configuration* c) noexcept;
 };
 
