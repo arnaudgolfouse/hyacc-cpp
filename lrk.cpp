@@ -128,16 +128,16 @@ insert_lrk_pt(LRkPTArray& lrk_pt_array,
 void
 LaneTracing::lrk_config_lane_tracing(Configuration* c) noexcept
 {
-    EDGE_PUSHING_CONTEXT_GENERATED.clear();
-    IN_EDGE_PUSHING_LANE_TRACING = true;
+    this->edge_pushing_context_generated.clear();
+    this->in_edge_pushing_lane_tracing = true;
     this->lane_tracing_reduction(c);
 
     // pretend that c is a reduce configuration.
     c->LANE_END = 0;
-    cur_red_config = c;
+    this->cur_red_config = c;
 
     // get LANE_END configs and add to lane_head_tail_pairs list.
-    trace_back_lrk(c);
+    this->trace_back_lrk(c);
 
     // clear the LANE_CON flag of configurations on conflicting lanes.
     trace_back_lrk_clear(c);
@@ -177,7 +177,8 @@ get_config_conflict_context(Configuration* c,
 }
 
 static void
-fill_set_c2(LRkPTArray& lrk_pt_array,
+fill_set_c2(SymbolList edge_pushing_context_generated,
+            LRkPTArray& lrk_pt_array,
             ConfigPairNode* n,
             const Configuration* c,
             Configuration* c_tail,
@@ -191,7 +192,7 @@ fill_set_c2(LRkPTArray& lrk_pt_array,
     std::cout << "next level lane head: " << n->start->owner->state_no << "."
               << n->start->ruleID << ". z = " << c->z << " + " << k1
               << " - 1 = " << n->start->z << std::endl;
-    for (const auto& sn : EDGE_PUSHING_CONTEXT_GENERATED) {
+    for (const auto& sn : edge_pushing_context_generated) {
         insert_lrk_pt(
           lrk_pt_array, state_no, cc->ctxt, sn.snode, n->start, c_tail, set_c2);
     }
@@ -276,7 +277,8 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, StateHandle state_no)
                         for (; n != nullptr; n = n->next) {
                             if (c != n->end)
                                 break;
-                            fill_set_c2(lrk_pt_array,
+                            fill_set_c2(this->edge_pushing_context_generated,
+                                        lrk_pt_array,
                                         n,
                                         c,
                                         c_tail,
@@ -293,7 +295,8 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, StateHandle state_no)
                         for (ConfigPairNode* n = lane_head_tail_pairs;
                              n != nullptr;
                              n = n->next) {
-                            fill_set_c2(lrk_pt_array,
+                            fill_set_c2(this->edge_pushing_context_generated,
+                                        lrk_pt_array,
                                         n,
                                         c,
                                         c_tail,

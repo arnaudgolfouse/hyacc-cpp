@@ -240,7 +240,6 @@ Grammar::write_non_terminals(std::ostream& os) const
 void
 Grammar::write_vanish_symbols(std::ostream& os) const
 {
-    SymbolNode* a = nullptr;
     os << "Vanish symbols (" << this->vanish_symbol_list.size()
        << "): " << std::endl;
     for (const auto& a : this->vanish_symbol_list) {

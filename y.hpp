@@ -607,7 +607,7 @@ struct StateCollection
 {
     std::shared_ptr<State> states_head;
     std::shared_ptr<State> states_tail;
-    int state_count;
+    size_t state_count;
 
     auto add_state2(std::shared_ptr<State> new_state) -> std::shared_ptr<State>;
 };

@@ -60,7 +60,7 @@ $(TARGET) : $(OBJS)
 	@echo compiled successfully
 
 release : FFLAG += -O2
-debug : $(OBJS)
+release : $(OBJS)
 	@echo please wait ...
 	@make create_path_file
 	$(CC) $(FFLAG) $(OBJS) -o $(TARGET)
@@ -75,6 +75,7 @@ debug : $(OBJS)
 
 clean :
 	rm -rf ./$(TARGET) ./$(BUILD_DIR)
+	mkdir -p $(BUILD_DIR)
 	@echo target is cleaned
 
 cscope.out : $(SRC) hyaccpar hyaccpark
