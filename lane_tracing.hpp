@@ -30,14 +30,14 @@
 #include <utility>
 #include <vector>
 
-/*
- * lane_tracing.h
+/**
+ * lane_tracing.hpp
  *
- * Used by lane_tracing.c and lrk.c only.
+ * Used by lane_tracing.cpp and lrk.cpp only.
  *
- * @Author: Xin Chen
- * @Created on: 7/26/2008
- * @Last modified: 3/24/2009
+ * @author: Xin Chen
+ * @created_on: 7/26/2008
+ * @last_modified: 3/24/2009
  */
 
 constexpr bool DEBUG_EDGE_PUSHING = false;
@@ -66,7 +66,6 @@ class LlistState : public std::list<StateHandle>
 
 /// Similar to llist_int, but has two int fields.
 /// Used by LT_cluster only.
-
 class LlistState2 : public std::list<std::pair<StateHandle, StateHandle>>
 {
   public:
@@ -102,15 +101,12 @@ class LlistContextSet : public std::list<LlistContextSetItem>
 {
   public:
     explicit LlistContextSet() noexcept = default;
-    // explicit LlistContextSet(Configuration* config)
-    // {
-    //     this->push_back(LlistContextSetItem(config));
-    // }
 
     void dump() const noexcept;
     void add_context(LlistContextSet::iterator c,
                      const SymbolList& context_set) const;
     [[nodiscard]] auto clone() const -> LlistContextSet;
+    [[nodiscard]] auto pairwise_disjoint() const noexcept -> bool;
 };
 
 /// to get a State pointer from the state_no, use
@@ -137,26 +133,45 @@ struct LtTblEntry
 };
 
 /// For state combining purpose.
-struct LtCluster
+struct LtClusterEntry
 {
     bool pairwise_disjoint = false;
     LlistState2 states{};       // in INC order of state_no.
     LlistContextSet ctxt_set{}; // in INC order of config->ruleID.
-    LtCluster* next = nullptr;
 
-    static auto find_actual_containing_cluster(LtCluster* all_clusters,
-                                               StateHandle state_no)
-      -> LtCluster*;
+    explicit LtClusterEntry() noexcept =
+      default; // TODO: remove this, and properly initialize
+               // `LaneTracing::new_cluster` ?
+    explicit LtClusterEntry(LtTblEntry* e, bool& all_pairwise_disjoint);
     void dump(LtTblEntry& lane_tracing_table) const noexcept;
     /// Return:
     ///   the splitted state's no if state_no is in c->states list
-    ///   -1 otherwise.
+    ///   nullopt otherwise.
     ///
     /// Note state_no here is the virtual state_no: the one
     /// splitted from. So there could be more than one cluster
     /// contain it.
     [[nodiscard]] auto contain_state(std::optional<StateHandle> state_no)
       const noexcept -> std::optional<StateHandle>;
+    /// Return:
+    ///   the splitted state's no if state_no is in c->states list
+    ///   -1 otherwise.
+    ///
+    /// Note state_no here is the actual state_no.
+    /// There could be only one cluster contains it.
+    [[nodiscard]] auto contain_actual_state(std::optional<StateHandle> state_no)
+      const noexcept -> std::optional<StateHandle>;
+    /// Combine new_part into old_part which is already in all_clusters list.
+    ///
+    /// Add each state in new_part to old_part, also merge context sets.
+    void combine(const LtClusterEntry& other);
+};
+
+class LtCluster : public std::list<LtClusterEntry>
+{
+  public:
+    auto find_actual_containing_cluster(StateHandle state_no) noexcept
+      -> LtCluster::iterator;
 };
 
 /*
@@ -164,41 +179,50 @@ struct LtCluster
  */
 
 /// For conflicting lanes' head states and associated conflicting contexts.
-using laneHead = struct laneHeadState;
-struct laneHeadState
+struct LaneHeadState
 {
-    /// conflicting lane head state.
+    /// Conflicting lane head state.
     ///
     /// Should never contain `nullptr`.
     std::shared_ptr<State> s;
-    SymbolList contexts; // list of conflicting contexts.
-    laneHead* next;
+    /// list of conflicting contexts.
+    SymbolList contexts;
+
+    explicit LaneHeadState(std::shared_ptr<State> s,
+                           std::shared_ptr<SymbolTableNode> n) noexcept;
 };
 
+using LaneHead = std::list<LaneHeadState>;
+
 /// For (conflict_config, lane_end_config) pairs.
-using ConfigPairList = struct ConfigPairNode*;
+class ConfigPairList : public std::list<struct ConfigPairNode>
+{
+  public:
+    /// Combine `other` into `this`.
+    void combine(const ConfigPairList& other) noexcept;
+    void insert(Configuration* conflict_config,
+                Configuration* lane_start_config) noexcept;
+    void dump() const noexcept;
+    auto find(Configuration* conflict_config) noexcept
+      -> ConfigPairList::iterator;
+};
+
 struct ConfigPairNode
 {
     Configuration* end;   // conflict_config
     Configuration* start; // lane_start_config
-    ConfigPairNode* next;
 
     /*
      * Functions in lrk_util.cpp
      */
 
-    static auto list_combine(ConfigPairList s, ConfigPairList t) noexcept
-      -> ConfigPairList;
-
-    static auto list_insert(ConfigPairList list,
-                            Configuration* conflict_config,
+    explicit ConfigPairNode(Configuration* conflict_config,
                             Configuration* lane_start_config) noexcept
-      -> ConfigPairList;
-    static void list_dump(ConfigPairList list);
-    static auto list_find(ConfigPairList list,
-                          Configuration* conflict_config) noexcept
-      -> ConfigPairNode*;
-    static void list_destroy(ConfigPairList list) noexcept;
+      : end(conflict_config)
+      , start(lane_start_config)
+    {}
+
+    void dump() const noexcept;
 };
 
 /*
@@ -234,7 +258,7 @@ struct LRkPtEntry
  * Functions in lane_tracing.c
  */
 extern void
-trace_back_lrk_clear(Configuration* c);
+trace_back_lrk_clear(Configuration& c);
 
 /// Set - a linked list of objects.
 template<typename T>
@@ -306,7 +330,7 @@ struct List
     void lrk_theads_rm_nt(size_t j);
     // Remove from t all strings whose k-heads consist entirely
     // of terminals, and add the k-heads to set t_heads;
-    void lrk_theads_rm_theads(size_t k, List* t_heads);
+    void lrk_theads_rm_theads(size_t k, List& t_heads);
     // Add to the end of list the result of applying all possible
     // productions to the j-th symbol, omitting existing strings,
     // and truncate until it contains no more than k non-vanishable
@@ -343,7 +367,8 @@ struct LRkPTRow
 {
     StateHandle state;
     std::shared_ptr<SymbolNode> token;
-    ConfigPairNode** row;
+    /// Size is ParsingTblColHdr
+    std::vector<std::optional<ConfigPairNode>> row;
     LRkPTRow* next;
 };
 
@@ -365,7 +390,7 @@ struct LRkPT
     auto get_entry(StateHandle state,
                    std::shared_ptr<SymbolTableNode> token,
                    std::shared_ptr<const SymbolTableNode> col_token,
-                   bool* exist) noexcept -> ConfigPairNode*;
+                   bool* exist) noexcept -> std::optional<ConfigPairNode>;
     auto add_reduction(StateHandle state,
                        std::shared_ptr<SymbolTableNode> token,
                        std::shared_ptr<const SymbolTableNode> s,
@@ -391,6 +416,9 @@ struct LRkPTArray
     [[nodiscard]] auto get(size_t k) const noexcept -> LRkPT*;
     void dump() const noexcept;
     void dump_file() const noexcept;
+
+  private:
+    constexpr static size_t INIT_SIZE = 10;
 };
 
 //
@@ -447,9 +475,8 @@ class LaneTracing : public YAlgorithm
     Configuration* cur_red_config = nullptr;
     /// Initialize this to nullptr at the beginning of phase2_regeneration2().
     /// This list is in the order of cluster insertion.
-    LtCluster* all_clusters = nullptr;
-    LtCluster* all_clusters_tail = nullptr;
-    LtCluster* new_cluster = nullptr;
+    LtCluster all_clusters{};
+    LtClusterEntry new_cluster{}; // TODO: use a free local variable instead ?
     /// Initialized to true. If in regeneration context conflicts occur,
     /// set this to false, which means the grammar is NOT LR(1).
     bool all_pairwise_disjoint = true;
@@ -466,11 +493,11 @@ class LaneTracing : public YAlgorithm
     void clear_inherit_regenerate(StateHandle state_no,
                                   StateHandle parent_state_no);
     void clear_regenerate(StateHandle state_no);
-    auto cluster_add_lt_tbl_entry(LtCluster* c,
+    auto cluster_add_lt_tbl_entry(LtClusterEntry& c,
                                   StateHandle from_state,
                                   const LlistContextSet& e_ctxt,
                                   size_t e_parent_state_no,
-                                  bool copy) const -> StateHandle;
+                                  bool copy) -> StateHandle;
     auto cluster_trace_new_chain(StateHandle parent_state_no,
                                  StateHandle state_no) -> bool;
     auto cluster_trace_new_chain_all(StateHandle parent_state,
@@ -484,21 +511,20 @@ class LaneTracing : public YAlgorithm
     void do_loop() noexcept(false);
     void dump_stacks() const;
     void edge_pushing(LRkPTArray& lrk_pt_array, StateHandle state_no);
-    [[nodiscard]] auto get_conflict_lane_head() noexcept(false) -> laneHead*;
+    [[nodiscard]] auto get_conflict_lane_head() noexcept(false) -> LaneHead;
     void get_inadequate_state_reduce_config_context(const State* s);
-    [[nodiscard]] auto get_state_conflict_lane_head(
-      StateHandle state_no,
-      laneHead* lh_list) noexcept(false) -> laneHead*;
+    void get_state_conflict_lane_head(StateHandle state_no,
+                                      LaneHead& lh_list) noexcept(false);
     auto get_the_context(const Configuration* o) noexcept(false) -> SymbolList;
     void gpm(std::shared_ptr<State> new_state);
     void inherit_propagate(StateHandle state_no,
                            StateHandle parent_state_no,
-                           LtCluster* container,
+                           const LtClusterEntry& container,
                            const LtTblEntry* e);
     /// used by both originator list and transitor list
     void lane_tracing_reduction(Configuration* c) noexcept(false);
     void lt_phase2_propagate_context_change(StateHandle state_no,
-                                            LtCluster* c,
+                                            const LtClusterEntry& c,
                                             const LtTblEntry* e);
     void lt_tbl_entry_add(StateHandle from_state,
                           const std::shared_ptr<const State>& to);
@@ -511,15 +537,14 @@ class LaneTracing : public YAlgorithm
     void move_markers(const Configuration* o) noexcept;
     void phase1();
     void phase2();
-    void phase2_regeneration(laneHead* lh_list);
+    void phase2_regeneration(LaneHead& lh_list);
     void phase2_regeneration2();
     void pop_lane();
     void resolve_lalr1_conflicts();
     void set_transitors_pass_thru_on(const Configuration& cur_config,
                                      const Configuration& o) noexcept(false);
     void stack_operation(int* fail_ct, Configuration* o);
-    auto trace_back(Configuration* c, laneHead* lh_list) noexcept(false)
-      -> laneHead*;
+    void trace_back(Configuration& c, LaneHead& lh_list) noexcept(false);
     /// For use by LR(k) only.
     /// Purpose: get LANE_END configurations and add to
     /// lane_head_tail_pairs list.
@@ -528,5 +553,5 @@ class LaneTracing : public YAlgorithm
 
     // In `lrk.cpp`
     [[nodiscard]] auto lane_tracing_lrk() -> std::optional<LRkPTArray>;
-    void lrk_config_lane_tracing(Configuration* c) noexcept;
+    void lrk_config_lane_tracing(Configuration& c) noexcept;
 };

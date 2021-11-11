@@ -72,8 +72,6 @@ StateNoArray* states_inadequate;
 static void
 init_parsing_table();
 static void
-destroy_state_collection(StateCollection* c);
-static void
 free_config(Configuration* c);
 static auto
 is_compatible_config(const Configuration* c1, const Configuration* c2) -> bool;
@@ -1217,13 +1215,6 @@ struct Counts
     size_t max_config_after_combine = 0;
 };
 
-/*
- * xx - no. of calls to getClosure,
- * yy - number of config in all states before combine,
- * zz - max config count in all states before combine.
- * yyy - number of config in all states after combine,
- * zzz - max config count in all states after combine.
- */
 static Counts counts{};
 
 /*
@@ -1291,15 +1282,6 @@ create_state_collection() -> StateCollection*
     c->state_count = 0;
 
     return c;
-}
-
-void
-destroy_state_collection(StateCollection* c)
-{
-    if (c == nullptr)
-        return;
-
-    delete c;
 }
 
 auto
@@ -1392,8 +1374,8 @@ create_config(const Grammar& grammar,
         c->LANE_END = 0;
         c->LANE_CON = 0;
         c->CONTEXT_CHANGED = 0;
-        c->originators = create_originator_list();
-        c->transitors = create_originator_list();
+        c->originators = OriginatorList();
+        c->transitors = OriginatorList();
     }
 
     return c;
@@ -1986,12 +1968,6 @@ YAlgorithm::generate_parsing_machine()
     this->n_state_opt1 = this->new_states.states_new->state_count;
 }
 
-static void
-dump_state_collections(const Grammar& grammar, const NewStates& new_states)
-{
-    write_state_collection(grammar.fp_v, grammar, new_states);
-}
-
 /////////////////////////////////////////////////////////////////
 // Parsing table functions.
 /////////////////////////////////////////////////////////////////
@@ -2022,21 +1998,21 @@ init_parsing_table()
 
 auto
 get_action(symbol_type symbol_type, int col, StateHandle row)
-  -> std::pair<char, StateHandle>
+  -> std::pair<std::optional<Action>, StateHandle>
 {
     const std::optional<ParsingAction> x_opt =
       ParsingTable.at(row * ParsingTblColHdr.size() + col);
 
     if (!x_opt.has_value()) {
-        return { '\0', 0 };
+        return { std::nullopt, 0 };
     }
     auto x = *x_opt;
     if (x.is_shift()) { // 's' or 'g'
-        char action = '\0';
+        std::optional<Action> action = std::nullopt;
         if (symbol_type == symbol_type::TERMINAL) {
-            action = 's';
+            action = Action::Shift;
         } else if (symbol_type == symbol_type::NONTERMINAL) {
-            action = 'g';
+            action = Action::Goto;
         } else {
             using std::to_string;
             throw std::runtime_error(
@@ -2047,9 +2023,9 @@ get_action(symbol_type symbol_type, int col, StateHandle row)
         return { action, x.shift_value() };
     }
     if (x.is_accept()) { // 'a'
-        return { 'a', 0 };
-    }                  // x < 0, 'r'
-    return { 'r', 1 }; // TODO: ???
+        return { Action::Accept, 0 };
+    }                             // x < 0, 'r'
+    return { Action::Reduce, 1 }; // TODO: ???
 }
 
 /*
@@ -2126,7 +2102,7 @@ LR0::insert_action(std::shared_ptr<SymbolTableNode> lookahead,
 
         // include r/r conflict for inadequate states.
         if (this->options.use_lalr) {
-            add_state_no_array(states_inadequate, row);
+            add_state_no_array(*states_inadequate, row);
         }
 
         return;
@@ -2178,7 +2154,7 @@ LR0::insert_action(std::shared_ptr<SymbolTableNode> lookahead,
         // include s/r conflicts not handled by
         // precedence/associativity.
         if (this->options.use_lalr) {
-            add_state_no_array(states_inadequate, row);
+            add_state_no_array(*states_inadequate, row);
         }
 
         return;
@@ -2196,7 +2172,7 @@ LR0::insert_action(std::shared_ptr<SymbolTableNode> lookahead,
     // include s/r conflicts not handled by
     // precedence/associativity.
     if (this->options.use_lalr) {
-        add_state_no_array(states_inadequate, row);
+        add_state_no_array(*states_inadequate, row);
     }
 
     previous_action = ParsingAction::new_shift(shift);
@@ -2379,8 +2355,8 @@ get_avg_config_count(std::ostream& os, const StateCollection& states_new)
     }
     os << std::endl;
     os << "Average configurations per state: " << std::setprecision(2)
-       << ((double)sum / states_new.state_count) << " (min: " << min
-       << ", max: " << max << ')' << std::endl;
+       << static_cast<double>(sum) / static_cast<double>(states_new.state_count)
+       << " (min: " << min << ", max: " << max << ')' << std::endl;
 }
 
 void
@@ -2406,26 +2382,6 @@ YAlgorithm::show_state_config_info(std::ostream& os) const noexcept
 
     get_avg_config_count(os, *this->new_states.states_new);
     this->state_hash_table.dump(os);
-}
-
-/// print size of different objects. For development use
-/// only.
-static void
-print_size()
-{
-    constexpr size_t PARSING_TBL_COL_HDR_ELEM_SIZE =
-      sizeof(std::shared_ptr<SymbolTableNode>);
-    std::cout << "size of Grammar: " << sizeof(Grammar) << std::endl
-              << "size of StateCollection: " << sizeof(StateCollection)
-              << std::endl
-              << "size of State: " << sizeof(State) << std::endl
-              << "size of (State *): " << sizeof(State*) << std::endl
-              << "size of Context: " << sizeof(Context) << std::endl
-              << "size of Production: " << sizeof(Production) << std::endl
-              << "size of Configuration: " << sizeof(Configuration) << std::endl
-              << "size of ParsingTblColHdr: "
-              << ParsingTblColHdr.size() * PARSING_TBL_COL_HDR_ELEM_SIZE
-              << std::endl;
 }
 
 static void
@@ -2512,8 +2468,6 @@ YAlgorithm::show_stat(std::ostream& os) const noexcept
            << std::endl
            << "\n";
     }
-
-    // print_size();
 }
 
 /////////////////////////////////////////////

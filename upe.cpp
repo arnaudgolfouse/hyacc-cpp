@@ -57,7 +57,6 @@ struct UnitProdState
 
 /* assume 500 new states maximal. */
 constexpr size_t UPS_SIZE = 64;
-constexpr size_t UPS_MAX_SIZE = 65536;
 
 static void
 get_reachable_states(const Grammar& grammar,
@@ -116,7 +115,7 @@ get_unit_prod_shift(StateHandle state,
         std::shared_ptr<SymbolTableNode> n = parent->snode;
         auto [action, state_dest] = get_action(n->type, get_col(*n), state);
         // std::cout << action << ", " << state_dest << std::endl;
-        if (action == 'g') {
+        if (action == Action::Goto) {
             unit_prod_dest_states.push_back(state_dest);
         }
     }
@@ -126,7 +125,7 @@ get_unit_prod_shift(StateHandle state,
     if (!unit_prod_dest_states.empty()) {
         auto [action, state_dest] =
           get_action(leaf->type, get_col(*leaf), state);
-        if (action == 's' || action == 'g') {
+        if (action == Action::Shift || action == Action::Goto) {
             unit_prod_dest_states.push_back(state_dest);
         }
     }
@@ -150,24 +149,6 @@ write_unit_prod_shift(std::ostream& os,
         os << unit_prod_dest_states[i];
     }
     os << std::endl;
-}
-
-static void
-write_ups_state(std::ostream& os, const UnitProdState& ups)
-{
-    os << "State no: " << ups.state_no
-       << ". Is combination of these states:" << std::endl;
-    print_int_array(os, ups.combined_states);
-}
-
-static void
-write_ups_states(std::ostream& os, const std::vector<UnitProdState>& ups)
-{
-    os << "==New states for unit production removal";
-    os << " (total " << ups.size() << "):" << std::endl;
-    for (const auto& up : ups) {
-        write_ups_state(os, up);
-    }
 }
 
 static void
@@ -224,18 +205,18 @@ YAlgorithm::insert_action_of_symbol(std::shared_ptr<SymbolTableNode> symbol,
     auto [action, state_dest] =
       get_action(symbol->type, get_col(*symbol), old_states[old_state_index]);
 
-    if (action == 0)
+    if (!action.has_value())
         return;
 
     //printf("insert action %c to dest_state %d for new state \
   //%d on symbol %s\n", action, state_dest, new_state, symbol->symbol);
 
-    if (action == 'a') {
+    if (action == Action::Accept) {
         this->insert_action(symbol, new_state, ParsingAction::new_accept());
-    } else if (action == 's' || action == 'g') {
+    } else if (action == Action::Shift || action == Action::Goto) {
         this->insert_action(
           symbol, new_state, ParsingAction::new_shift(state_dest));
-    } else if (action == 'r') {
+    } else if (action == Action::Reduce) {
         if (!grammar.is_unit_production(state_dest)) {
             this->insert_action(
               symbol, new_state, ParsingAction::new_reduce(state_dest));
@@ -322,7 +303,7 @@ get_reachable_states_for_symbol(const Grammar& grammar,
     const std::shared_ptr<const SymbolTableNode> n = hash_tbl_find(symbol);
 
     auto [action, state_dest] = get_action(n->type, get_col(*n), cur_state);
-    if ((action == 's' || action == 'g') &&
+    if ((action == Action::Shift || action == Action::Goto) &&
         !vector_contains(states_reachable, state_dest)) {
         states_reachable.push_back(state_dest);
         get_reachable_states(grammar, state_dest, states_reachable);
@@ -549,7 +530,7 @@ print_condensed_final_parsing_table(const Grammar& grammar)
                 if (is_goal_symbol(grammar, n) == false &&
                     is_parent_symbol(n) == false) {
                     auto [action, state_no] = get_action(n->type, col, row);
-                    if (action == 's' || action == 'g')
+                    if (action == Action::Shift || action == Action::Goto)
                         state_no = *get_actual_state(state_no);
                     grammar.fp_v << action << state_no << "\t";
                 }

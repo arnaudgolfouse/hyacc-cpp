@@ -168,6 +168,44 @@ struct TerminalProperty
     associativity assoc;
 };
 
+enum class Action
+{
+    Shift,
+    Goto,
+    Reduce,
+    Accept,
+};
+
+inline auto
+operator<<(std::ostream& os, Action action) -> std::ostream&
+{
+    switch (action) {
+        case Action::Accept:
+            os << 'a';
+            return os;
+        case Action::Reduce:
+            os << 'r';
+            return os;
+        case Action::Shift:
+            os << 's';
+            return os;
+        case Action::Goto:
+            os << 'g';
+            return os;
+    }
+}
+
+inline auto
+operator<<(std::ostream& os, std::optional<Action> action) -> std::ostream&
+{
+    if (action.has_value()) {
+        os << *action;
+    } else {
+        os << '\0';
+    }
+    return os;
+}
+
 class ParsingAction
 {
   public:
@@ -484,8 +522,15 @@ struct Production
 struct OriginatorList
 {
     std::vector<struct ConfigurationNode*> list;
+
+    explicit OriginatorList() noexcept
+    {
+        this->list.reserve(ORIGINATOR_LIST_LEN_INIT);
+    }
+
+  private:
+    constexpr static size_t ORIGINATOR_LIST_LEN_INIT = 2;
 };
-constexpr size_t ORIGINATOR_LIST_LEN_INIT = 2;
 
 /*
  * This has the same structure as OriginatorList.
@@ -513,8 +558,8 @@ struct ConfigurationNode
     unsigned int LANE_CON : 1;        /* label for config on conflict lane. */
     unsigned int CONTEXT_CHANGED : 1; /* for LR(k) use only. */
     unsigned int padding : 25;
-    OriginatorList* originators; /* for LANE_TRACING */
-    OriginatorList* transitors;  /* for phase 2 of LANE_TRACING */
+    OriginatorList originators; /* for LANE_TRACING */
+    OriginatorList transitors;  /* for phase 2 of LANE_TRACING */
 
     int z; // used by LR(k) edge_pushing only...11/26/2008
 
@@ -1013,7 +1058,7 @@ get_actual_state(StateHandle virtual_state) -> std::optional<StateHandle>;
 /// ```
 extern auto
 get_action(symbol_type symbol_type, int col, StateHandle row)
-  -> std::pair<char, StateHandle>;
+  -> std::pair<std::optional<Action>, StateHandle>;
 // extern bool isVanishSymbol(SymbolTableNode * n);
 extern auto
 is_parent_symbol(std::shared_ptr<const SymbolTableNode> s) -> bool;
@@ -1229,11 +1274,9 @@ extern StateNoArray* states_inadequate;
 
 /* functions in lane_tracing.c */
 extern auto
-create_originator_list() -> OriginatorList*;
-extern auto
 create_state_no_array() -> StateNoArray*;
 extern void
-add_state_no_array(StateNoArray* sa, StateHandle state_no);
+add_state_no_array(StateNoArray& sa, StateHandle state_no);
 extern void
 stdout_write_config(const Grammar& grammar, const Configuration* c);
 extern auto

@@ -783,18 +783,18 @@ print_yyreds(std::ofstream& fp, const Grammar& grammar)
 
 static void
 print_parsing_tbl_entry(std::ofstream& fp,
-                        const char action,
+                        const std::optional<Action> action,
                         const StateHandle state_no,
                         int& count)
 {
     bool is_entry = false;
-    if (action == 's' || action == 'g') {
+    if (action == Action::Shift || action == Action::Goto) {
         fp << state_no << ", ";
         is_entry = true;
-    } else if (action == 'r') {
+    } else if (action == Action::Reduce) {
         fp << '-' << state_no << ", ";
         is_entry = true;
-    } else if (action == 'a') {
+    } else if (action == Action::Accept) {
         fp << "0, ";
         is_entry = true;
     }
@@ -826,20 +826,20 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
             if (is_reachable_state(row)) {
 
                 if constexpr (USE_REM_FINAL_STATE) {
-                    if (final_state_list[row] < 0) {
+                    if (final_state_list.at(row) < 0) {
                         print_parsing_tbl_entry(
-                          fp, 's', final_state_list[row], count);
+                          fp, Action::Shift, final_state_list.at(row), count);
                         rowoffset.push_back(count);
                         continue;
                     }
                 }
                 for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
                     std::shared_ptr<const SymbolTableNode> n =
-                      ParsingTblColHdr[col];
+                      ParsingTblColHdr.at(col);
                     if (is_goal_symbol(grammar, n) == false &&
                         is_parent_symbol(n) == false) {
                         auto [action, state_no] = get_action(n->type, col, row);
-                        if (action == 's' || action == 'g')
+                        if (action == Action::Shift || action == Action::Goto)
                             state_no = *get_actual_state(state_no);
                         // std::cout  <<  action <<  state_no<< "\t";
                         print_parsing_tbl_entry(fp, action, state_no, count);
@@ -854,9 +854,9 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
         for (size_t i = 0; i < ParsingTblRows; i++) {
 
             if constexpr (USE_REM_FINAL_STATE) {
-                if (final_state_list[i] < 0) {
+                if (final_state_list.at(i) < 0) {
                     print_parsing_tbl_entry(
-                      fp, 's', final_state_list[i], count);
+                      fp, Action::Shift, final_state_list.at(i), count);
                     rowoffset.push_back(count);
                     continue;
                 }
@@ -864,7 +864,7 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
 
             for (size_t j = 0; j < ParsingTblColHdr.size(); j++) {
                 auto [action, state_no] =
-                  get_action(ParsingTblColHdr[j]->type, j, i);
+                  get_action(ParsingTblColHdr.at(j)->type, j, i);
                 // std::cout  <<  action <<  state_no<< ", ";
                 print_parsing_tbl_entry(fp, action, state_no, count);
             }
@@ -890,12 +890,12 @@ print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
 
 static void
 print_parsing_tbl_col_entry(std::ofstream& fp,
-                            const char action,
+                            const std::optional<Action> action,
                             const int token_value,
                             int& count)
 {
     bool is_entry = false;
-    if (action == 's' || action == 'g' || action == 'r' || action == 'a') {
+    if (action.has_value()) {
         fp << token_value << ", ";
         is_entry = true;
     }
@@ -929,14 +929,15 @@ print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
             if (is_reachable_state(row)) {
 
                 if constexpr (USE_REM_FINAL_STATE) {
-                    if (final_state_list[row] < 0) {
+                    if (final_state_list.at(row) < 0) {
                         print_parsing_tbl_col_entry(
-                          fp, 'r', FINAL_STATE_COL_ENTRY, count);
+                          fp, Action::Reduce, FINAL_STATE_COL_ENTRY, count);
                         continue;
                     }
                 }
                 for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
-                    std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
+                    std::shared_ptr<SymbolTableNode> n =
+                      ParsingTblColHdr.at(col);
                     if (is_goal_symbol(grammar, n) == false &&
                         is_parent_symbol(n) == false) {
                         auto [action, state] = get_action(n->type, col, row);
@@ -950,14 +951,14 @@ print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
         for (size_t i = 0; i < ParsingTblRows; i++) {
 
             if constexpr (USE_REM_FINAL_STATE) {
-                if (final_state_list[i] < 0) { // is a final state.
+                if (final_state_list.at(i) < 0) { // is a final state.
                     print_parsing_tbl_col_entry(
-                      fp, 'r', FINAL_STATE_COL_ENTRY, count);
+                      fp, Action::Reduce, FINAL_STATE_COL_ENTRY, count);
                     continue;
                 }
             }
             for (size_t j = 0; j < ParsingTblColHdr.size(); j++) {
-                std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[j];
+                std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr.at(j);
                 auto [action, state] = get_action(n->type, j, i);
                 print_parsing_tbl_col_entry(fp, action, n->value, count);
             }
@@ -975,7 +976,7 @@ void
 get_final_states(std::ofstream& fp)
 {
     fp << "static YYCONST yytabelem yyfs[] = {" << std::endl;
-    fp << final_state_list[0];
+    fp << final_state_list.at(0);
     int j = 0;
     for (size_t i = 1; i < ParsingTblRows; i++) {
         if (Options::get().use_remove_unit_production) {
@@ -986,7 +987,7 @@ get_final_states(std::ofstream& fp)
         fp << ", ";
         if ((++j) % ITEM_PER_LINE == 0)
             fp << std::endl;
-        fp << final_state_list[i];
+        fp << final_state_list.at(i);
     }
     fp << "};" << std::endl << std::endl;
 }
@@ -1036,12 +1037,12 @@ write_lrk_table_arrays(std::ofstream& fp,
         for (const LRkPTRow* r = t->rows; r != nullptr; r = r->next) {
             fp << "  " << r->state << ", " << r->token->snode->value << ", ";
             for (size_t j = 0; j < ParsingTblColHdr.size(); j++) {
-                if (r->row[j] != nullptr) {
-                    if (reinterpret_cast<uintptr_t>(r->row[j]->end) ==
+                if (r->row.at(j).has_value()) {
+                    if (reinterpret_cast<uintptr_t>(r->row.at(j)->end) ==
                         CONST_CONFLICT_SYMBOL) {
                         fp << j << ", " << -2 << ", ";
                     } else {
-                        fp << j << ", " << r->row[j]->end->ruleID << ", ";
+                        fp << j << ", " << r->row.at(j)->end->ruleID << ", ";
                     }
                 }
             }

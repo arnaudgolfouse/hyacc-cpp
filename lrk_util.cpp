@@ -46,26 +46,7 @@
 // Functions for ConfigPairNode. START.
 //////////////////////////////////////////////////////////////////
 
-static auto
-config_pair_node_create(Configuration* conflict_config,
-                        Configuration* lane_start_config) -> ConfigPairNode*
-{
-    auto* n = new ConfigPairNode;
-    n->end = conflict_config;
-    n->start = lane_start_config;
-    n->next = nullptr;
-    return n;
-}
-
-static void
-config_pair_node_destroy(ConfigPairNode* n)
-{
-    delete n;
-}
-
-/*
- * compare function: 1 - greater than, 0 - equal, -1 - less than.
- */
+/// compare function: 1 - greater than, 0 - equal, -1 - less than.
 static auto
 config_pair_cmp(Configuration* end1,
                 Configuration& start1,
@@ -95,43 +76,28 @@ config_pair_cmp(Configuration* end1,
     return 0;
 }
 
-/*
- * Combine list s(ource) to list t(arget).
- */
-auto
-ConfigPairNode::list_combine(ConfigPairList t, ConfigPairList s) noexcept
-  -> ConfigPairList
+void
+ConfigPairList::combine(const ConfigPairList& other) noexcept
 {
-    if (s == nullptr)
-        return t;
-    if (t == nullptr)
-        return s;
-
-    for (ConfigPairNode* n = s; n != nullptr; n = n->next) {
-        t = ConfigPairNode::list_insert(t, n->end, n->start);
+    if (this->empty()) {
+        *this = other;
+        return;
     }
 
-    return t;
+    for (const auto& n : other) {
+        this->insert(n.end, n.start);
+    }
 }
 
-/*
- * Insert in INC order of:
- *   conflict_config's state_no and ruleID,
- *   lane_start_config's state_no and ruleID.
- */
-auto
-ConfigPairNode::list_insert(ConfigPairList list,
-                            Configuration* conflict_config,
-                            Configuration* lane_start_config) noexcept
-  -> ConfigPairList
+/// Insert in INC order of:
+///   conflict_config's state_no and ruleID,
+///   lane_start_config's state_no and ruleID.
+void
+ConfigPairList::insert(Configuration* conflict_config,
+                       Configuration* lane_start_config) noexcept
 {
-    ConfigPairNode *n = nullptr, *n_prev = nullptr;
-
-    if (list == nullptr) {
-        return config_pair_node_create(conflict_config, lane_start_config);
-    }
-
-    for (n_prev = nullptr, n = list; n != nullptr; n_prev = n, n = n->next) {
+    auto n = this->begin();
+    for (; n != this->end(); n++) {
         int cmp = config_pair_cmp(
           n->end, *n->start, conflict_config, *lane_start_config);
         if (cmp < 0) {
@@ -139,56 +105,45 @@ ConfigPairNode::list_insert(ConfigPairList list,
         }
         if (cmp == 0) {
             // existing config pair.
-            return list;
-        } // cmp > 0, insert to list between n and n_prev.
-        ConfigPairNode* m =
-          config_pair_node_create(conflict_config, lane_start_config);
-        if (n_prev == nullptr) { // insert at start
-            m->next = list;
-            list = m;
-        } else { // insert in the middle
-            n_prev->next = m;
-            m->next = n;
-        }
-        return list;
+            return;
+        } // cmp > 0, insert at n.
+
+        ConfigPairNode m = ConfigPairNode(conflict_config, lane_start_config);
+        this->emplace(n, m);
+        return;
     }
 
-    // n is nullptr. insert at the end.
-    n_prev->next = config_pair_node_create(conflict_config, lane_start_config);
-    return list;
+    this->push_back(ConfigPairNode(conflict_config, lane_start_config));
 }
 
-static void
-config_pair_node_dump(ConfigPairNode* n)
+void
+ConfigPairNode::dump() const noexcept
 {
-    std::cout << "(" << n->start->owner->state_no << "." << n->start->ruleID
-              << " -> " << n->end->owner->state_no << "." << n->end->ruleID
-              << ")";
+    std::cout << "(" << this->start->owner->state_no << "."
+              << this->start->ruleID << " -> " << this->end->owner->state_no
+              << "." << this->end->ruleID << ")";
 
-    if (n->start->owner->PASS_THRU == 1u) {
+    if (this->start->owner->PASS_THRU == 1u) {
         std::cout << " PASS_THRU. ";
     }
 }
 
 void
-ConfigPairNode::list_dump(ConfigPairList list)
+ConfigPairList::dump() const noexcept
 {
     std::cout << "--ConfigPairList--" << std::endl;
-    for (ConfigPairNode* n = list; n != nullptr; n = n->next) {
-        config_pair_node_dump(n);
+    for (const auto& n : *this) {
+        n.dump();
         std::cout << std::endl;
     }
 }
 
-/*
- * Note that more than one LANE_END configurations could be found.
- */
+/// Note that more than one LANE_END configurations could be found.
 auto
-ConfigPairNode::list_find(ConfigPairList list,
-                          Configuration* conflict_config) noexcept
-  -> ConfigPairNode*
+ConfigPairList::find(Configuration* conflict_config) noexcept
+  -> ConfigPairList::iterator
 {
-    for (ConfigPairNode* n = list; n != nullptr; n = n->next) {
+    for (auto n = this->begin(); n != this->end(); n++) {
         if (n->end == conflict_config) {
             return n;
         }
@@ -196,18 +151,7 @@ ConfigPairNode::list_find(ConfigPairList list,
     if constexpr (DEBUG_EDGE_PUSHING) {
         std::cout << "not found" << std::endl;
     }
-    return nullptr;
-}
-
-void
-ConfigPairNode::list_destroy(ConfigPairList list) noexcept
-{
-    ConfigPairNode* n = list;
-    while (n != nullptr) {
-        ConfigPairNode* tmp = n;
-        n = n->next;
-        config_pair_node_destroy(tmp);
-    }
+    return this->end();
 }
 
 //////////////////////////////////////////////////////////////////
@@ -267,8 +211,8 @@ LRkPT::dump() const noexcept
     for (const LRkPTRow* r = this->rows; r != nullptr; r = r->next) {
         std::cout << "[" << r->state << ", " << r->token->snode->symbol << "] ";
         for (size_t i = 0; i < ParsingTblColHdr.size(); i++) {
-            ConfigPairNode* n = r->row[i];
-            if (n == nullptr) {
+            const std::optional<ConfigPairNode>& n = r->row.at(i);
+            if (!n.has_value()) {
                 std::cout << "0 ";
             } else {
                 Configuration* c = n->end; /// start;
@@ -284,9 +228,7 @@ LRkPT::dump() const noexcept
     std::cout << std::endl;
 }
 
-/*
- * Same as lrk_pt_dump() but write a file.
- */
+/// Same as lrk_pt_dump() but write a file.
 void
 lrk_pt_dump_file(const LRkPT* t, std::ofstream& fp)
 {
@@ -304,8 +246,8 @@ lrk_pt_dump_file(const LRkPT* t, std::ofstream& fp)
     for (const LRkPTRow* r = t->rows; r != nullptr; r = r->next) {
         fp << "[" << r->state << ", " << r->token->snode->symbol << "] ";
         for (size_t i = 0; i < ParsingTblColHdr.size(); i++) {
-            const ConfigPairNode* n = r->row[i];
-            if (n == nullptr) {
+            const std::optional<ConfigPairNode>& n = r->row.at(i);
+            if (!n.has_value()) {
                 fp << "0 ";
             } else {
                 const Configuration* c = n->end; /// start;
@@ -368,9 +310,8 @@ lrk_pt_add_row(LRkPT* t,
     r->state = state;
     r->token = std::make_shared<SymbolNode>(token);
 
-    r->row = new ConfigPairNode*[ParsingTblColHdr.size()];
     for (size_t i = 0; i < ParsingTblColHdr.size(); i++) {
-        r->row[i] = nullptr; // initialize to nullptr.
+        r->row.emplace_back(std::nullopt); // initialize to nullopt.
     }
 
     r->next = nullptr;
@@ -392,28 +333,26 @@ auto
 LRkPT::get_entry(StateHandle state,
                  std::shared_ptr<SymbolTableNode> token,
                  const std::shared_ptr<const SymbolTableNode> col_token,
-                 bool* exist) noexcept -> ConfigPairNode*
+                 bool* exist) noexcept -> std::optional<ConfigPairNode>
 {
     bool found = false;
     *exist = false;
     LRkPTRow* r = this->find(state, token, &found);
     if (found == false)
-        return nullptr; // row not exist in t.
+        return std::nullopt; // row not exist in t.
 
     *exist = true; // this entry exists.
     int index = get_col(*col_token);
 
-    return r->row[index];
+    return r->row.at(index);
 }
 
-/*
- * For row on (state, token), there is a reduce action for symbol s.
- * New entries are inserted in INC order of state, then token.
- *
- * ruleID can be accessed as c->ruleID.
- *
- * Return: true is confilct occurs, false otherwise.
- */
+/// For row on (state, token), there is a reduce action for symbol s.
+/// New entries are inserted in INC order of state, then token.
+///
+/// ruleID can be accessed as c->ruleID.
+///
+/// Return: true is confilct occurs, false otherwise.
 auto
 LRkPT::add_reduction(StateHandle state,
                      std::shared_ptr<SymbolTableNode> token,
@@ -430,9 +369,9 @@ LRkPT::add_reduction(StateHandle state,
 
     // now add the reduce action on token s.
     int index = get_col(*s);
-    const ConfigPairNode* n = r->row[index];
-    if (n == nullptr) {
-        r->row[index] = config_pair_node_create(c_tail, c);
+    const auto& n = r->row.at(index);
+    if (!n.has_value()) {
+        r->row.at(index) = ConfigPairNode(c_tail, c);
         return false;
     }
     const Configuration* prev_entry = n->end; /// start;
@@ -446,7 +385,7 @@ LRkPT::add_reduction(StateHandle state,
         std::cout << "row [" << r->state << ", " << r->token->snode->symbol
                   << "] r/r conflict: " << prev_entry->ruleID << ":"
                   << c->ruleID << std::endl;
-        r->row[index]->end =
+        r->row.at(index)->end =
           reinterpret_cast<Configuration*>(CONST_CONFLICT_SYMBOL);
     }
     return true;
@@ -462,7 +401,7 @@ LRkPT::add_reduction(StateHandle state,
 
 LRkPTArray::LRkPTArray() noexcept
 {
-    this->array = std::vector<LRkPT*>(10, nullptr);
+    this->array = std::vector<LRkPT*>(INIT_SIZE, nullptr);
 }
 
 /*
@@ -690,16 +629,15 @@ is_same_symbol_list(const SymbolList& a, const SymbolList& b) -> bool
     return false;
 }
 
-/// assumption: new_list != nullptr, t != nullptr.
+/// assumption: new_list is not empty.
 static auto
-lrk_thead_in_list(const List* t, const SymbolList& new_list) -> bool
+lrk_thead_in_list(const List& t, const SymbolList& new_list) -> bool
 {
-    if (t == nullptr || new_list.empty()) {
-        throw std::runtime_error(
-          "lrk_thead_in_list ERROR: t is nullptr or new_list is empty");
+    if (new_list.empty()) {
+        throw std::runtime_error("lrk_thead_in_list ERROR: new_list is empty");
     }
 
-    for (const auto& o : t->inner) {
+    for (const auto& o : t.inner) {
         if (is_same_symbol_list(new_list, o)) {
             return true;
         }
@@ -762,7 +700,7 @@ List::add_derivatives(const Grammar& grammar,
         // assumption: !new_list.empty(), t != nullptr.
         if (!new_list.empty()) {
             lrk_theads_truncate_list_by_k(new_list, k);
-            if (!lrk_thead_in_list(this, new_list)) {
+            if (!lrk_thead_in_list(*this, new_list)) {
                 this->insert_tail(new_list);
             }
         }
@@ -839,7 +777,7 @@ k_heads_are_t(const SymbolList& s, size_t k)
 }
 
 void
-List::lrk_theads_rm_theads(size_t k, List* t_heads)
+List::lrk_theads_rm_theads(size_t k, List& t_heads)
 {
     if (this->inner.empty())
         return;
@@ -852,11 +790,11 @@ List::lrk_theads_rm_theads(size_t k, List* t_heads)
             if (len < k) {
                 // k'-thead, where k' < k. do nothing
                 if (len == k - 1) {
-                    t_heads->insert_tail(*o);
+                    t_heads.insert_tail(*o);
                 }
             } else if (false == lrk_thead_in_list(t_heads, *o)) {
                 // k-thead.
-                t_heads->insert_tail(*o);
+                t_heads.insert_tail(*o);
             }
             // remove o.
             this->inner.erase(o);
@@ -890,7 +828,7 @@ lrk_theads(const Grammar& grammar, SymbolList& alpha, const size_t k)
         }
 
         t->lrk_theads_rm_nt(j);
-        t->lrk_theads_rm_theads(k, t_heads.get());
+        t->lrk_theads_rm_theads(k, *t_heads);
     }
 
     return t_heads;

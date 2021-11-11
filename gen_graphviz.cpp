@@ -205,13 +205,13 @@ gen_graphviz_input(const Grammar& grammar,
             if (!is_goal_symbol(grammar, n)) {
                 auto [action, state] = get_action(n->type, col, row);
                 /*std::cout  <<  action <<  state<< "\t"; */
-                if (action == 0) {
+                if (!action.has_value()) {
                     /* do nothing */
-                } else if (action == 'r') {
+                } else if (action == Action::Reduce) {
                     add_gv_node_to_list(r_list, state, n);
-                } else if (action == 's' || action == 'g') {
+                } else if (action == Action::Shift || action == Action::Goto) {
                     add_gv_node_to_list(s_list, state, n);
-                } else if (action == 'a') {
+                } else if (action == Action::Accept) {
                     fp_gviz << " " << row << " -> acc [ label = \""
                             << *n->symbol << "\" ];" << std::endl;
                 }
@@ -254,16 +254,17 @@ gen_graphviz_input2(const Grammar& grammar,
                 std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
                 if (!is_goal_symbol(grammar, n) && !is_parent_symbol(n)) {
                     auto [action, state] = get_action(n->type, col, row);
-                    if (action == 's' || action == 'g')
+                    if (action == Action::Shift || action == Action::Goto)
                         state = *get_actual_state(state);
                     /* yyprintf("%c%d\t", action, state); */
-                    if (action == 0) {
+                    if (!action.has_value()) {
                         /* do nothing */
-                    } else if (action == 'r') {
+                    } else if (action == Action::Reduce) {
                         add_gv_node_to_list(r_list, state, n);
-                    } else if (action == 's' || action == 'g') {
+                    } else if (action == Action::Shift ||
+                               action == Action::Goto) {
                         add_gv_node_to_list(s_list, state, n);
-                    } else if (action == 'a') {
+                    } else if (action == Action::Accept) {
                         fp_gviz << " " << row << " -> acc [ label = \""
                                 << *n->symbol << "\" ];" << std::endl;
                     }

@@ -36,9 +36,6 @@
 #include <memory>
 #include <optional>
 
-/** For (conflict_config, lane_end_config) pairs. */
-ConfigPairList lane_head_tail_pairs;
-
 inline void
 print_int(const int& object)
 {
@@ -56,10 +53,12 @@ print_symbol_list(const SymbolList& object)
 }
 
 static auto
-get_start_config_from_tail(Configuration* c) -> Configuration*
+get_start_config_from_tail(Configuration* c,
+                           ConfigPairList& lane_head_tail_pairs)
+  -> Configuration*
 {
-    ConfigPairNode* n = ConfigPairNode::list_find(lane_head_tail_pairs, c);
-    if (nullptr == n)
+    auto n = lane_head_tail_pairs.find(c);
+    if (n == lane_head_tail_pairs.end())
         return nullptr;
     return n->start;
 }
@@ -105,8 +104,9 @@ insert_lrk_pt(LRkPTArray& lrk_pt_array,
     }
 
     for (const SymbolNode& token : token_list) {
-        ConfigPairNode* c0 = pt->get_entry(state_no, token.snode, col, &exist);
-        if (exist == false || c0 == nullptr) { // no conflict.
+        std::optional<ConfigPairNode> c0 =
+          pt->get_entry(state_no, token.snode, col, &exist);
+        if (exist == false || !c0.has_value()) { // no conflict.
             pt->add_reduction(state_no, token.snode, col, c, c_tail);
         } else { // exist is true, and c0 != nullptr.
             SymbolList list;
@@ -126,23 +126,23 @@ insert_lrk_pt(LRkPTArray& lrk_pt_array,
 }
 
 void
-LaneTracing::lrk_config_lane_tracing(Configuration* c) noexcept
+LaneTracing::lrk_config_lane_tracing(Configuration& c) noexcept
 {
     this->edge_pushing_context_generated.clear();
     this->in_edge_pushing_lane_tracing = true;
-    this->lane_tracing_reduction(c);
+    this->lane_tracing_reduction(&c);
 
     // pretend that c is a reduce configuration.
-    c->LANE_END = 0;
-    this->cur_red_config = c;
+    c.LANE_END = 0;
+    this->cur_red_config = &c;
 
     // get LANE_END configs and add to lane_head_tail_pairs list.
-    this->trace_back_lrk(c);
+    this->trace_back_lrk(&c);
 
     // clear the LANE_CON flag of configurations on conflicting lanes.
     trace_back_lrk_clear(c);
 
-    c->LANE_END = 1; // recover the value of c->LANE_END.
+    c.LANE_END = 1; // recover the value of c->LANE_END.
     // note that the value of cur_red_config does not need recovery.
 }
 
@@ -179,7 +179,7 @@ get_config_conflict_context(Configuration* c,
 static void
 fill_set_c2(SymbolList edge_pushing_context_generated,
             LRkPTArray& lrk_pt_array,
-            ConfigPairNode* n,
+            ConfigPairNode& n,
             const Configuration* c,
             Configuration* c_tail,
             const int k1,
@@ -188,13 +188,13 @@ fill_set_c2(SymbolList edge_pushing_context_generated,
             const CfgCtxt* cc)
 {
     // n->start is the next level lane head.
-    n->start->z = c->z + k1 - 1;
-    std::cout << "next level lane head: " << n->start->owner->state_no << "."
-              << n->start->ruleID << ". z = " << c->z << " + " << k1
-              << " - 1 = " << n->start->z << std::endl;
+    n.start->z = c->z + k1 - 1;
+    std::cout << "next level lane head: " << n.start->owner->state_no << "."
+              << n.start->ruleID << ". z = " << c->z << " + " << k1
+              << " - 1 = " << n.start->z << std::endl;
     for (const auto& sn : edge_pushing_context_generated) {
         insert_lrk_pt(
-          lrk_pt_array, state_no, cc->ctxt, sn.snode, n->start, c_tail, set_c2);
+          lrk_pt_array, state_no, cc->ctxt, sn.snode, n.start, c_tail, set_c2);
     }
 }
 
@@ -223,7 +223,7 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, StateHandle state_no)
             // check if this final config's context contains conflict symbol,
             // if so add it to set_c, together with the conflict symbol(s).
             cc = std::make_shared<CfgCtxt>(
-              get_start_config_from_tail(c),
+              get_start_config_from_tail(c, this->lane_head_tail_pairs),
               get_config_conflict_context(c, this->new_states.states_new_array),
               c);
             c->z = 0;
@@ -269,17 +269,17 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, StateHandle state_no)
                                   c_tail,
                                   set_c2);
                 } else if (x_len == k1 - 1) {
-                    ConfigPairNode* n =
-                      ConfigPairNode::list_find(lane_head_tail_pairs, c);
-                    if (n != nullptr) { // found in cache.
+                    auto n = this->lane_head_tail_pairs.find(c);
+                    if (n !=
+                        this->lane_head_tail_pairs.end()) { // found in cache.
                         std::cout << "found in cache" << std::endl;
                         // this list is in INC order of c.
-                        for (; n != nullptr; n = n->next) {
+                        for (; n != this->lane_head_tail_pairs.end(); n++) {
                             if (c != n->end)
                                 break;
                             fill_set_c2(this->edge_pushing_context_generated,
                                         lrk_pt_array,
-                                        n,
+                                        *n,
                                         c,
                                         c_tail,
                                         k1,
@@ -288,13 +288,10 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, StateHandle state_no)
                                         cc.get());
                         }
                     } else {
-                        ConfigPairNode* tmp =
-                          lane_head_tail_pairs; // store the old list.
-                        lane_head_tail_pairs = nullptr;
-                        this->lrk_config_lane_tracing(c);
-                        for (ConfigPairNode* n = lane_head_tail_pairs;
-                             n != nullptr;
-                             n = n->next) {
+                        ConfigPairList tmp{};
+                        std::swap(tmp, this->lane_head_tail_pairs);
+                        this->lrk_config_lane_tracing(*c);
+                        for (auto& n : this->lane_head_tail_pairs) {
                             fill_set_c2(this->edge_pushing_context_generated,
                                         lrk_pt_array,
                                         n,
@@ -306,12 +303,10 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, StateHandle state_no)
                                         cc.get());
                         }
                         // now combine the two list.
-                        if (nullptr == lane_head_tail_pairs) {
-                            lane_head_tail_pairs = tmp;
+                        if (this->lane_head_tail_pairs.empty()) {
+                            this->lane_head_tail_pairs = tmp;
                         } else {
-                            lane_head_tail_pairs = ConfigPairNode::list_combine(
-                              lane_head_tail_pairs, tmp);
-                            ConfigPairNode::list_destroy(tmp);
+                            this->lane_head_tail_pairs.combine(tmp);
                         }
                     }
                 }
@@ -386,7 +381,7 @@ LaneTracing::lane_tracing_lrk() -> std::optional<LRkPTArray>
 
     std::cout << "\n------------- lane_tracing_LR_k ------------- "
               << "lane head/tail pairs:" << std::endl;
-    ConfigPairNode::list_dump(lane_head_tail_pairs);
+    this->lane_head_tail_pairs.dump();
 
     for (const StateHandle state_no : states_inadequate->states) {
         size_t ct_rr = this->new_states.states_new_array[state_no].rr_count;
