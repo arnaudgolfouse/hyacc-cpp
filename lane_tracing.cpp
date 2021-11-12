@@ -632,9 +632,7 @@ clone_state(const Grammar& grammar, const State& s) -> std::shared_ptr<State>
     return t;
 }
 
-/*
- * In the successor list of src_state, replace s_old with s_new.
- */
+/// In the successor list of src_state, replace s_old with s_new.
 static void
 replace_successor(std::shared_ptr<State> src_state,
                   std::shared_ptr<State> s_new,
@@ -1309,17 +1307,17 @@ write_originator_list(OriginatorList* o)
 
 /// Add transitor to c's transitor list if it does not exist yet.
 static auto
-insert_transitor_list(Configuration& c, Configuration* transitor) -> bool
+insert_transitor_list(Configuration& c, Configuration& transitor) -> bool
 {
-    if (&c == transitor)
+    if (&c == &transitor)
         return false;
 
     for (const ConfigurationNode* item : c.transitors.list) {
-        if (transitor == item)
+        if (&transitor == item)
             return false; // already exists.
     }
 
-    c.transitors.list.push_back(transitor);
+    c.transitors.list.push_back(&transitor);
     return true;
 }
 
@@ -1490,9 +1488,7 @@ LaneTracing::phase1()
     // next will check resolved conflicts.
 }
 
-/*
- * called by update_action_table().
- */
+/// Called by update_action_table().
 static auto
 find_successor_state_no(const StateHandle state_no,
                         const StateArray& states_new_array,
@@ -1514,9 +1510,7 @@ find_successor_state_no(const StateHandle state_no,
     return 0;
 }
 
-/*
- * Clear a parsing table row where lookahead is terminal.
- */
+/// Clear a parsing table row where lookahead is terminal.
 inline void
 clear_state_terminal_transitions(const Grammar& grammar, StateHandle state_no)
 {
@@ -1528,26 +1522,22 @@ clear_state_terminal_transitions(const Grammar& grammar, StateHandle state_no)
     }
 }
 
-/*
- * clear all the conflicts from states_new_array->conflict_list.
- */
+/// Clear all the conflicts from states_new_array->conflict_list.
 static void
 clear_state_conflicts(StateHandle state_no, StateArray& states_new_array)
 {
     states_new_array[state_no].conflict = nullptr;
 }
 
-/*
- * Algorithm:
- * resolve_conflict_2(State S) {
- *  clear the parsing table row for S where lookahead is terminal.
- *  clear all the conflicts associated with S.
- *
- *  foreach config c in S which is an x-transition or reduce {
- *    insert_action(c) to parsing table. Any conflicts will be recorded.
- *  }
- * }
- */
+/// Algorithm:
+/// resolve_conflict_2(State S) {
+///  clear the parsing table row for S where lookahead is terminal.
+///  clear all the conflicts associated with S.
+///
+///  foreach config c in S which is an x-transition or reduce {
+///    insert_action(c) to parsing table. Any conflicts will be recorded.
+///  }
+/// }
 void
 LaneTracing::resolve_lalr1_conflicts()
 {
@@ -1672,9 +1662,7 @@ LaneTracing::gpm(std::shared_ptr<State> new_state)
               << this->new_states.states_new->state_count << std::endl;
 }
 
-/*
- * Adapted from transition() in y.c.
- */
+/// Adapted from transition() in y.c.
 static auto
 get_state_successors(const Grammar& grammar, const State& s) -> StateCollection*
 {
@@ -1716,10 +1704,8 @@ get_state_successors(const Grammar& grammar, const State& s) -> StateCollection*
     return coll;
 }
 
-/*
- * Given the trans_symbol, find the index of the
- * successor of s that has this trans_symbol.
- */
+/// Given the trans_symbol, find the index of the
+/// successor of s that has this trans_symbol.
 static auto
 get_successor_index(const State& s,
                     const std::shared_ptr<const SymbolTableNode> trans_symbol)
@@ -1737,15 +1723,13 @@ get_successor_index(const State& s,
     return std::nullopt; // this should NEVER happen
 }
 
-/*
- * Update S's successor Y0 to be Y:
- *   add Y as a new state,
- *   update the parsing table, and the successor link of S
- *   from Y0 to Y.
- * @Input: S is the source state of Y.
- * @Return - true if a new state is really added.
- *          false if an existing state is found.
- */
+/// Update S's successor Y0 to be Y:
+///   add Y as a new state,
+///   update the parsing table, and the successor link of S
+///   from Y0 to Y.
+/// @Input: S is the source state of Y.
+/// @Return - true if a new state is really added.
+///          false if an existing state is found.
 auto
 LaneTracing::add_split_state(std::shared_ptr<State> y,
                              State& s,
@@ -1822,9 +1806,7 @@ regenerate_state_context(State& s, const State& t) noexcept(false)
     }
 }
 
-/*
- * Combine the contexts from T to S. No propagation here.
- */
+/// Combine the contexts from T to S. No propagation here.
 static auto
 combine_state_context(State& s_dest, const State& s_src) -> bool
 {
@@ -1838,11 +1820,9 @@ combine_state_context(State& s_dest, const State& s_src) -> bool
     return is_changed;
 }
 
-/*
- * update reduce actions in parsing table for S.
- * note that transition actions are handled by addSplitState()
- * or keep unchanged.
- */
+/// update reduce actions in parsing table for S.
+/// note that transition actions are handled by addSplitState()
+/// or keep unchanged.
 void
 LaneTracing::update_state_reduce_action(State& s)
 {
@@ -1875,6 +1855,7 @@ LaneTracing::update_state_reduce_action(State& s)
 /// Let Q be a queue containing the start states.
 /// Associate these start state's contexts to be empty sets.
 ///
+/// ```text
 /// while (Q is not empty) {
 ///  s <- next state in Q;
 ///  coll <- regenerate successors of s;
@@ -1897,6 +1878,7 @@ LaneTracing::update_state_reduce_action(State& s)
 ///
 /// // now Q is empty.
 /// GPM() on the new states.
+/// ```
 /// ==END==
 void
 LaneTracing::phase2_regeneration(LaneHead& lh_list)
@@ -2106,16 +2088,16 @@ LaneTracing::trace_back(Configuration& c, LaneHead& lh_list) noexcept(false)
 /// Purpose: get LANE_END configurations and add to
 /// lane_head_tail_pairs list.
 void
-LaneTracing::trace_back_lrk(Configuration* c)
+LaneTracing::trace_back_lrk(Configuration& c)
 {
-    c->LANE_CON = 1; // set as config on conflicting lane.
+    c.LANE_CON = 1; // set as config on conflicting lane.
 
-    if (c->LANE_END == 1u) {
+    if (c.LANE_END == 1u) {
         if constexpr (DEBUG_PHASE_2) {
-            std::cout << "END config FOUND: " << c->owner->state_no << "."
-                      << c->ruleID << std::endl
+            std::cout << "END config FOUND: " << c.owner->state_no << "."
+                      << c.ruleID << std::endl
                       << "\n";
-            std::cout << "=ADD another head state: " << c->owner->state_no
+            std::cout << "=ADD another head state: " << c.owner->state_no
                       << std::endl;
         }
 
@@ -2123,29 +2105,30 @@ LaneTracing::trace_back_lrk(Configuration* c)
             std::cout << "config_red_config: "
                       << this->cur_red_config->owner->state_no << "."
                       << this->cur_red_config->ruleID
-                      << ", LANE_END: " << c->owner->state_no << "."
-                      << c->ruleID << std::endl;
+                      << ", LANE_END: " << c.owner->state_no << "." << c.ruleID
+                      << std::endl;
         }
         // Don't use goal production. As it is the augmented rule, and
         // it generates no context at all.
-        if (!(c->owner->state_no == 0 && c->ruleID == 0))
-            this->lane_head_tail_pairs.insert(this->cur_red_config, c);
+        if (!(c.owner->state_no == 0 && c.ruleID == 0))
+            this->lane_head_tail_pairs.insert(this->cur_red_config, &c);
 
         return;
     }
 
-    for (Configuration* o : c->originators.list) {
-        if (o->LANE_CON == 0u) {
+    for (Configuration* o_ptr : c.originators.list) {
+        Configuration& o = *o_ptr;
+        if (o.LANE_CON == 0u) {
             if constexpr (DEBUG_PHASE_2) {
-                std::cout << "config on lane: " << o->owner->state_no << "."
-                          << o->ruleID << std::endl;
+                std::cout << "config on lane: " << o.owner->state_no << "."
+                          << o.ruleID << std::endl;
             }
 
             this->trace_back_lrk(o);
         } else {
             if constexpr (DEBUG_PHASE_2) {
-                std::cout << "already traced: " << o->owner->state_no << "."
-                          << o->ruleID << std::endl;
+                std::cout << "already traced: " << o.owner->state_no << "."
+                          << o.ruleID << std::endl;
             }
         }
     }
@@ -2709,7 +2692,7 @@ get_transitors(const Grammar& grammar, Configuration* c0, Configuration& c)
                               << t.ruleID << "." << t.marker << "]"
                               << std::endl;
                 }
-                insert_transitor_list(c, &t);
+                insert_transitor_list(c, t);
                 get_originators(grammar, c0, t);
             }
         }

@@ -18,7 +18,7 @@
  */
 
 /*
- * graphviz.c
+ * graphviz.cpp
  *
  * To produce an input file for graphviz.
  *
@@ -59,9 +59,7 @@ find_gv_node_in_list(GvNodeList& list, StateHandle target_state) -> GvNode*
     return nullptr;
 }
 
-/*
- * find label in label list.
- */
+/// Find label in label list.
 static void
 insert_label_to_list(GvNode* n, std::shared_ptr<SymbolTableNode> snode)
 {
@@ -80,12 +78,10 @@ insert_label_to_list(GvNode* n, std::shared_ptr<SymbolTableNode> snode)
     }
 }
 
-/*
- * If exists a node n in list, s.t.
- *   n->target_state == targetState, then add snode to n->label_list.
- * else
- *   create a new node and insert it to list.
- */
+/// If exists a node n in list, s.t.
+///   n->target_state == targetState, then add snode to n->label_list.
+/// else
+///   create a new node and insert it to list.
 static void
 add_gv_node_to_list(GvNodeList& list,
                     const StateHandle target_state,
@@ -179,10 +175,8 @@ update_r_list(GvNodeList& r_list,
     }
 }
 
-/*
- * Has the same logic as printParsingTable() in y.c.
- * For O0, O1.
- */
+/// Has the same logic as printParsingTable() in y.c.
+/// For O0, O1.
 void
 gen_graphviz_input(const Grammar& grammar,
                    const std::string& y_gviz,
@@ -204,9 +198,9 @@ gen_graphviz_input(const Grammar& grammar,
             std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
             if (!is_goal_symbol(grammar, n)) {
                 auto [action, state] = get_action(n->type, col, row);
-                /*std::cout  <<  action <<  state<< "\t"; */
+                // std::cout  <<  action <<  state<< "\t";
                 if (!action.has_value()) {
-                    /* do nothing */
+                    // do nothing
                 } else if (action == Action::Reduce) {
                     add_gv_node_to_list(r_list, state, n);
                 } else if (action == Action::Shift || action == Action::Goto) {
@@ -215,8 +209,8 @@ gen_graphviz_input(const Grammar& grammar,
                     fp_gviz << " " << row << " -> acc [ label = \""
                             << *n->symbol << "\" ];" << std::endl;
                 }
-            } // end of if
-        }     // end of for.
+            }
+        }
 
         update_r_list(r_list, s_list, options);
 
@@ -228,10 +222,8 @@ gen_graphviz_input(const Grammar& grammar,
     fp_gviz.close();
 }
 
-/*
- * Has the same logic as printCondensedFinalParsingTable() in y.c.
- * For O2, O3.
- */
+/// Has the same logic as printCondensedFinalParsingTable() in y.c.
+/// For O2, O3.
 void
 gen_graphviz_input2(const Grammar& grammar,
                     const std::string& y_gviz,
@@ -256,9 +248,9 @@ gen_graphviz_input2(const Grammar& grammar,
                     auto [action, state] = get_action(n->type, col, row);
                     if (action == Action::Shift || action == Action::Goto)
                         state = *get_actual_state(state);
-                    /* yyprintf("%c%d\t", action, state); */
+                    // yyprintf("%c%d\t", action, state);
                     if (!action.has_value()) {
-                        /* do nothing */
+                        // do nothing
                     } else if (action == Action::Reduce) {
                         add_gv_node_to_list(r_list, state, n);
                     } else if (action == Action::Shift ||

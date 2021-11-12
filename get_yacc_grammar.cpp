@@ -18,7 +18,7 @@
  */
 
 /*
- * get_yacc_grammar.c
+ * get_yacc_grammar.cpp
  *
  * Parse Yacc input file, extract the grammar and feed to y.c.
  *
@@ -56,13 +56,11 @@ const std::string_view STR_END = "$end";
 const std::string_view STR_EMPTY = "";
 const std::string_view STR_ERROR = "error"; // reserved word.
 
-/*
- * %prec is in section2. See output_nonterminal() function
- * in gen_compiler.c. To be implemented.
- *
- * In section 1, %left, %right, %union, %nonassoc,
- * %type, %expect, %pure_passer are to be implemented.
- */
+/// %prec is in section2. See output_nonterminal() function
+/// in gen_compiler.c. To be implemented.
+///
+/// In section 1, %left, %right, %union, %nonassoc,
+/// %type, %expect, %pure_passer are to be implemented.
 enum yacc_section1_state
 {
     IS_NONE,
@@ -96,16 +94,14 @@ add_rhs_symbol(Grammar& grammar, std::shared_ptr<SymbolTableNode> symbol)
     p.nRHS.push_back(s);
 }
 
-/*
- * case-insensitive string compare.
- * Return:
- *   - 1 if a > b
- *   - -1 if a < b
- *   - 0 if a == b
- *
- * Note: strcasecmp() is not an ANSI C function.
- * So use my own to be ANSI C compliant.
- */
+/// case-insensitive string compare.
+/// Return:
+///   - 1 if a > b
+///   - -1 if a < b
+///   - 0 if a == b
+///
+/// Note: strcasecmp() is not an ANSI C function.
+/// So use my own to be ANSI C compliant.
 static auto
 y_strcasecmp(const std::string_view a, const std::string_view b) -> int
 {
@@ -132,10 +128,8 @@ y_strcasecmp(const std::string_view a, const std::string_view b) -> int
     return 0;
 }
 
-/*
- *  A valid identifier: [alph|_](alph|digit|_)*.
- *  where alph is [a-zA-Z], digit is [0-9].
- */
+///  A valid identifier: [alph|_](alph|digit|_)*.
+///  where alph is [a-zA-Z], digit is [0-9].
 static auto
 validate_identifier(const std::string_view s) -> bool
 {
@@ -153,9 +147,7 @@ validate_identifier(const std::string_view s) -> bool
     return true;
 }
 
-/*
- * Assumption: n is a terminal, and n->TP != nullptr.
- */
+/// Assumption: n is a terminal, and n->TP != nullptr.
 static void
 get_terminal_precedence(SymbolTableNode& n,
                         yacc_section1_state state,
@@ -192,13 +184,11 @@ get_symbol(const symbol_type t, GetYaccGrammarOutput& output)
     return n;
 }
 
-/*
- * Used when process section 1 of the grammar file.
- *
- * The token added here is a terminal.
- * These are declared in the first section of yacc input file.
- * empty string is not allowed.
- */
+/// Used when process section 1 of the grammar file.
+///
+/// The token added here is a terminal.
+/// These are declared in the first section of yacc input file.
+/// empty string is not allowed.
 static void
 output_terminal(yacc_section1_state state,
                 yacc_section1_state prev_state,
@@ -222,13 +212,13 @@ output_terminal(yacc_section1_state state,
     auto n = get_symbol(symbol_type::NEITHER, output);
 
     switch (n->type) {
-        case symbol_type::TERMINAL: /* already entered */
+        case symbol_type::TERMINAL: // already entered
             must_add_token = false;
             if (!n->token_type.has_value() && token_type.has_value())
                 n->token_type = token_type;
             break;
 
-        case symbol_type::NEITHER: /* new symbol */
+        case symbol_type::NEITHER: // new symbol
             n->type = symbol_type::TERMINAL;
             n->token_type = token_type;
             must_add_token = true;
@@ -283,12 +273,10 @@ get_start_symbol(const std::optional<std::string> token_type,
     return start_symbol;
 }
 
-/*
- * If more than one %expect value, use the first one.
- *
- * Note that atoi() function returns 0 if error occurs,
- * like when the ysymbol is a string "abc" and not a number.
- */
+/// If more than one %expect value, use the first one.
+///
+/// Note that atoi() function returns 0 if error occurs,
+/// like when the ysymbol is a string "abc" and not a number.
 static void
 get_expect_sr_conflict(GetYaccGrammarOutput& output,
                        uint32_t expected_sr_conflict)
@@ -617,9 +605,7 @@ GetYaccGrammarOutput::process_yacc_file_input_section1(
 // Functions to add rules to grammar. Start.
 /////////////////////////////////////////////////////////////
 
-/*
- * Used by function createNewRule().
- */
+/// Used by function createNewRule().
 static auto
 create_empty_production() -> Production*
 {
@@ -642,12 +628,10 @@ create_new_rule(Grammar& grammar) -> Production*&
     return grammar.rules.back();
 }
 
-/*
- * Add a rule for mid-production action.
- *
- * @return: the new created non-terminal, which will
- *          be inserted to the position of the mid-production action.
- */
+/// Add a rule for mid-production action.
+///
+/// @return: the new created non-terminal, which will
+///          be inserted to the position of the mid-production action.
 static void
 insert_mid_prod_rule(Grammar& grammar, int ct)
 {
@@ -684,9 +668,7 @@ add_lhs_symbol(Grammar& grammar, std::shared_ptr<SymbolTableNode> symbol)
     p->nLHS = std::make_shared<SymbolNode>(symbol);
 }
 
-/*
- * Assumption: symbol is the one after %prec in the RHS of p.
- */
+/// Assumption: symbol is the one after %prec in the RHS of p.
 static void
 get_rhs_prec_symbol(const Grammar& grammar,
                     const std::string_view symbol,
@@ -803,13 +785,11 @@ get_vanish_symbols(Grammar& grammar)
     }
 }
 
-/*
- * Given a grammar's rules, get non-terminals.
- *
- * Assumption: all non-terminals are used as LHS of
- * some rules. If not, such invalid non-terminal will
- * be reported after getSymbolRuleIDList().
- */
+/// Given a grammar's rules, get non-terminals.
+///
+/// Assumption: all non-terminals are used as LHS of
+/// some rules. If not, such invalid non-terminal will
+/// be reported after getSymbolRuleIDList().
 static void
 get_non_terminals(Grammar& grammar)
 {
@@ -850,11 +830,9 @@ get_non_terminals(Grammar& grammar)
     // if (has_error ) exit(1);
 }
 
-/*
- * Assumption:
- * This function is called after getNonTerminals().
- * empty string is not included as terminal.
- */
+/// Assumption:
+/// This function is called after getNonTerminals().
+/// empty string is not included as terminal.
 static void
 get_terminals(Grammar& grammar)
 {
@@ -880,9 +858,7 @@ get_terminals(Grammar& grammar)
     }
 }
 
-/*
- * ref: page 38. The C programming language.
- */
+/// ref: page 38. The C programming language.
 static auto
 get_escape_char(const char c) -> char
 {
@@ -926,9 +902,7 @@ get_escape_char(const char c) -> char
     }
 }
 
-/*
- * Used by get_tokens_value() only.
- */
+/// Used by get_tokens_value() only.
 static auto
 get_token_value(const std::string& s, int* index) -> int
 {
@@ -953,32 +927,30 @@ get_token_value(const std::string& s, int* index) -> int
     return val;
 }
 
-/*
- * This function gets the values of all terminals,
- * Including those after %prec in the rule section,
- * and including STR_END, STR_ERROR.
- *
- * Symbol can be:
- *   - a token, value is 257 + index in token list (in un-quoted ones).
- *   - "error", value is 256.
- *   - a char or escaped char, value is its ascii code.
- *   - STR_END, value is 0.
- *   - a non-terminal symbol, value is -1 * index in non-terminal list.
- *
- * The values of non-terminals are calculated in
- * getNonTerminals().
- *
- * STR_EMPTY has no value. STR_ACCEPT is a non-terminal,
- * whose value is default to 0. But the value of these
- * two are never used, so doesn't matter.
- *
- * The values of tokens are used for y.tab.h, for yytoks[]
- * and for yytbltok[] in y.tab.c.
- *
- * Note that the terminal list is a subset of tokens list.
- * The tokens list can include those after %prec in the
- * rule section, which terminal list does not include.
- */
+/// This function gets the values of all terminals,
+/// Including those after %prec in the rule section,
+/// and including STR_END, STR_ERROR.
+///
+/// Symbol can be:
+///   - a token, value is 257 + index in token list (in un-quoted ones).
+///   - "error", value is 256.
+///   - a char or escaped char, value is its ascii code.
+///   - STR_END, value is 0.
+///   - a non-terminal symbol, value is -1 * index in non-terminal list.
+///
+/// The values of non-terminals are calculated in
+/// getNonTerminals().
+///
+/// STR_EMPTY has no value. STR_ACCEPT is a non-terminal,
+/// whose value is default to 0. But the value of these
+/// two are never used, so doesn't matter.
+///
+/// The values of tokens are used for y.tab.h, for yytoks[]
+/// and for yytbltok[] in y.tab.c.
+///
+/// Note that the terminal list is a subset of tokens list.
+/// The tokens list can include those after %prec in the
+/// rule section, which terminal list does not include.
 static void
 get_tokens_value(SymbolList& tokens)
 {
@@ -995,18 +967,16 @@ get_goal_symbol(Grammar& grammar)
       std::make_shared<SymbolNode>(grammar.rules.at(0)->nLHS->snode);
 }
 
-/*
- * Get the column index in the parsing table for
- * each symbol.
- * This makes it easy to find the address for a symbol
- * in the parsing table.
- *
- * This can be done when calling getNonTerminals() and
- * getTerminals(), but doing it here separately makes
- * it easy to check, debug and change.
- * Since there are not many symbols, this will take
- * only very little time.
- */
+/// Get the column index in the parsing table for
+/// each symbol.
+/// This makes it easy to find the address for a symbol
+/// in the parsing table.
+///
+/// This can be done when calling getNonTerminals() and
+/// getTerminals(), but doing it here separately makes
+/// it easy to check, debug and change.
+/// Since there are not many symbols, this will take
+/// only very little time.
 static void
 get_symbol_parsing_tbl_col(const Grammar& grammar)
 {
@@ -1026,11 +996,9 @@ get_symbol_parsing_tbl_col(const Grammar& grammar)
     }
 }
 
-/*
- *  Get the list of Parsing table column header symbols.
- *  This plus the get_symbol_parsing_tbl_col() function make it
- *  easy to refer between column number and column symbol.
- */
+/// Get the list of Parsing table column header symbols.
+/// This plus the get_symbol_parsing_tbl_col() function make it
+/// easy to refer between column number and column symbol.
 static void
 get_parsing_tbl_col_hdr(const Grammar& grammar)
 {
@@ -1049,13 +1017,11 @@ get_parsing_tbl_col_hdr(const Grammar& grammar)
     }
 }
 
-/*
- * For each non-terminal, get a list of indexes of rules
- * for which the non-terminal is the LHS.
- *
- * If a non-terminal is not the LHS of any rule,
- * it's an error and should be reported.
- */
+/// For each non-terminal, get a list of indexes of rules
+/// for which the non-terminal is the LHS.
+///
+/// If a non-terminal is not the LHS of any rule,
+/// it's an error and should be reported.
 static void
 get_symbol_rule_id_list(Grammar& grammar)
 {
@@ -1192,11 +1158,9 @@ GetYaccGrammarOutput::output_nonterminal(const YACC_STATE state,
     return n;
 }
 
-/*
- * Stores LHS of current rule.
- * To be used by the next rule with the same LHS in cases like:
- *   LHS : RHS1 | RHS2 ...
- */
+/// Stores LHS of current rule.
+/// To be used by the next rule with the same LHS in cases like:
+///   LHS : RHS1 | RHS2 ...
 inline auto
 get_cur_lhs(std::shared_ptr<SymbolTableNode> n, const Position position)
   -> std::shared_ptr<SymbolTableNode>
@@ -1389,8 +1353,8 @@ GetYaccGrammarOutput::process_yacc_file_input_section2(std::ifstream& fp)
                       is_prec,
                       yacc_sec2_state); // OUTPUT NEXT RHS SYMBOL. is terminal.
                 } else {
-                    /* if (isspace(c)) std::cout << "hit space here " <<
-                     * position.line<< " " <<  position.col << std::endl; */
+                    // if (isspace(c)) std::cout << "hit space here " <<
+                    // position.line<< " " <<  position.col << std::endl;
                     this->add_char_to_symbol(c);
                 }
                 break;
@@ -1452,12 +1416,10 @@ GetYaccGrammarOutput::process_yacc_file_input_section2(std::ifstream& fp)
     }
 }
 
-/*
- * If there is a "%start ..." in the declaration section,
- * copy the start symbol value to RHS of goal production.
- * Otherwise, use the LHS of the first user rule as the
- * RHS of goal production.
- */
+/// If there is a "%start ..." in the declaration section,
+/// copy the start symbol value to RHS of goal production.
+/// Otherwise, use the LHS of the first user rule as the
+/// RHS of goal production.
 static void
 get_goal_rule_rhs(const Grammar& grammar,
                   const std::shared_ptr<SymbolTableNode> start_symbol)
@@ -1474,13 +1436,11 @@ get_goal_rule_rhs(const Grammar& grammar,
     }
 }
 
-/*
- * This modification is to preserve those unit productions
- * that have associated code. In such case add a place holder
- * nonterminal to the end of each such unit production, to
- * convert them to non-unit productions. This place holder
- * nonterminal will reduce to empty string.
- */
+/// This modification is to preserve those unit productions
+/// that have associated code. In such case add a place holder
+/// nonterminal to the end of each such unit production, to
+/// convert them to non-unit productions. This place holder
+/// nonterminal will reduce to empty string.
 static void
 post_modification(Grammar& grammar)
 {
@@ -1537,12 +1497,10 @@ GetYaccGrammarOutput::GetYaccGrammarOutput(std::ofstream& fp_v)
     }
 }
 
-/*
- * The main function of this file.
- * Gets grammar from a yacc input file.
- *
- * Called by function main() in y.c.
- */
+/// The main function of this file.
+/// Gets grammar from a yacc input file.
+///
+/// Called by function main() in y.cpp.
 auto
 GetYaccGrammarOutput::get_yacc_grammar(const std::string& infile,
                                        std::ofstream& fp_v,

@@ -90,10 +90,8 @@ show_helpmsg_exit(const ErrorFlags error_flags)
     exit(0);
 }
 
-/*
- * Get output file name if -o or --outfile-name==
- * switches are used.
- */
+/// Get output file name if -o or --outfile-name==
+/// switches are used.
 static auto
 get_outfile_name(const std::string name) -> FileNames
 {
@@ -109,10 +107,8 @@ get_outfile_name(const std::string name) -> FileNames
     return files;
 }
 
-/*
- * Get output file name if -b or --file_prefix==
- * switches are used.
- */
+/// Get output file name if -b or --file_prefix==
+/// switches are used.
 static auto
 get_filename_prefix(std::string name) -> FileNames
 {
@@ -157,7 +153,7 @@ init_options(Options& options) -> FileNames
 
     options.use_yydebug = false;
     options.use_lines = true;
-    options.use_verbose = false; /* not implemented in code yet */
+    options.use_verbose = false; // not implemented in code yet
     FileNames files;
     files.y_tab_c = "y.tab.cpp";
     files.y_tab_h = "y.tab.hpp";
@@ -190,9 +186,7 @@ set_lr0(Options& options)
     options.use_lr0 = true;
 }
 
-/*
- * Use PGM to combine states in the end.
- */
+/// Use PGM to combine states in the end.
 void
 set_lane_tracing_pgm(Options& options)
 {
@@ -202,9 +196,7 @@ set_lane_tracing_pgm(Options& options)
     options.use_combine_compatible_states = true;
 }
 
-/*
- * Use the other (lane-based) method to combine states in the end.
- */
+/// Use the other (lane-based) method to combine states in the end.
 void
 set_lane_tracing_ltt(Options& options)
 {
@@ -214,9 +206,7 @@ set_lane_tracing_ltt(Options& options)
     options.use_combine_compatible_states = false;
 }
 
-/*
- * -P plus LR(k).
- */
+/// -P plus LR(k).
 void
 set_lrk(Options& options)
 {
@@ -242,7 +232,7 @@ get_single_letter_option(Options& options,
 
     // std::cout << "c = " <<  c << std::endl;
     switch (c) {
-        case 'b': /* file name prefix */
+        case 'b': // file name prefix
             if (argc_pt >= cmd_argc - 1) {
                 show_helpmsg_exit(ErrorFlags::NO_FILENAME_PREFIX);
             }
@@ -254,30 +244,30 @@ get_single_letter_option(Options& options,
         case 'C':
             options.preserve_unit_prod_with_code = true;
             break;
-        case 'd': /* define: create y.tab.h */
+        case 'd': // define: create y.tab.h
             options.use_header_file = true;
             break;
-        case 'g': /* create y.gviz */
+        case 'g': // create y.gviz
             options.use_graphviz = true;
             break;
         case 'h':
         case '?':
             show_helpmsg_exit(ErrorFlags::SHOW_HELP);
             break;
-        case 'l': /* no line directives in y.tab.cpp */
+        case 'l': // no line directives in y.tab.cpp
             options.use_lines = false;
             break;
-        case 'm':           /* show man page */
-            show_manpage(); /* in hyacc_path.cpp */
+        case 'm':           // show man page
+            show_manpage(); // in hyacc_path.cpp
             exit(0);
             break;
-        case 'o': /* output file name */
+        case 'o': // output file name
             if (argc_pt >= cmd_argc - 1) {
                 show_helpmsg_exit(ErrorFlags::NO_OUTFILE_NAME);
             }
             options.use_output_filename = true;
             break;
-        case 'O': /* optimization. */
+        case 'O': // optimization.
             if (s == end) {
                 show_helpmsg_exit(ErrorFlags::UNKNOWN_SWITCH_O);
             }
@@ -302,7 +292,7 @@ get_single_letter_option(Options& options,
                     options.use_remove_unit_production = true;
                     options.use_remove_repeated_states = false;
                     break;
-                case '3': /* use all optimizations */
+                case '3': // use all optimizations
                     options.use_combine_compatible_states = true;
                     options.use_remove_unit_production = true;
                     options.use_remove_repeated_states = true;
@@ -312,7 +302,7 @@ get_single_letter_option(Options& options,
                     break;
             }
             break;
-        // case 'p':        /* symbol name prefix */ // to be implemented.
+        // case 'p':        // symbol name prefix // to be implemented.
         //           break;
         case 'K':
             set_lrk(options);
@@ -329,17 +319,17 @@ get_single_letter_option(Options& options,
         case 'S':
             set_lr0(options);
             break;
-        case 't': /* debug: output y.parse */
+        case 't': // debug: output y.parse
             options.use_yydebug = true;
             break;
-        case 'v': /* verbose */
+        case 'v': // verbose
             options.use_verbose = true;
             break;
-        case 'V': /* show version information. */
+        case 'V': // show version information.
             print_version();
             exit(0);
             break;
-        case 'D': /* debug print options. */
+        case 'D': // debug print options.
             if (s == end) {
                 show_helpmsg_exit(ErrorFlags::UNKNOWN_SWITCH_D);
             }
@@ -411,10 +401,10 @@ get_single_letter_option(Options& options,
                     show_helpmsg_exit(ErrorFlags::UNKNOWN_SWITCH_D);
                     break;
             }
-            options.use_verbose = true; /* allow write to y.output */
+            options.use_verbose = true; // allow write to y.output
             break;
-        default:                           /* ignore other switches. */
-            if (!(c >= '0' && c <= '9')) { /* not a digit */
+        default:                           // ignore other switches.
+            if (!(c >= '0' && c <= '9')) { // not a digit
                 throw std::runtime_error(std::string("unknown switch ") + c);
             }
             break;
@@ -451,7 +441,7 @@ get_mnemonic_long_option(Options& options, const std::string& s)
     } else if (s == "--lrk") {
         set_lrk(options);
     } else if (s == "--man-page") { // -m
-        show_manpage();             /* in hyacc_path.cpp */
+        show_manpage();             // in hyacc_path.cpp
         exit(0);
         //} else if (strncmp(s, "--name-prefix==", 15) == 0) { // -p
         // to be implemented.
@@ -469,12 +459,10 @@ get_mnemonic_long_option(Options& options, const std::string& s)
     }
 }
 
-/*
- * Note:
- *   optimization 1: combine compatible states.
- *   optimization 2: remove unit productions after 1.
- *   optimization 3: further remove repeated states after 2.
- */
+/// Note:
+///   optimization 1: combine compatible states.
+///   optimization 2: remove unit productions after 1.
+///   optimization 3: further remove repeated states after 2.
 auto
 get_options(const std::span<const std::string_view> args,
             Options& options,

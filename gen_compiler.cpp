@@ -18,7 +18,7 @@
  */
 
 /*
- * gen_compiler.c
+ * gen_compiler.cpp
  *
  * Contains functions to generate a compiler.
  *
@@ -78,9 +78,7 @@ print_break(std::ofstream& fp)
     fp << "break;" << std::endl;
 }
 
-/*
- * Token - terminal symbols.
- */
+/// Token - terminal symbols.
 void
 write_tokens(const SymbolList& tokens)
 {
@@ -91,9 +89,7 @@ write_tokens(const SymbolList& tokens)
     }
 }
 
-/*
- *  Write all terminal tokens that are not quoted, and not "error".
- */
+///  Write all terminal tokens that are not quoted, and not "error".
 static void
 write_tokens_to_compiler_file(std::ofstream& fp,
                               std::ofstream& fp_h,
@@ -171,9 +167,7 @@ process_yacc_file_section1(std::ifstream& fp_yacc,
     return position;
 }
 
-/*
- * rewind to section 2.
- */
+/// rewind to section 2.
 static void
 goto_section2(std::ifstream& fp_yacc, uint32_t& n_line)
 {
@@ -192,10 +186,8 @@ goto_section2(std::ifstream& fp_yacc, uint32_t& n_line)
     }
 }
 
-/*
- * Pass section 2, go to section 3.
- * Presumption: finished section 1, entering section 2.
- */
+/// Pass section 2, go to section 3.
+/// Presumption: finished section 1, entering section 2.
 static void
 goto_section3(std::ifstream& fp_yacc, uint32_t& n_line)
 {
@@ -225,7 +217,7 @@ find_full_rule(const Grammar& grammar, int rule_count) -> Production*
         if ((rule = grammar.rules[full_rule]) && (node = rule->nLHS.get()) &&
             (sym = node->snode)) {
             if (sym->symbol->starts_with(
-                  "$$")) /* node symbol starting with $$ we continue */
+                  "$$")) // node symbol starting with $$ we continue
                 break;
         } else {
             throw std::runtime_error(
@@ -284,14 +276,12 @@ find_sym(const Production* rule, int dollar_number)
     return sym;
 }
 
-/*
- * Basically, this has the same structure as function
- *   processYaccFileInput_section2(int c)
- * in parsetYaccInput.c.
- *
- * The purpose here is to extract the code for semantic
- * actions of rules.
- */
+/// Basically, this has the same structure as function
+///   processYaccFileInput_section2(int c)
+/// in parsetYaccInput.c.
+///
+/// The purpose here is to extract the code for semantic
+/// actions of rules.
 static void
 process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
                            std::ifstream& fp_yacc,
@@ -572,12 +562,10 @@ process_yacc_file_section3(std::ifstream& fp_yacc, std::ofstream& fp)
     }
 }
 
-/*
- * This function will return the position of $A
- * to the end of yaccpar.
- * This is for the purpose of inserting code
- * associated with reductions.
- */
+/// This function will return the position of $A
+/// to the end of yaccpar.
+/// This is for the purpose of inserting code
+/// associated with reductions.
 void
 copy_yaccpar_file_1(std::ofstream& fp, const std::string& filename)
 {
@@ -627,11 +615,9 @@ copy_yaccpar_file_2(std::ofstream& fp, const std::string& filename)
 // Functions to print parsing table arrays. START.
 ///////////////////////////////////////////////////////
 
-/*
- * Returns the index of the given symbol in the
- * non-terminal array of the given grammar.
- * Used in gen_compiler.c.
- */
+/// Returns the index of the given symbol in the
+/// non-terminal array of the given grammar.
+/// Used in gen_compiler.c.
 static auto
 get_non_terminal_index(const Grammar& grammar,
                        std::shared_ptr<const SymbolTableNode> snode) -> int
@@ -645,13 +631,11 @@ get_non_terminal_index(const Grammar& grammar,
     return -1;
 }
 
-/*
- * yyr1[i] represents index of non-terminal symbol
- * on the LHS of reduction i, or a terminal symbol
- * if use unit-production-removal and in step 3
- * the LHS are replaced with leaf terminals in the
- * multi-rooted trees.
- */
+ /// yyr1[i] represents index of non-terminal symbol
+ /// on the LHS of reduction i, or a terminal symbol
+ /// if use unit-production-removal and in step 3
+ /// the LHS are replaced with leaf terminals in the
+ /// multi-rooted trees.
 void
 print_yyr1(std::ofstream& fp, const Grammar& grammar)
 {
@@ -749,9 +733,7 @@ print_yytoks(std::ofstream& fp, const SymbolList& tokens)
        << "};" << std::endl;
 }
 
-/*
- * Print reductions.
- */
+ /// Print reductions.
 void
 print_yyreds(std::ofstream& fp, const Grammar& grammar)
 {
@@ -806,12 +788,10 @@ print_parsing_tbl_entry(std::ofstream& fp,
     }
 }
 
-/*
- * For the actions in a parsing table.
- * if an action yyptblact[i] is positive, it's a shift/goto;
- * if it is negative, it's a reduce;
- * if it's zero, it's accept.
- */
+ /// For the actions in a parsing table.
+ /// if an action yyptblact[i] is positive, it's a shift/goto;
+ /// if it is negative, it's a reduce;
+ /// if it's zero, it's accept.
 static void
 print_parsing_tbl(std::ofstream& fp, const Grammar& grammar)
 {
@@ -907,13 +887,11 @@ print_parsing_tbl_col_entry(std::ofstream& fp,
     }
 }
 
-/*
- * For the tokens upon which action are taken.
- * If it's between 0 - 255, it's an ascii char;
- * if it's 256, it's 'error';
- * if it's > 256, it's a token;
- * if it's < 0, it's a non-terminal.
- */
+ /// For the tokens upon which action are taken.
+ /// If it's between 0 - 255, it's an ascii char;
+ /// if it's 256, it's 'error';
+ /// if it's > 256, it's a token;
+ /// if it's < 0, it's a non-terminal.
 static void
 print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
 {
@@ -968,10 +946,8 @@ print_parsing_tbl_col(std::ofstream& fp, const Grammar& grammar)
     fp << "-10000000};" << std::endl << std::endl; // -10000000 is space filler
 }
 
-/*
- * Find those states that only have a single reduce action.
- * Refer: Pager July, 72', Tech Rpt PE 259. Measure 3.
- */
+ /// Find those states that only have a single reduce action.
+ /// Refer: Pager July, 72', Tech Rpt PE 259. Measure 3.
 void
 get_final_states(std::ofstream& fp)
 {
@@ -1087,10 +1063,8 @@ write_lrk_table_arrays(std::ofstream& fp,
     fp << std::endl << std::endl;
 }
 
-/*
- * write the generated parsing table into the arrays
- * used by the driver code.
- */
+ /// Write the generated parsing table into the arrays
+ /// used by the driver code.
 static void
 write_parsing_table_arrays(std::ofstream& fp,
                            const std::optional<LRkPTArray>& lrk_pt_array,
@@ -1143,9 +1117,7 @@ write_special_info(std::ofstream& fp)
     }
 }
 
-/*
- * Do this is use LR(k).
- */
+ /// Do this is use LR(k).
 static void
 get_lrk_hyacc_path(const std::optional<LRkPTArray>& lrk_pt_array)
 {
@@ -1199,7 +1171,7 @@ generate_compiler(GetYaccGrammarOutput& yacc_grammar_output,
     fp << "typedef int yytabelem;" << std::endl << std::endl;
     write_parsing_table_arrays(fp, lrk_pt_array, yacc_grammar_output.grammar);
 
-    get_lrk_hyacc_path(lrk_pt_array); /* do this if LR(k) is used */
+    get_lrk_hyacc_path(lrk_pt_array); // do this if LR(k) is used
 
     copy_yaccpar_file_1(fp, HYACC_PATH);
     goto_section2(fp_yacc, position.line);

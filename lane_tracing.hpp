@@ -548,7 +548,7 @@ class LaneTracing : public YAlgorithm
     /// For use by LR(k) only.
     /// Purpose: get LANE_END configurations and add to
     /// lane_head_tail_pairs list.
-    void trace_back_lrk(Configuration* c);
+    void trace_back_lrk(Configuration& c);
     void update_state_reduce_action(State& s);
 
     // In `lrk.cpp`
