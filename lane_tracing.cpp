@@ -703,7 +703,7 @@ lane_head_tail_pairs_replace(ConfigPairList& lane_head_tail_pairs,
         // search as n1 or n2??? I think should be n2, so it
         // covers the situation where n->start->owner is a
         // splitted state.
-        if (n.end->owner.get() == s &&
+        if (n.end.value()->owner.get() == s &&
             c.states.find_n2(n.start->owner->state_no) != c.states.end()) {
             // do replacement for n->end: from that in s to s_copy.
             for (size_t i = 0; i < s->config.size(); i++) {

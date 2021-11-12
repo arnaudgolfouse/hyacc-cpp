@@ -209,8 +209,10 @@ class ConfigPairList : public std::list<struct ConfigPairNode>
 
 struct ConfigPairNode
 {
-    Configuration* end;   // conflict_config
-    Configuration* start; // lane_start_config
+    /// conflict_config
+    std::optional<Configuration*> end;
+    /// lane_start_config
+    Configuration* start;
 
     /*
      * Functions in lrk_util.cpp
@@ -362,7 +364,6 @@ struct List
 //
 // LRk_P_T - LR(k) parsing table.
 //
-constexpr uintptr_t CONST_CONFLICT_SYMBOL = -10000010;
 struct LRkPTRow
 {
     StateHandle state;

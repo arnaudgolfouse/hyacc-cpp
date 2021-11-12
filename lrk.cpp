@@ -113,12 +113,10 @@ insert_lrk_pt(LRkPTArray& lrk_pt_array,
             list.emplace_back(col);
             auto cc = std::make_shared<CfgCtxt>(c, list, c_tail);
             insert_cfg_ctxt_to_set(cc, set_c2);
-            if (reinterpret_cast<uintptr_t>(c0->end) == CONST_CONFLICT_SYMBOL) {
-                // do nothing.
-            } else {
-                cc = std::make_shared<CfgCtxt>(c0->start, list, c0->end);
+            if (c0->end.has_value()) {
+                cc = std::make_shared<CfgCtxt>(c0->start, list, *c0->end);
                 insert_cfg_ctxt_to_set(cc, set_c2);
-                // set this entry to CONST_CONFLICT_SYMBOL.
+                // set this entry to nullopt.
                 pt->add_reduction(state_no, token.snode, col, c, c_tail);
             }
         }

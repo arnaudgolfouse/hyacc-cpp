@@ -62,7 +62,7 @@
 #define 0x604000000f60313
 #define 0x604000000fa0314
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
-typedef int YYSTYPE;
+
 #define YYSTYPE_IS_DECLARED 1
 #endif
 
@@ -1776,6 +1776,7 @@ yytoktype yytoks[] = {
 };
 char * yyreds[] = {
 	"-no such reduction-"
+	"0x6040000000e0 : translation_unit", 
 	"0x604000001020 : IDENTIFIER", 
 	"0x604000001020 : CONSTANT", 
 	"0x604000001020 : STRING_LITERAL", 

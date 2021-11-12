@@ -434,11 +434,11 @@ write_lrk_table_arrays(std::ofstream& fp,
             fp << "  " << r->state << ", " << r->token->snode->value << ", ";
             for (size_t j = 0; j < ParsingTblColHdr.size(); j++) {
                 if (r->row.at(j).has_value()) {
-                    if (reinterpret_cast<uintptr_t>(r->row.at(j)->end) ==
-                        CONST_CONFLICT_SYMBOL) {
-                        fp << j << ", " << -2 << ", ";
+                    if (r->row.at(j)->end.has_value()) {
+                        fp << j << ", " << r->row.at(j)->end.value()->ruleID
+                           << ", ";
                     } else {
-                        fp << j << ", " << r->row.at(j)->end->ruleID << ", ";
+                        fp << j << ", " << -2 << ", ";
                     }
                 }
             }

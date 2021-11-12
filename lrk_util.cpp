@@ -85,7 +85,7 @@ ConfigPairList::combine(const ConfigPairList& other) noexcept
     }
 
     for (const auto& n : other) {
-        this->insert(n.end, n.start);
+        this->insert(*n.end, n.start);
     }
 }
 
@@ -99,7 +99,7 @@ ConfigPairList::insert(Configuration* conflict_config,
     auto n = this->begin();
     for (; n != this->end(); n++) {
         int cmp = config_pair_cmp(
-          n->end, *n->start, conflict_config, *lane_start_config);
+          *n->end, *n->start, conflict_config, *lane_start_config);
         if (cmp < 0) {
             continue;
         }
@@ -120,8 +120,9 @@ void
 ConfigPairNode::dump() const noexcept
 {
     std::cout << "(" << this->start->owner->state_no << "."
-              << this->start->ruleID << " -> " << this->end->owner->state_no
-              << "." << this->end->ruleID << ")";
+              << this->start->ruleID << " -> "
+              << this->end.value()->owner->state_no << "."
+              << this->end.value()->ruleID << ")";
 
     if (this->start->owner->PASS_THRU == 1u) {
         std::cout << " PASS_THRU. ";
@@ -215,11 +216,10 @@ LRkPT::dump() const noexcept
             if (!n.has_value()) {
                 std::cout << "0 ";
             } else {
-                Configuration* c = n->end; /// start;
-                if (reinterpret_cast<uintptr_t>(c) == CONST_CONFLICT_SYMBOL) {
-                    std::cout << "X ";
+                if (n->end.has_value()) {
+                    std::cout << n->end.value()->ruleID << " ";
                 } else {
-                    std::cout << n->end->ruleID << " ";
+                    std::cout << "X ";
                 }
             }
         }
@@ -250,11 +250,10 @@ lrk_pt_dump_file(const LRkPT* t, std::ofstream& fp)
             if (!n.has_value()) {
                 fp << "0 ";
             } else {
-                const Configuration* c = n->end; /// start;
-                if (reinterpret_cast<uintptr_t>(c) == CONST_CONFLICT_SYMBOL) {
-                    fp << "X ";
+                if (n->end.has_value()) {
+                    fp << n->end.value()->ruleID << " ";
                 } else {
-                    fp << n->end->ruleID << " ";
+                    fp << "X ";
                 }
             }
         }
@@ -368,14 +367,14 @@ LRkPT::add_reduction(StateHandle state,
     }
 
     // now add the reduce action on token s.
-    int index = get_col(*s);
+    size_t index = get_col(*s);
     const auto& n = r->row.at(index);
     if (!n.has_value()) {
         r->row.at(index) = ConfigPairNode(c_tail, c);
         return false;
     }
-    const Configuration* prev_entry = n->end; /// start;
-    if (reinterpret_cast<uintptr_t>(prev_entry) == CONST_CONFLICT_SYMBOL) {
+    const std::optional<const Configuration*> prev_entry = n->end; /// start;
+    if (!prev_entry.has_value()) {
         std::cout << "row [" << r->state << ", " << r->token->snode->symbol
                   << "] r/r conflict: CONFLICT_LABEL:" << c->ruleID
                   << std::endl;
@@ -383,10 +382,9 @@ LRkPT::add_reduction(StateHandle state,
         // same config, do nothing.
     } else {
         std::cout << "row [" << r->state << ", " << r->token->snode->symbol
-                  << "] r/r conflict: " << prev_entry->ruleID << ":"
+                  << "] r/r conflict: " << prev_entry.value()->ruleID << ":"
                   << c->ruleID << std::endl;
-        r->row.at(index)->end =
-          reinterpret_cast<Configuration*>(CONST_CONFLICT_SYMBOL);
+        r->row.at(index)->end = std::nullopt;
     }
     return true;
 }
