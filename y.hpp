@@ -331,11 +331,13 @@ operator<<(std::ostream& os, ParsingAction action) -> std::ostream&
 struct SymbolTableNode
 {
     std::shared_ptr<std::string> symbol;
-    int value = 0; /* symbol value, for parsing table col header. */
+    /// symbol value, for parsing table col header.
+    int value = 0;
     symbol_type type = symbol_type::NEITHER;
     bool vanishable = false;
     TerminalProperty* TP = nullptr;
-    int seq = -1; /* sequence (column) number in parsing table. */
+    /// sequence (column) number in parsing table.
+    std::optional<size_t> seq = std::nullopt;
     RuleIDNode* ruleIDList = nullptr;
     std::shared_ptr<SymbolTableNode> next;
     std::optional<std::string> token_type;
@@ -753,6 +755,8 @@ struct GetYaccGrammarOutput
     /// Parsed grammar.
     Grammar
       grammar; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+    std::string
+      yystype_definition; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
 
     constexpr static size_t SYMBOL_MAX_SIZE = 512;
 
@@ -1057,7 +1061,7 @@ get_actual_state(StateHandle virtual_state) -> std::optional<StateHandle>;
 /// auto [action, state_dest] = get_action(SymbolType::TERMINAL, 1, 1);
 /// ```
 extern auto
-get_action(symbol_type symbol_type, int col, StateHandle row)
+get_action(symbol_type symbol_type, size_t col, StateHandle row)
   -> std::pair<std::optional<Action>, StateHandle>;
 // extern bool isVanishSymbol(SymbolTableNode * n);
 extern auto
@@ -1122,19 +1126,20 @@ combine_context(Context* c_dest, const Context* c_src) -> bool;
 extern void
 write_parsing_table_col_header(std::ostream& os, const Grammar& grammar);
 
-/*
- * Given a symbol, returns which column it locates in
- * the parsing table.
- *
- * The column is arranged this way:
- * STR_END, terminals, non-terminals.
- *
- * Used in y.cpp and upe.cpp.
- */
+/// Given a symbol, returns which column it locates in
+/// the parsing table.
+///
+/// The column is arranged this way:
+/// STR_END, terminals, non-terminals.
+///
+/// Used in y.cpp and upe.cpp.
 inline auto
-get_col(const SymbolTableNode& n) -> int
+get_col(const SymbolTableNode& n) -> size_t
 {
-    return n.seq;
+    if (!n.seq.has_value()) {
+        throw std::runtime_error("[in get_col] `seq` should not be nullopt !");
+    }
+    return n.seq.value();
 }
 
 /*
@@ -1225,9 +1230,6 @@ insert_inc_symbol_list(SymbolList& a, std::shared_ptr<SymbolTableNode> n);
 /*
  * For use by get_yacc_grammar.cpp and gen_compiler.cpp
  */
-
-extern void
-write_tokens();
 
 extern const std::string_view STR_ACCEPT;
 extern const std::string_view STR_PLACE_HOLDER;

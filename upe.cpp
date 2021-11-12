@@ -197,10 +197,11 @@ Grammar::is_unit_production(StateHandle rule_no) const -> bool
  * Called by function insert_actionsOfCombinedStates().
  */
 void
-YAlgorithm::insert_action_of_symbol(std::shared_ptr<SymbolTableNode> symbol,
-                                    const StateHandle new_state,
-                                    const size_t old_state_index,
-                                    const std::vector<StateHandle>& old_states)
+YAlgorithm::insert_action_of_symbol(
+  std::shared_ptr<SymbolTableNode> symbol,
+  const StateHandle new_state, // NOLINT(bugprone-easily-swappable-parameters)
+  const size_t old_state_index,
+  const std::vector<StateHandle>& old_states)
 {
     auto [action, state_dest] =
       get_action(symbol->type, get_col(*symbol), old_states[old_state_index]);
@@ -677,6 +678,7 @@ is_equal_row(const StateHandle i, const StateHandle j) -> bool
 /// target state is old_state by new_state.
 static void
 update_repeated_row(const Grammar& grammar,
+                    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
                     const StateHandle new_state,
                     const StateHandle old_state,
                     const StateHandle row)

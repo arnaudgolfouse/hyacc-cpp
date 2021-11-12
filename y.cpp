@@ -1347,6 +1347,7 @@ create_context() -> Context*
 
 auto
 create_config(const Grammar& grammar,
+              // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
               const size_t rule_id,
               const size_t marker,
               const uint is_core_config) -> Configuration*
@@ -1997,7 +1998,7 @@ init_parsing_table()
 }
 
 auto
-get_action(symbol_type symbol_type, int col, StateHandle row)
+get_action(symbol_type symbol_type, size_t col, StateHandle row)
   -> std::pair<std::optional<Action>, StateHandle>
 {
     const std::optional<ParsingAction> x_opt =

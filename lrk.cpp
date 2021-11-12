@@ -137,7 +137,7 @@ LaneTracing::lrk_config_lane_tracing(Configuration& c) noexcept
     this->cur_red_config = &c;
 
     // get LANE_END configs and add to lane_head_tail_pairs list.
-    this->trace_back_lrk(&c);
+    this->trace_back_lrk(c);
 
     // clear the LANE_CON flag of configurations on conflicting lanes.
     trace_back_lrk_clear(c);

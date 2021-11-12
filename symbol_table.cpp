@@ -291,13 +291,13 @@ hash_tbl_init()
 
 /// @note Empty string is allowed.
 static auto
-hash_value(const std::string_view symbol) -> int
+hash_value(const std::string_view symbol) -> size_t
 {
     size_t len = symbol.size();
 
-    int sum = 0;
+    size_t sum = 0;
     for (size_t i = 0; i < len; i++) {
-        sum = (sum + symbol[i]) % static_cast<int>(HT_SIZE);
+        sum = (sum + static_cast<size_t>(symbol[i])) % HT_SIZE;
     }
 
     if constexpr (DEBUG_HASHTBL) {
@@ -307,30 +307,30 @@ hash_value(const std::string_view symbol) -> int
     return sum;
 }
 
-/*
- * If the symbol exists, return the node,
- * otherwise create a node and return the node.
- *
- * So this contains the function of hash_tbl_find().
- * If it's unknown whether a symbol exists, use
- * this function to ensure getting a node contains
- * this symbol.
- */
+/// If the symbol exists, return the node,
+/// otherwise create a node and return the node.
+///
+/// So this contains the function of hash_tbl_find().
+/// If it's unknown whether a symbol exists, use
+/// this function to ensure getting a node contains
+/// this symbol.
 auto
 hash_tbl_insert(const std::string_view symbol)
   -> std::shared_ptr<SymbolTableNode>
 {
-    const int v = hash_value(symbol);
+    const size_t v = hash_value(symbol);
+    // no lint since we know that `v` is in bounds.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+    auto& cell = HashTbl[v];
     if constexpr (DEBUG_HASHTBL) {
         std::cout << "hash insert " << symbol << " at " << v << std::endl;
     }
-
-    if (HashTbl[v].next == nullptr) {
-        HashTbl[v].next = std::make_shared<SymbolTableNode>(symbol);
-        HashTbl[v].count++;
-        return HashTbl[v].next;
+    if (cell.next == nullptr) {
+        cell.next = std::make_shared<SymbolTableNode>(symbol);
+        cell.count++;
+        return cell.next;
     }
-    std::shared_ptr<SymbolTableNode> n = HashTbl[v].next;
+    std::shared_ptr<SymbolTableNode> n = cell.next;
     for (; n->next != nullptr; n = n->next) {
         if (*n->symbol == symbol) {
             if constexpr (DEBUG_HASHTBL) {
@@ -348,7 +348,7 @@ hash_tbl_insert(const std::string_view symbol)
         return n;
     }
     n->next = std::make_shared<SymbolTableNode>(symbol);
-    HashTbl[v].count++;
+    cell.count++;
     return n->next;
 }
 
@@ -359,7 +359,7 @@ hash_tbl_insert(const std::string_view symbol)
 auto
 hash_tbl_find(const std::string_view symbol) -> std::shared_ptr<SymbolTableNode>
 {
-    int v = hash_value(symbol);
+    const size_t v = hash_value(symbol);
 
     for (std::shared_ptr<SymbolTableNode> n = HashTbl.at(v).next; n != nullptr;
          n = n->next) {
@@ -401,8 +401,8 @@ symbol_tbl_node_dump(std::ostream& os,
                      const std::shared_ptr<const SymbolTableNode> n)
 {
     os << *n->symbol << " [type=" << get_symbol_type(n)
-       << ",vanish=" << (n->vanishable ? "true" : "false") << ", seq=" << n->seq
-       << ", val=" << n->value;
+       << ",vanish=" << (n->vanishable ? "true" : "false")
+       << ", seq=" << *n->seq << ", val=" << n->value;
     if (n->type == symbol_type::TERMINAL && n->TP != nullptr) {
         os << ", prec=" << n->TP->precedence
            << ", assoc=" << get_assoc_name(n->TP->assoc);

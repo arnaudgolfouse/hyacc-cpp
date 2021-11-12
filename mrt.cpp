@@ -18,7 +18,7 @@
  */
 
 /*
- * mrt.c
+ * mrt.cpp
  *
  * Functions for multi-rooted tree. Used by unit production elimination
  * algorithm.
@@ -180,6 +180,7 @@ MRTreeNode::create(std::shared_ptr<SymbolTableNode> symbol)
  */
 void
 insert_new_tree(MRLeaves& mr_leaves,
+                // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
                 const std::shared_ptr<SymbolTableNode> parent,
                 const std::shared_ptr<SymbolTableNode> child)
 {
