@@ -557,14 +557,13 @@ GetYaccGrammarOutput::process_yacc_file_input_section1(
                     constexpr std::string_view STR1 = "typedef union YYSTYPE\n";
                     constexpr std::string_view STR2 = "\n        YYSTYPE;";
                     off_t size = static_cast<off_t>(fp.tellg()) - union_start;
-                    extern std::string yystype_definition;
 
-                    yystype_definition = STR1;
+                    this->yystype_definition = STR1;
                     fp.seekg(union_start, std::ios_base::beg);
                     std::vector<char> fp_string(size, ' ');
                     fp.read(fp_string.data(), size);
-                    yystype_definition += fp_string.data();
-                    yystype_definition += STR2;
+                    this->yystype_definition += fp_string.data();
+                    this->yystype_definition += STR2;
 
                     state = IS_NONE;
                 }
