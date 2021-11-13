@@ -777,7 +777,7 @@ get_context(const Grammar& grammar, const Configuration& cfg, Context& context)
 
     if (cfg.marker == production.nRHS.size() - 1) {
         // is last symbol, just copy the context.
-        for (const auto& a : cfg.context->context) {
+        for (const auto& a : cfg.context.context) {
             add_symbol2_context(a.snode, context);
         }
     } else { // need to find thead(alpha)
@@ -796,14 +796,14 @@ get_context(const Grammar& grammar, const Configuration& cfg, Context& context)
 
         // if theads is empty, just copy the context.
         if (theads.empty()) {
-            for (const auto& a : cfg.context->context) {
+            for (const auto& a : cfg.context.context) {
                 add_symbol2_context(a.snode, context);
             }
         } else { // theads_count > 0
             for (const auto& a : theads) {
                 if (a.snode->symbol->empty()) { // empty string.
                     // Entire alpha vanishable. Copy context.
-                    for (const auto& a : cfg.context->context) {
+                    for (const auto& a : cfg.context.context) {
                         add_symbol2_context(a.snode, context);
                     }
                 } else {
@@ -834,7 +834,7 @@ free_config(Configuration* c)
 {
     if (c == nullptr)
         return;
-    c->context->clear();
+    c->context.clear();
     delete c;
 }
 
@@ -865,7 +865,7 @@ is_same_config(const Configuration& config1, const Configuration& config2)
         return false;
     if (config1.ruleID != config2.ruleID)
         return false;
-    if (!is_same_context(*config1.context, *config2.context))
+    if (!is_same_context(config1.context, config2.context))
         return false;
     return true;
 }
@@ -878,7 +878,7 @@ is_existing_successor_config(const State& s,
 {
     for (const auto& config : s.config) {
         if (config->marker == 0 && rule_id == config->ruleID &&
-            is_same_context(con, *config->context))
+            is_same_context(con, config->context))
             return true; // existing config
     }
     return false;
@@ -894,7 +894,7 @@ add_successor_config_to_state(const Grammar& grammar,
     // marker = 0, is_core_config = 0.
     Configuration* c = create_config(grammar, rule_id, 0, 0);
     c->owner = s;
-    copy_context(*c->context, con);
+    copy_context(c->context, con);
     s->config.push_back(c);
 }
 
@@ -914,23 +914,21 @@ is_empty_production(const Grammar& grammar, const Configuration* c) -> bool
     return false;
 }
 
-/*
- * Used by addCoreConfig2State() only.
- * comparison is made alphabetically on:
- * 1) production,
- * 2) marker,
- * 3) context.
- * Actually, for the same state,
- * core configurations are different only
- * by production. But for the same state,
- * different core configuration comparison
- * will be sure to end in production comparison
- * -- either > or <. So does not matter to
- * add in the extra code to compare marker and
- * context. This function thus can be used
- * for general config comparison, although in
- * this program it's used only here.
- */
+/// Used by addCoreConfig2State() only.
+/// comparison is made alphabetically on:
+/// 1) production,
+/// 2) marker,
+/// 3) context.
+/// Actually, for the same state,
+/// core configurations are different only
+/// by production. But for the same state,
+/// different core configuration comparison
+/// will be sure to end in production comparison
+/// -- either > or <. So does not matter to
+/// add in the extra code to compare marker and
+/// context. This function thus can be used
+/// for general config comparison, although in
+/// this program it's used only here.
 static auto
 config_cmp(const Grammar& grammar,
            const Configuration* c1,
@@ -978,10 +976,10 @@ config_cmp(const Grammar& grammar,
 
     // If production and marker are the same, go on to compare context.
     // std::cout << "compare context" << std::endl;
-    a = c1->context->context.cbegin();
-    b = c2->context->context.cbegin();
-    while ((a != c1->context->context.cend()) &&
-           (b != c2->context->context.cend())) {
+    a = c1->context.context.cbegin();
+    b = c2->context.context.cbegin();
+    while ((a != c1->context.context.cend()) &&
+           (b != c2->context.context.cend())) {
         cmp_val = a->snode->symbol->compare(*b->snode->symbol);
         if (cmp_val != 0)
             return cmp_val;
@@ -989,10 +987,10 @@ config_cmp(const Grammar& grammar,
         b++;
     }
 
-    if (c1->context->context.size() > c2->context->context.size()) {
+    if (c1->context.context.size() > c2->context.context.size()) {
         return 1;
     }
-    if (c1->context->context.size() < c2->context->context.size()) {
+    if (c1->context.context.size() < c2->context.context.size()) {
         return -1;
     }
 
@@ -1081,7 +1079,7 @@ get_config_successors(const Grammar& grammar,
                     } else {
                         size_t index = index_opt.value();
                         if (combine_context(s->config.at(index)->context,
-                                            &tmp_context)) {
+                                            tmp_context)) {
                             // compatible config
                             // if this config has no successor, don't insert
                             // to config_queue. This saves time. marker = 0
@@ -1336,13 +1334,6 @@ find_state_for_scanned_symbol(
 }
 
 auto
-create_context() -> Context*
-{
-    auto* c = new Context;
-    return c;
-}
-
-auto
 create_config(const Grammar& grammar,
               // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
               const size_t rule_id,
@@ -1353,8 +1344,6 @@ create_config(const Grammar& grammar,
     if (c == nullptr) {
         throw std::runtime_error("create_config error: out of memory");
     }
-
-    c->context = create_context();
 
     c->ruleID = rule_id;
     c->marker = marker;
@@ -1394,7 +1383,7 @@ copy_config(Configuration& c_dest, const Configuration& c_src)
     c_dest.isCoreConfig = c_src.isCoreConfig;
     c_dest.ruleID = c_src.ruleID;
     c_dest.nMarker = c_src.nMarker;
-    copy_context(*c_dest.context, *c_src.context);
+    copy_context(c_dest.context, c_src.context);
 }
 
 /////////////////////////////////////////////////////////
@@ -1412,7 +1401,7 @@ is_common_config(const Configuration& con, const Configuration& c) -> bool
     if (con.ruleID != c.ruleID)
         return false;
     // If all same, then are same config, not common config!
-    if (is_same_context(*con.context, *c.context))
+    if (is_same_context(con.context, c.context))
         return false;
     return true;
 }
@@ -1474,8 +1463,8 @@ is_compatible_state_a(const State& s1, const State& s2) -> bool
     for (size_t i = 0; i < count; i++) {
         for (size_t j = 0; j < count; j++) {
             if (i != j) {
-                const Context& c1 = *s1.config.at(i)->context;
-                const Context& c2 = *s2.config.at(j)->context;
+                const Context& c1 = s1.config.at(i)->context;
+                const Context& c2 = s2.config.at(j)->context;
                 if (!has_empty_intersection(c1, c2)) {
                     return false;
                 }
@@ -1493,8 +1482,8 @@ is_compatible_state_bc(const State& s) -> bool
     size_t count = s.core_config_count;
     for (size_t i = 0; i < count - 1; i++) {
         for (size_t j = i + 1; j < count; j++) {
-            const Context& c1 = *s.config.at(i)->context;
-            const Context& c2 = *s.config.at(j)->context;
+            const Context& c1 = s.config.at(i)->context;
+            const Context& c2 = s.config.at(j)->context;
             if (has_empty_intersection(c1, c2)) {
                 return false;
             } // end if
@@ -1570,25 +1559,23 @@ find_similar_core_config(const std::shared_ptr<const State>& t,
     return nullptr;
 }
 
-/*
- * For each successor state s, update context of core
- * configurations, then get closure, add change to
- * parsing table. Do this recursively.
- *
- * In more detail:
- * For each successor state t of s:
- *   look through each config c in the config list of s:
- *     if scanned symbol of c == trans_symbol of t {
- *       // c transits to a core config in t
- *       find core config d in t which is the transition
- *       result of c,
- *       update the context of d from c.
- *       if the context of d is changed {
- *         get closure of d again,
- *         update parsing table, and
- *         propagate context change to d's successors.
- *     }
- */
+/// For each successor state s, update context of core
+/// configurations, then get closure, add change to
+/// parsing table. Do this recursively.
+///
+/// In more detail:
+/// For each successor state t of s:
+///   look through each config c in the config list of s:
+///     if scanned symbol of c == trans_symbol of t {
+///       // c transits to a core config in t
+///       find core config d in t which is the transition
+///       result of c,
+///       update the context of d from c.
+///       if the context of d is changed {
+///         get closure of d again,
+///         update parsing table, and
+///         propagate context change to d's successors.
+///     }
 void
 YAlgorithm::propagate_context_change(const State& s)
 {
@@ -1609,8 +1596,7 @@ YAlgorithm::propagate_context_change(const State& s)
                 continue;
 
             c->marker += 1;
-            const Configuration* d =
-              find_similar_core_config(t, c, &config_index);
+            Configuration* d = find_similar_core_config(t, c, &config_index);
             c->marker -= 1;
             if (d == nullptr)
                 continue;
@@ -1727,11 +1713,11 @@ YAlgorithm::insert_reduction_to_parsing_table(const Configuration* c,
 {
     if (this->grammar.rules.at(c->ruleID)->nLHS->snode ==
         this->grammar.goal_symbol->snode) { // accept, action = "a";
-        for (const auto& a : c->context->context) {
+        for (const auto& a : c->context.context) {
             this->insert_action(a.snode, state_no, ParsingAction::new_accept());
         }
     } else { // reduct, action = "r";
-        for (const auto& a : c->context->context) {
+        for (const auto& a : c->context.context) {
             this->insert_action(
               a.snode, state_no, ParsingAction::new_reduce(c->ruleID));
         }
@@ -1919,14 +1905,11 @@ is_compatible_config(const Configuration* c1, const Configuration* c2) -> bool
  * Returns true if any change is made.
  */
 auto
-combine_context(Context* c_dest, const Context* c_src) -> bool
+combine_context(Context& c_dest, const Context& c_src) -> bool
 {
     bool is_changed = false;
-    if (c_dest == nullptr || c_src == nullptr)
-        return false;
-
-    for (const SymbolNode& a : c_src->context) {
-        if (add_symbol2_context(a.snode, *c_dest)) {
+    for (const SymbolNode& a : c_src.context) {
+        if (add_symbol2_context(a.snode, c_dest)) {
             is_changed = true;
         }
     }
@@ -2245,7 +2228,7 @@ YAlgorithm::init_start_state()
 
     state0->config.at(0)->owner = state0;
     hash_tbl_insert(STR_END);
-    state0->config.at(0)->context->context.emplace_back(hash_tbl_find(STR_END));
+    state0->config.at(0)->context.context.emplace_back(hash_tbl_find(STR_END));
 
     this->new_states.states_new->add_state2(state0);
     this->new_states.states_new_array.add_state(state0);

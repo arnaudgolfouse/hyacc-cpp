@@ -587,7 +587,7 @@ copy_config_lalr(Configuration* dst, Configuration* src)
     dst->ruleID = src->ruleID;
     dst->nMarker = src->nMarker;
     dst->marker = src->marker;
-    copy_context(*dst->context, *src->context);
+    copy_context(dst->context, src->context);
     dst->owner = src->owner;
 
     dst->isCoreConfig = src->isCoreConfig;
@@ -893,8 +893,8 @@ LaneTracing::clear_regenerate(const StateHandle state_no)
     clear_state_context(s.get());
     if (state_no == 0) {
         hash_tbl_insert(STR_END);
-        s->config[0]->context->context.clear();
-        s->config[0]->context->context.emplace_back(hash_tbl_find(STR_END));
+        s->config[0]->context.context.clear();
+        s->config[0]->context.context.emplace_back(hash_tbl_find(STR_END));
     }
     this->get_state_closure(s);
 }
@@ -968,10 +968,9 @@ inherit_parent_context(const Grammar& grammar,
 
         c_p->marker++;
         size_t config_index = 0;
-        const Configuration* c =
-          find_similar_core_config(s, c_p, &config_index);
+        Configuration* c = find_similar_core_config(s, c_p, &config_index);
         c_p->marker--;
-        if (nullptr == c)
+        if (c == nullptr)
             continue; // should NOT happen.
 
         if (combine_context(c->context, c_p->context)) {
@@ -997,7 +996,7 @@ clear_state_context(State* s)
         return;
 
     for (auto& i : s->config) {
-        i->context->clear(); // defined in y.c.
+        i->context.clear(); // defined in y.c.
     }
 }
 
@@ -1392,7 +1391,7 @@ stdout_write_config(const Grammar& grammar, const Configuration* c)
     }
     std::cout << "config (" << c->owner->state_no << "." << c->ruleID << ") : ";
     my_write_production(grammar.rules[c->ruleID], c->marker);
-    my_write_context(*c->context);
+    my_write_context(c->context);
     std::cout << "[COMPLETE: " << c->COMPLETE << "]"
               << "[IN_LANE: " << c->IN_LANE << "]"
               << "[LANE_END: " << c->LANE_END << "]"
@@ -1562,10 +1561,9 @@ LaneTracing::resolve_lalr1_conflicts()
         for (auto it = state->config.rbegin(); it < state->config.rend();
              it++) {
             const Configuration* config = *it;
-            if (is_final_configuration(grammar, config) &&
-                config->context != nullptr) {
+            if (is_final_configuration(grammar, config)) {
                 // insert reduce
-                for (const auto& contxt : config->context->context) {
+                for (const auto& contxt : config->context.context) {
                     this->insert_action(
                       contxt.snode,
                       state_no,
@@ -1788,13 +1786,13 @@ regenerate_state_context(State& s, const State& t) noexcept(false)
     // clear the context of S.
     for (const auto& config :
          s.config) { // -> if final config, remove p.t. entry.
-        config->context->context.clear();
+        config->context.context.clear();
     }
 
     // copy the context from T to S.
     const size_t ct = t.core_config_count;
     for (size_t i = 0; i < ct; i++) {
-        copy_context(*s.config[i]->context, *t.config[i]->context);
+        copy_context(s.config[i]->context, t.config[i]->context);
     }
 }
 
@@ -1822,7 +1820,7 @@ LaneTracing::update_state_reduce_action(State& s)
         // update reduce action for final/empty production.
         if (is_final_configuration(this->grammar, c) ||
             get_scanned_symbol(*c)->symbol->empty()) {
-            for (const auto& lookahead : c->context->context) {
+            for (const auto& lookahead : c->context.context) {
                 auto [action, state_dest] = get_action(
                   lookahead.snode->type, get_col(*lookahead.snode), s.state_no);
                 if (state_dest != c->ruleID) {
@@ -2503,7 +2501,7 @@ LaneTracing::context_adding(SymbolList context_generated,
                               << "." << (*c)->ruleID << std::endl;
                 }
                 bool exist = insert_symbol_list_unique(
-                  (*c)->context->context, context_generated.front().snode);
+                  (*c)->context.context, context_generated.front().snode);
                 if (exist)
                     break;
                 // else, NOT exist, insert was sucessful.
@@ -2844,8 +2842,7 @@ LaneTracing::do_loop() noexcept(false)
                     if constexpr (DEBUG_PHASE_1) {
                         std::cout << "COMPLETE ON" << std::endl;
                     }
-                    combine_context_list(contexts_generated,
-                                         o.context->context);
+                    combine_context_list(contexts_generated, o.context.context);
                 } else {
                     if constexpr (DEBUG_PHASE_1) {
                         std::cout << "COMPLETE OFF" << std::endl;
@@ -2903,7 +2900,7 @@ LaneTracing::do_loop() noexcept(false)
                     std::cout << "testB true" << std::endl;
                 }
 
-                combine_context_list(contexts_generated, o.context->context);
+                combine_context_list(contexts_generated, o.context.context);
                 this->context_adding_routine(
                   contexts_generated, &o, cur_config_index, &fail_ct);
             } else {
@@ -2918,8 +2915,7 @@ LaneTracing::do_loop() noexcept(false)
 
                     this->move_markers(&o);
 
-                    combine_context_list(contexts_generated,
-                                         o.context->context);
+                    combine_context_list(contexts_generated, o.context.context);
                     this->context_adding_routine(
                       contexts_generated, &o, cur_config_index, &fail_ct);
                 } else {
@@ -3028,7 +3024,6 @@ propogate_context_sets(const Grammar& grammar, Configuration* c)
             continue; // x-transition of conflict states.
 
         // otherwise, heuristically propagate context sets.
-        free_context(f->context);
         f->context = c->context;
         f->COMPLETE = 1;
     }

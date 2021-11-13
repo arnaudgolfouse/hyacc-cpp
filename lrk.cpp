@@ -160,7 +160,7 @@ get_config_conflict_context(Configuration* c,
       states_new_array[c->owner->state_no].conflict;
     for (; n != nullptr; n = n->next) {
         if (n->r.is_reduce() && n->s.is_reduce()) { // is r/r conflict.
-            for (const auto& contxt : c->context->context) {
+            for (const auto& contxt : c->context.context) {
                 if (n->lookahead == contxt.snode) {
                     insert_inc_symbol_list(ret_list, n->lookahead);
                 }

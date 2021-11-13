@@ -548,7 +548,7 @@ struct ConfigurationNode
     size_t ruleID;      // index of rule in grammar.rules[].
     SymbolList nMarker; // point to scanned symbol.
     size_t marker;      // redundant to nMarker, but make processing easier.
-    Context* context;
+    Context context{};
     std::shared_ptr<struct StateNode> owner;
 
     unsigned int isCoreConfig : 1; /* 1 - true, 0 - false. */
@@ -1034,8 +1034,6 @@ extern std::string HYACC_PATH;
  *************************/
 
 /* functions in y.c */
-extern auto
-create_context() -> Context*;
 // extern Configuration * createConfig();
 extern auto
 create_config(const Grammar& grammar,
@@ -1107,8 +1105,6 @@ mandatory_update_action(std::shared_ptr<SymbolTableNode> lookahead,
                         int row,
                         int state_dest);
 extern void
-free_context(Context* c);
-extern void
 print_parsing_table_note(std::ostream& os);
 /// Insert snode to the list, no repetition allowed, increasing order.
 /// Do it like insertion sort.
@@ -1124,7 +1120,7 @@ print_parsing_table(std::ostream& os,
 extern auto
 has_common_core(std::shared_ptr<State> s1, std::shared_ptr<State> s2) -> bool;
 extern auto
-combine_context(Context* c_dest, const Context* c_src) -> bool;
+combine_context(Context& c_dest, const Context& c_src) -> bool;
 extern void
 write_parsing_table_col_header(std::ostream& os, const Grammar& grammar);
 

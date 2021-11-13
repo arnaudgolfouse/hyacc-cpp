@@ -128,8 +128,8 @@ LR0::insert_reduction_to_parsing_table_lalr(const Configuration& c,
         this->insert_action(
           hash_tbl_find(STR_END), state_no, ParsingAction::new_accept());
     } else { // reduct, action = "r";
-        if (!c.context->context.empty()) {
-            for (const auto& a : c.context->context) {
+        if (!c.context.context.empty()) {
+            for (const auto& a : c.context.context) {
                 this->insert_action(
                   a.snode, state_no, ParsingAction::new_reduce(c.ruleID));
             }
