@@ -66,7 +66,7 @@ int n_symbol;
 size_t n_rule;
 size_t n_rule_opt;
 std::vector<StateHandle> final_state_list;
-StateNoArray* states_inadequate;
+StateNoArray states_inadequate{};
 
 /* Declaration of functions. */
 static void
@@ -341,10 +341,8 @@ NewStates::add_to_conflict_array(
     return c;
 }
 
-/*
- * Initialize variables when the program starts.
- * Called by function main().
- */
+/// Initialize variables when the program starts.
+/// Called by function main().
 void
 YAlgorithm::init()
 {
@@ -352,7 +350,8 @@ YAlgorithm::init()
     this->new_states.states_new_array.clear(); // size == PARSING_TABLE_SIZE
 
     if (this->options.use_lalr) {
-        states_inadequate = create_state_no_array();
+        states_inadequate.clear();
+        states_inadequate.states.reserve(2);
     }
 
     if constexpr (USE_CONFIG_QUEUE_FOR_GET_CLOSURE) {
@@ -2101,7 +2100,7 @@ LR0::insert_action(std::shared_ptr<SymbolTableNode> lookahead,
 
         // include r/r conflict for inadequate states.
         if (this->options.use_lalr) {
-            add_state_no_array(*states_inadequate, row);
+            add_state_no_array(states_inadequate, row);
         }
 
         return;
@@ -2153,7 +2152,7 @@ LR0::insert_action(std::shared_ptr<SymbolTableNode> lookahead,
         // include s/r conflicts not handled by
         // precedence/associativity.
         if (this->options.use_lalr) {
-            add_state_no_array(*states_inadequate, row);
+            add_state_no_array(states_inadequate, row);
         }
 
         return;
@@ -2171,7 +2170,7 @@ LR0::insert_action(std::shared_ptr<SymbolTableNode> lookahead,
     // include s/r conflicts not handled by
     // precedence/associativity.
     if (this->options.use_lalr) {
-        add_state_no_array(*states_inadequate, row);
+        add_state_no_array(states_inadequate, row);
     }
 
     previous_action = ParsingAction::new_shift(shift);

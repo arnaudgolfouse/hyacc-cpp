@@ -342,10 +342,10 @@ remove_rr_conflict_from_list(size_t state_no, NewStates& new_states)
 
     // if list is empty, remove this conflict.
     if (new_states.states_new_array[state_no].conflict == nullptr) {
-        for (StateHandle& state : states_inadequate->states) {
+        for (StateHandle& state : states_inadequate.states) {
             if (state_no == state) {
                 state = -1;
-                states_inadequate->count_unresolved--;
+                states_inadequate.count_unresolved--;
             }
         }
     }
@@ -372,7 +372,7 @@ update_lr1_parsing_table(size_t state_no, NewStates& new_states)
 auto
 LaneTracing::lane_tracing_lrk() -> std::optional<LRkPTArray>
 {
-    if (0 == states_inadequate->count_unresolved)
+    if (0 == states_inadequate.count_unresolved)
         return std::nullopt;
     MAX_K++; // increment K for LR(k).
     LRkPTArray lrk_pt_array{};
@@ -381,7 +381,7 @@ LaneTracing::lane_tracing_lrk() -> std::optional<LRkPTArray>
               << "lane head/tail pairs:" << std::endl;
     this->lane_head_tail_pairs.dump();
 
-    for (const StateHandle state_no : states_inadequate->states) {
+    for (const StateHandle state_no : states_inadequate.states) {
         size_t ct_rr = this->new_states.states_new_array[state_no].rr_count;
 
         if (state_no >= 0 && ct_rr > 0) {

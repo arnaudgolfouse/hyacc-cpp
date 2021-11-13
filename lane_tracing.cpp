@@ -1323,14 +1323,6 @@ insert_transitor_list(Configuration& c, Configuration& transitor) -> bool
 
 /* for inadequate states */
 
-auto
-create_state_no_array() -> StateNoArray*
-{
-    auto* sa = new StateNoArray;
-    sa->states.reserve(2);
-    return sa;
-}
-
 /// If state_no is not in the inadequate states list, add it.
 void
 add_state_no_array(StateNoArray& sa, StateHandle state_no)
@@ -1475,11 +1467,11 @@ void
 LaneTracing::phase1()
 {
     if constexpr (DEBUG_PHASE_1) {
-        std::cout << states_inadequate->states.size()
+        std::cout << states_inadequate.states.size()
                   << " inadequate states: " << std::endl;
     }
 
-    for (const StateHandle state_no : states_inadequate->states) {
+    for (const StateHandle state_no : states_inadequate.states) {
         const State* s =
           this->new_states.states_new_array[state_no].state.get();
         this->get_inadequate_state_reduce_config_context(s);
@@ -1545,11 +1537,11 @@ LaneTracing::resolve_lalr1_conflicts()
         print_parsing_table(this->grammar.fp_v, this->grammar);
     }
 
-    states_inadequate->count_unresolved = states_inadequate->states.size();
+    states_inadequate.count_unresolved = states_inadequate.states.size();
 
-    const size_t ct = states_inadequate->states.size();
+    const size_t ct = states_inadequate.states.size();
     for (size_t i = 0; i < ct; i++) {
-        const StateHandle state_no = states_inadequate->states[i];
+        const StateHandle state_no = states_inadequate.states[i];
         if (state_no < 0)
             continue; // should never happen.
 
@@ -1594,8 +1586,8 @@ LaneTracing::resolve_lalr1_conflicts()
         std::shared_ptr<Conflict>& c =
           this->new_states.states_new_array[state_no].conflict;
         if (c == nullptr) {
-            states_inadequate->states[i] = -1;
-            states_inadequate->count_unresolved--;
+            states_inadequate.states[i] = -1;
+            states_inadequate.count_unresolved--;
         } else {
             // do nothing.
         }
@@ -2193,7 +2185,7 @@ LaneTracing::get_conflict_lane_head() noexcept(false) -> LaneHead
 {
     LaneHead lane_head_list{};
 
-    for (const StateHandle state_no : states_inadequate->states) {
+    for (const StateHandle state_no : states_inadequate.states) {
         if (state_no >= 0) {
             if constexpr (DEBUG_GET_LANEHEAD) {
                 std::cout << "inadequate state: " << state_no << ". ";
@@ -2244,7 +2236,7 @@ LaneTracing::phase2()
 
     if constexpr (DEBUG_PHASE_2) {
         std::cout << "phase 2. unresolved inadequate states: "
-                  << states_inadequate->count_unresolved << std::endl;
+                  << states_inadequate.count_unresolved << std::endl;
     }
 
     LaneHead lane_head_list = this->get_conflict_lane_head();
@@ -2293,7 +2285,7 @@ LaneTracing::lane_tracing() -> std::optional<LRkPTArray>
     this->resolve_lalr1_conflicts();
 
     if (this->options.use_lane_tracing &&
-        states_inadequate->count_unresolved > 0) {
+        states_inadequate.count_unresolved > 0) {
         this->phase2();
         this->resolve_lalr1_conflicts();
         this->output_parsing_table_lalr();

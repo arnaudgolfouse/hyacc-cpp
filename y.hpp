@@ -1272,13 +1272,17 @@ struct StateNoArray
     std::vector<StateHandle> states;
     // SymbolNode ** conflictSymbolList; // conflict symbols for each state
     size_t count_unresolved; /* unresolved after lane tracing phase 1. */
+
+    inline void clear() noexcept
+    {
+        this->states.clear();
+        this->count_unresolved = 0;
+    }
 };
 
-extern StateNoArray* states_inadequate;
+extern StateNoArray states_inadequate;
 
 /* functions in lane_tracing.c */
-extern auto
-create_state_no_array() -> StateNoArray*;
 extern void
 add_state_no_array(StateNoArray& sa, StateHandle state_no);
 extern void
