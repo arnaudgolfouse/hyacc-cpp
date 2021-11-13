@@ -1091,7 +1091,9 @@ add_core_config2_state(const Grammar& grammar,
 extern void
 add_successor(std::shared_ptr<State>& s, std::shared_ptr<State> n);
 extern auto
-get_theads(const Grammar& grammar, const SymbolList& alpha) -> SymbolList;
+get_theads(const Grammar& grammar,
+           const SymbolList& alpha,
+           SymbolList::const_iterator alpha_it) -> SymbolList;
 extern void
 show_theads(SymbolList alpha, SymbolList theads);
 extern auto

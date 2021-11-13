@@ -646,16 +646,18 @@ insert_unique_symbol_list(SymbolList& list,
 }
 
 static void
-write_symbol_node_array(std::ostream& os, const SymbolList& str)
+write_symbol_node_array(std::ostream& os,
+                        const SymbolList& str,
+                        SymbolList::const_iterator str_it)
 {
     bool first_a = true;
-    for (const auto& a : str) {
+    for (; str_it != str.end(); str_it++) {
         if (first_a) {
             first_a = false;
         } else {
             os << ", ";
         }
-        os << *a.snode->symbol;
+        os << *str_it->snode->symbol;
     }
     os << std::endl;
 }
@@ -678,17 +680,12 @@ show_t_heads(std::ostream& os,
     os << std::endl;
 }
 
-/// @note This will skip `s`'s first element.
 static void
 insert_alpha_to_heads(const SymbolList& s,
+                      SymbolList::const_iterator s_it,
                       SymbolList& heads,
                       SymbolList& theads)
 {
-    if (s.empty()) {
-        throw std::runtime_error("s should not be empty");
-    }
-    auto s_it = s.begin();
-    ++s_it;
     for (; s_it != s.end(); ++s_it) {
         const auto& a = *s_it;
         if (a.snode->is_vanish_symbol()) {
@@ -747,12 +744,14 @@ insert_rhs_to_heads(const SymbolList& s, SymbolList& heads, SymbolList& theads)
 ///
 /// @note This will skip alpha's first element.
 auto
-get_theads(const Grammar& grammar, const SymbolList& alpha) -> SymbolList
+get_theads(const Grammar& grammar,
+           const SymbolList& alpha,
+           SymbolList::const_iterator alpha_it) -> SymbolList
 {
     SymbolList heads{};
     SymbolList theads{};
 
-    insert_alpha_to_heads(alpha, heads, theads);
+    insert_alpha_to_heads(alpha, alpha_it, heads, theads);
 
     for (const auto& n : heads) {
         for (const RuleIDNode* rules = n.snode->ruleIDList; rules != nullptr;
@@ -764,8 +763,8 @@ get_theads(const Grammar& grammar, const SymbolList& alpha) -> SymbolList
 
     if (Options::get().debug_gen_parsing_machine) {
         grammar.fp_v << "==getTHeads: theads for: ";
-        write_symbol_node_array(grammar.fp_v, alpha);
-        write_symbol_node_array(grammar.fp_v, theads);
+        write_symbol_node_array(grammar.fp_v, alpha, alpha_it);
+        write_symbol_node_array(grammar.fp_v, theads, theads.begin());
     }
 
     return theads;
@@ -775,7 +774,6 @@ get_theads(const Grammar& grammar, const SymbolList& alpha) -> SymbolList
 static void
 get_context(const Grammar& grammar, const Configuration& cfg, Context& context)
 {
-    SymbolList theads{};
     const Production& production = *grammar.rules.at(cfg.ruleID);
 
     if (cfg.marker == production.nRHS.size() - 1) {
@@ -791,7 +789,7 @@ get_context(const Grammar& grammar, const Configuration& cfg, Context& context)
 
         const SymbolList& alpha =
           cfg.nMarker; // we know cfg.nMarker is not empty.
-        theads = get_theads(grammar, alpha);
+        SymbolList theads = get_theads(grammar, alpha, alpha.begin());
 
         if (Options::get().show_theads) {
             show_t_heads(grammar.fp_v, alpha, theads);

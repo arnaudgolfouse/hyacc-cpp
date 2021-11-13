@@ -1977,9 +1977,12 @@ LaneTracing::get_the_context(const Configuration* o) noexcept(false)
     if (o->nMarker.empty())
         return {};
 
-    // TODO: shoud be o->nMarker.next
-    SymbolList gamma_theads = get_theads(
-      this->grammar, o->nMarker); // Note nullptr is a valid terminal.
+    auto n_marker_it = o->nMarker.begin();
+    n_marker_it++;
+    SymbolList gamma_theads =
+      get_theads(this->grammar,
+                 o->nMarker,
+                 n_marker_it); // Note nullptr is a valid terminal.
 
     // note that "" will be the first node in the INC list,
     // so it's not so inefficient.
@@ -2579,19 +2582,19 @@ LaneTracing::lane_tracing_reduction(Configuration* c) noexcept(false)
 
 /// Used if `DEBUG_PHASE_1` is `true`.
 [[maybe_unused]] static void
-my_show_t_heads(
-  const SymbolList& alpha, // NOLINT(bugprone-easily-swappable-parameters)
-  const SymbolList& theads)
+my_show_t_heads(const SymbolList& alpha,
+                SymbolList::const_iterator alpha_it,
+                const SymbolList& theads)
 {
     std::cout << "string '";
 
     bool first = true;
-    for (const auto& a : alpha) {
+    for (; alpha_it != alpha.end(); alpha_it++) {
         if (first)
             first = false;
         else
             std::cout << ' ';
-        std::cout << a.snode->symbol;
+        std::cout << alpha_it->snode->symbol;
     }
 
     std::cout << "' has theads: ";
@@ -2780,24 +2783,29 @@ LaneTracing::do_loop() noexcept(false)
 
         SymbolList contexts_generated{};
 
-        const SymbolList& gamma = o.nMarker;
+        auto gamma = o.nMarker.begin();
+        if (gamma != o.nMarker.end()) {
+            gamma++;
+        } // p.nMarker should not be empty anyways !
 
         if constexpr (DEBUG_PHASE_1) {
             stdout_write_config(this->grammar, &o);
             std::cout << "gamma: "
-                      << (gamma.empty() ? "nullptr"
-                                        : gamma.front().snode->symbol->c_str())
+                      << (gamma == o.nMarker.end()
+                            ? "nullptr"
+                            : gamma->snode->symbol->c_str())
                       << std::endl;
         }
 
         SymbolList gamma_theads{};
-        if (!gamma.empty()) { // if not nullptr, get theads.
+        if (gamma != o.nMarker.end()) { // if not nullptr, get theads.
             if constexpr (DEBUG_PHASE_1) {
                 std::cout << "gamma not nullptr, get theads." << std::endl;
             }
-            gamma_theads = get_theads(this->grammar, gamma); // get Heads.
+            gamma_theads =
+              get_theads(this->grammar, o.nMarker, gamma); // get Heads.
             if constexpr (DEBUG_PHASE_1) {
-                my_show_t_heads(gamma, gamma_theads);
+                my_show_t_heads(o.nMarker, gamma, gamma_theads);
             }
         } else {
             // gamma is nullptr, check if this is goal production.
