@@ -139,9 +139,6 @@ struct LtClusterEntry
     LlistState2 states{};       // in INC order of state_no.
     LlistContextSet ctxt_set{}; // in INC order of config->ruleID.
 
-    explicit LtClusterEntry() noexcept =
-      default; // TODO: remove this, and properly initialize
-               // `LaneTracing::new_cluster` ?
     explicit LtClusterEntry(LtTblEntry* e, bool& all_pairwise_disjoint);
     void dump(LtTblEntry& lane_tracing_table) const noexcept;
     /// Return:
@@ -484,7 +481,6 @@ class LaneTracing : public YAlgorithm
     /// Initialize this to nullptr at the beginning of phase2_regeneration2().
     /// This list is in the order of cluster insertion.
     LtCluster all_clusters{};
-    LtClusterEntry new_cluster{}; // TODO: use a free local variable instead ?
     /// Initialized to true. If in regeneration context conflicts occur,
     /// set this to false, which means the grammar is NOT LR(1).
     bool all_pairwise_disjoint = true;
@@ -506,9 +502,11 @@ class LaneTracing : public YAlgorithm
                                   const LlistContextSet& e_ctxt,
                                   size_t e_parent_state_no,
                                   bool copy) -> StateHandle;
-    auto cluster_trace_new_chain(StateHandle parent_state_no,
+    auto cluster_trace_new_chain(LtClusterEntry& new_cluster,
+                                 StateHandle parent_state_no,
                                  StateHandle state_no) -> bool;
-    auto cluster_trace_new_chain_all(StateHandle parent_state,
+    auto cluster_trace_new_chain_all(LtClusterEntry& new_cluster,
+                                     StateHandle parent_state,
                                      const LtTblEntry& e) -> bool;
     void context_adding(SymbolList context_generated,
                         size_t cur_config_index) const;

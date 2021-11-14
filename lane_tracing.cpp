@@ -1011,7 +1011,8 @@ clear_state_context(State* s)
 ///  false - combined with a cluster in all_clusters..
 ///  true - NOT combined with another cluster in all_clusters.
 auto
-LaneTracing::cluster_trace_new_chain(StateHandle parent_state_no,
+LaneTracing::cluster_trace_new_chain(LtClusterEntry& new_cluster,
+                                     StateHandle parent_state_no,
                                      StateHandle state_no) -> bool
 {
     bool is_new_chain = true;
@@ -1036,7 +1037,7 @@ LaneTracing::cluster_trace_new_chain(StateHandle parent_state_no,
 
     // state in in cluster c.
     std::optional<StateHandle> ret_state_opt =
-      this->new_cluster.contain_state(state_no);
+      new_cluster.contain_state(state_no);
     if (ret_state_opt.has_value()) {
         if constexpr (DEBUG_PHASE_2_REGENERATE2) {
             std::cout << "=>2. state " << *ret_state_opt
@@ -1044,7 +1045,7 @@ LaneTracing::cluster_trace_new_chain(StateHandle parent_state_no,
                       << " & propagate" << std::endl;
         }
         this->inherit_propagate(
-          *ret_state_opt, parent_state_no, this->new_cluster, e);
+          *ret_state_opt, parent_state_no, new_cluster, e);
 
         std::shared_ptr<State> old_state =
           this->new_states.states_new_array[state_no].state;
@@ -1079,7 +1080,7 @@ LaneTracing::cluster_trace_new_chain(StateHandle parent_state_no,
         }
 
         if (container->pairwise_disjoint) {
-            LlistContextSet x = this->new_cluster.ctxt_set.clone();
+            LlistContextSet x = new_cluster.ctxt_set.clone();
             llist_context_set_merge_chain(x, container->ctxt_set);
             bool is_pairwise_disjoint = x.pairwise_disjoint();
 
@@ -1089,13 +1090,12 @@ LaneTracing::cluster_trace_new_chain(StateHandle parent_state_no,
                       << "3. combine 2 clusters result is pairwise disjoint"
                       << std::endl;
                 }
-                this->new_cluster.combine(
-                  *container);        // container is the result.
-                is_new_chain = false; // not a new chain.
+                new_cluster.combine(*container); // container is the result.
+                is_new_chain = false;            // not a new chain.
 
                 // This is used so cluster_contain_state() at the beginning
                 // of this function can return correct value once c is changed.
-                this->new_cluster = *container;
+                new_cluster = *container;
                 // c = this->new_cluster;
 
                 if constexpr (DEBUG_PHASE_2_REGENERATE2) {
@@ -1121,11 +1121,11 @@ LaneTracing::cluster_trace_new_chain(StateHandle parent_state_no,
                           << " is NOT in any cluster yet" << std::endl;
             }
             ret_state = this->cluster_add_lt_tbl_entry(
-              this->new_cluster, state_no, *e_ctxt, parent_state_no, false);
+              new_cluster, state_no, *e_ctxt, parent_state_no, false);
 
-            if (this->new_cluster.pairwise_disjoint &&
-                !this->new_cluster.ctxt_set.pairwise_disjoint()) {
-                this->new_cluster.pairwise_disjoint = false;
+            if (new_cluster.pairwise_disjoint &&
+                !new_cluster.ctxt_set.pairwise_disjoint()) {
+                new_cluster.pairwise_disjoint = false;
                 all_pairwise_disjoint = false;
             }
             if (e != nullptr)
@@ -1143,10 +1143,10 @@ LaneTracing::cluster_trace_new_chain(StateHandle parent_state_no,
             // but combined context are NOT pairwise-disjoint.
             // so make a copy e' of e and add it to c.
             ret_state = this->cluster_add_lt_tbl_entry(
-              this->new_cluster, state_no, *e_ctxt, parent_state_no, true);
-            this->new_cluster.pairwise_disjoint =
-              this->new_cluster.ctxt_set.pairwise_disjoint();
-            if (!this->new_cluster.pairwise_disjoint) {
+              new_cluster, state_no, *e_ctxt, parent_state_no, true);
+            new_cluster.pairwise_disjoint =
+              new_cluster.ctxt_set.pairwise_disjoint();
+            if (!new_cluster.pairwise_disjoint) {
                 all_pairwise_disjoint = false;
             }
             if constexpr (DEBUG_PHASE_2_REGENERATE2) {
@@ -1158,7 +1158,8 @@ LaneTracing::cluster_trace_new_chain(StateHandle parent_state_no,
         }
 
         if (e != nullptr) { // recursively trace the chain.
-            is_new_chain = this->cluster_trace_new_chain_all(ret_state, *e);
+            is_new_chain =
+              this->cluster_trace_new_chain_all(new_cluster, ret_state, *e);
         }
     }
 
@@ -1167,14 +1168,15 @@ LaneTracing::cluster_trace_new_chain(StateHandle parent_state_no,
 
 /// parent_state: state_no of the parent state.
 auto
-LaneTracing::cluster_trace_new_chain_all(const StateHandle parent_state,
+LaneTracing::cluster_trace_new_chain_all(LtClusterEntry& new_cluster,
+                                         const StateHandle parent_state,
                                          const LtTblEntry& e) -> bool
 {
     bool is_new_chain = true;
 
     // recursively trace the chain.
     for (const auto& n : e.to_states) {
-        if (!this->cluster_trace_new_chain(parent_state, n)) {
+        if (!this->cluster_trace_new_chain(new_cluster, parent_state, n)) {
             is_new_chain = false;
         }
     }
@@ -1196,7 +1198,7 @@ LaneTracing::phase2_regeneration2()
         if (e.processed)
             continue;
 
-        this->new_cluster = LtClusterEntry(&e, this->all_pairwise_disjoint);
+        auto new_cluster = LtClusterEntry(&e, this->all_pairwise_disjoint);
 
         if constexpr (DEBUG_PHASE_2_REGENERATE2) {
             std::cout << "== chain head state: " << e.from_state << std::endl;
@@ -1207,11 +1209,12 @@ LaneTracing::phase2_regeneration2()
 
         e.processed = true;
 
-        is_new_chain = this->cluster_trace_new_chain_all(e.from_state, e);
+        is_new_chain =
+          this->cluster_trace_new_chain_all(new_cluster, e.from_state, e);
 
         // add new_cluster to the all_clusters list.
         if (is_new_chain) {
-            this->all_clusters.push_back(this->new_cluster);
+            this->all_clusters.push_back(new_cluster);
         }
     }
 
