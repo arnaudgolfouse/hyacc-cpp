@@ -18,7 +18,7 @@
  */
 
 /*
- * upe.c
+ * upe.cpp
  *
  * For unit production elimination and further remove redundant states.
  * This is separated out from y.c to make y.c size smaller.
@@ -42,13 +42,11 @@
 #include <string_view>
 #include <vector>
 
-/*
- * State numbers are added to the dynamic array cmbined_states
- * in function createNewUPSState(), where the size of
- * combined_states is given by old_states_count.
- * combined_states is dynamically allocated there and does not
- * need expansion later.
- */
+/// State numbers are added to the dynamic array cmbined_states
+/// in function createNewUPSState(), where the size of
+/// combined_states is given by old_states_count.
+/// combined_states is dynamically allocated there and does not
+/// need expansion later.
 struct UnitProdState
 {
     std::vector<StateHandle> combined_states{};
@@ -57,11 +55,6 @@ struct UnitProdState
 
 /* assume 500 new states maximal. */
 constexpr size_t UPS_SIZE = 64;
-
-static void
-get_reachable_states(const Grammar& grammar,
-                     const StateHandle cur_state,
-                     std::vector<StateHandle>& states_reachable);
 
 void
 print_int_array(std::ostream& os, const std::vector<StateHandle>& a)
@@ -102,11 +95,12 @@ print_int_array(std::ostream& os, const std::vector<StateHandle>& a)
 /// new state is not one from 0 to total states count - 1.
 ///
 /// These target states are to be combined in the next step.
-static void
-get_unit_prod_shift(StateHandle state,
-                    std::shared_ptr<SymbolTableNode> leaf,
-                    const MRParents& parents,
-                    std::vector<StateHandle>& unit_prod_dest_states)
+void
+YAlgorithm::get_unit_prod_shift(
+  StateHandle state,
+  std::shared_ptr<SymbolTableNode> leaf,
+  const MRParents& parents,
+  std::vector<StateHandle>& unit_prod_dest_states) const
 {
     // std::cout << "getUnitProdShift for '" <<  leaf<< "'" << std::endl;
     unit_prod_dest_states.clear();
@@ -193,15 +187,12 @@ Grammar::is_unit_production(StateHandle rule_no) const -> bool
     return false;
 }
 
-/*
- * Called by function insert_actionsOfCombinedStates().
- */
+/// Called by function insert_actionsOfCombinedStates().
 void
-YAlgorithm::insert_action_of_symbol(
-  std::shared_ptr<SymbolTableNode> symbol,
-  const StateHandle new_state, // NOLINT(bugprone-easily-swappable-parameters)
-  const size_t old_state_index,
-  const std::vector<StateHandle>& old_states)
+YAlgorithm::insert_action_of_symbol(std::shared_ptr<SymbolTableNode> symbol,
+                                    const StateHandle new_state,
+                                    const size_t old_state_index,
+                                    const std::vector<StateHandle>& old_states)
 {
     auto [action, state_dest] =
       get_action(symbol->type, get_col(*symbol), old_states[old_state_index]);
@@ -225,13 +216,11 @@ YAlgorithm::insert_action_of_symbol(
     }
 }
 
-/*
- * For a combined state, get actions from each of the states
- * from which the combined state is made of, and copy these
- * actions to the combined state.
- *
- * Called by remove_unit_production_step1and2() only.
- */
+/// For a combined state, get actions from each of the states
+/// from which the combined state is made of, and copy these
+/// actions to the combined state.
+///
+/// Called by remove_unit_production_step1and2() only.
 void
 YAlgorithm::insert_actions_of_combined_states(
   const StateHandle new_state,
@@ -264,15 +253,16 @@ YAlgorithm::insert_actions_of_combined_states(
 /// is stdout output. This is because after getting all
 /// parent symbols we can ignore to output them in the
 /// step writeFinalParsingTable!
-static void
-remove_unit_production_step3(const Grammar& grammar)
+void
+YAlgorithm::remove_unit_production_step3()
 {
     for (size_t i = 0; i < ParsingTblRows; i++) {
-        for (const auto& a : grammar.non_terminal_list) {
+        for (const auto& a : this->grammar.non_terminal_list) {
             // use "" as action and Error as dest state clears it.
             // Only those non-terminals y => x are cleared.
             if (is_parent_symbol(a.snode)) {
-                update_action(get_col(*a.snode), i, ParsingAction::new_error());
+                this->update_action(
+                  get_col(*a.snode), i, ParsingAction::new_error());
             }
         }
     }
@@ -295,19 +285,20 @@ vector_contains(const std::vector<T>& v, const T elem) -> bool
 /// But include it does not affect the cases for STR_END
 /// and terminals, which have only action 's'. So just
 /// include checking for 'g' for all three situations.
-static void
-get_reachable_states_for_symbol(const Grammar& grammar,
-                                const std::string_view symbol,
-                                const size_t cur_state,
-                                std::vector<size_t>& states_reachable)
+void
+YAlgorithm::get_reachable_states_for_symbol(
+  const std::string_view symbol,
+  const size_t cur_state,
+  std::vector<size_t>& states_reachable) const
 {
     const std::shared_ptr<const SymbolTableNode> n = hash_tbl_find(symbol);
 
-    auto [action, state_dest] = get_action(n->type, get_col(*n), cur_state);
+    auto [action, state_dest] =
+      this->get_action(n->type, get_col(*n), cur_state);
     if ((action == Action::Shift || action == Action::Goto) &&
         !vector_contains(states_reachable, state_dest)) {
         states_reachable.push_back(state_dest);
-        get_reachable_states(grammar, state_dest, states_reachable);
+        this->get_reachable_states(state_dest, states_reachable);
     }
 }
 
@@ -315,41 +306,37 @@ get_reachable_states_for_symbol(const Grammar& grammar,
 /// from cur_state, and stores the result in array
 /// states_reachable[].
 void
-get_reachable_states(const Grammar& grammar,
-                     const size_t cur_state,
-                     std::vector<size_t>& states_reachable)
+YAlgorithm::get_reachable_states(const size_t cur_state,
+                                 std::vector<size_t>& states_reachable) const
 {
-    get_reachable_states_for_symbol(
-      grammar, STR_END, cur_state, states_reachable);
+    this->get_reachable_states_for_symbol(STR_END, cur_state, states_reachable);
 
     for (const auto& a : grammar.terminal_list) {
-        get_reachable_states_for_symbol(
-          grammar, *a.snode->symbol, cur_state, states_reachable);
+        this->get_reachable_states_for_symbol(
+          *a.snode->symbol, cur_state, states_reachable);
     }
 
     for (const auto& a : grammar.non_terminal_list) {
         if (!is_parent_symbol(a.snode)) {
-            get_reachable_states_for_symbol(
-              grammar, *a.snode->symbol, cur_state, states_reachable);
+            this->get_reachable_states_for_symbol(
+              *a.snode->symbol, cur_state, states_reachable);
         }
     }
 }
 
 void
-write_parsing_table_col_header(std::ostream& os, const Grammar& grammar)
+YAlgorithm::write_parsing_table_col_header(std::ostream& os) const noexcept
 {
-    for (const auto& node : ParsingTblColHdr) {
-        if (!is_goal_symbol(grammar, node)) {
+    for (const auto& node : this->ParsingTblColHdr) {
+        if (!is_goal_symbol(this->grammar, node)) {
             os << node->symbol << "\t";
         }
     }
     os << std::endl;
 }
 
-/*
- * get final parsing table column headers.
- * + 1 for end marker STR_END.
- */
+/// get final parsing table column headers.
+/// + 1 for end marker STR_END.
 static void
 get_f_parsing_tbl_col_hdr(const Grammar& grammar)
 {
@@ -376,37 +363,33 @@ write_final_parsing_table_col_header(std::ostream& os)
     os << std::endl;
 }
 
-/*
- * step 4. delete all states at this stage
- * not reachable from state 0.
- * Does a recursive traveral starting from
- * state 0 to determine reachable state.
- *
- * int * states_reachable and int states_reachable_count
- * are defined in y.h.
- */
-static void
-remove_unit_production_step4(const Grammar& grammar)
+/// step 4. delete all states at this stage
+/// not reachable from state 0.
+/// Does a recursive traveral starting from
+/// state 0 to determine reachable state.
+///
+/// int * states_reachable and int states_reachable_count
+/// are defined in y.h.
+void
+YAlgorithm::remove_unit_production_step4() const
 {
     states_reachable.clear();
     states_reachable.reserve(ParsingTblRows);
-    get_reachable_states(grammar, 0, states_reachable);
+    this->get_reachable_states(0, states_reachable);
     std::sort(states_reachable.begin(), states_reachable.end());
 
-    if (Options::get().debug_remove_up_step_4) {
-        grammar.fp_v << std::endl
-                     << "--remove_" << std::endl
-                     << "it_producti" << std::endl
-                     << "_step4--\n";
-        grammar.fp_v << "states reachable from state 0:" << std::endl;
-        print_int_array(grammar.fp_v, states_reachable);
+    if (this->options.debug_remove_up_step_4) {
+        this->grammar.fp_v << std::endl
+                           << "--remove_unit_production_step4--" << std::endl
+                           << "states reachable from state 0:" << std::endl;
+        print_int_array(this->grammar.fp_v, states_reachable);
     }
 
-    get_f_parsing_tbl_col_hdr(grammar);
+    get_f_parsing_tbl_col_hdr(this->grammar);
 }
 
 auto
-is_reachable_state(StateHandle state) -> bool
+is_reachable_state(const StateHandle state) -> bool
 {
     if (state == 0 || vector_contains(states_reachable, state)) {
         return true;
@@ -414,54 +397,50 @@ is_reachable_state(StateHandle state) -> bool
     return false;
 }
 
-/*
- * The parsing table array does not change,
- * only change the output entries.
- */
+/// The parsing table array does not change,
+/// only change the output entries.
 void
-print_final_parsing_table(const Grammar& grammar)
+YAlgorithm::print_final_parsing_table() const noexcept
 {
-    grammar.fp_v << std::endl << "--Pars" << std::endl << "g Table--\n";
-    grammar.fp_v << "State\t";
-    write_final_parsing_table_col_header(grammar.fp_v);
+    this->grammar.fp_v << std::endl << "--Parsing Table--" << std::endl;
+    this->grammar.fp_v << "State\t";
+    write_final_parsing_table_col_header(this->grammar.fp_v);
 
     for (size_t row = 0; row < ParsingTblRows; row++) {
         if (is_reachable_state(row)) {
-            grammar.fp_v << row << "\t";
-            for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
-                std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
-                if (is_goal_symbol(grammar, n) == false &&
-                    is_parent_symbol(n) == false) {
+            this->grammar.fp_v << row << "\t";
+            for (size_t col = 0; col < this->ParsingTblColHdr.size(); col++) {
+                std::shared_ptr<SymbolTableNode> n =
+                  this->ParsingTblColHdr[col];
+                if (!is_goal_symbol(this->grammar, n) && !is_parent_symbol(n)) {
                     auto [action, state] = get_action(n->type, col, row);
-                    grammar.fp_v << action << state << "\t";
+                    this->grammar.fp_v << action << state << "\t";
                 }
             }
 
-            grammar.fp_v << std::endl;
+            this->grammar.fp_v << std::endl;
         }
     }
-    print_parsing_table_note(grammar.fp_v);
+    print_parsing_table_note(this->grammar.fp_v);
 }
 
-/*
- * There are some holes in the parsing table.
- * Now do a first pass to record the "virtual" state number
- * and the "actual" state number correspondence relationship,
- * then when print the parsing table, replace those
- * "virtual" state numbers with corresponding "actual"
- * state numbers.
- *
- * Store the correspondence relationship in array
- * actual_state_no[].
- * actual_state_no[2 * i] is virtual state,
- * actual_state_no[2 * i + 1} is actual state.
- *
- * The following two are defined in y.h:
- * int actual_state_no[2 * STATE_COLLECTION_SIZE];
- * int actual_state_no_ct;
- */
+/// There are some holes in the parsing table.
+/// Now do a first pass to record the "virtual" state number
+/// and the "actual" state number correspondence relationship,
+/// then when print the parsing table, replace those
+/// "virtual" state numbers with corresponding "actual"
+/// state numbers.
+///
+/// Store the correspondence relationship in array
+/// actual_state_no[].
+/// actual_state_no[2 * i] is virtual state,
+/// actual_state_no[2 * i + 1} is actual state.
+///
+/// The following two are defined in y.h:
+/// int actual_state_no[2 * STATE_COLLECTION_SIZE];
+/// int actual_state_no_ct;
 void
-get_actual_state_no()
+YAlgorithm::get_actual_state_no()
 {
     size_t row_size = ParsingTblRows;
     actual_state_no.clear();
@@ -496,40 +475,37 @@ write_actual_state_array(std::ostream& os)
     if (!Options::get().use_remove_unit_production)
         return;
 
-    os << std::endl << "\n--actual state array [actual, pseudo]--" << std::endl;
+    os << std::endl
+       << std::endl
+       << "--actual state array [actual, pseudo]--" << std::endl;
     for (size_t i = 0; i < actual_state_no.size(); i += 2) {
         if (i > 0 && i % LINE_LENGTH == 0)
             os << std::endl;
         os << "[" << actual_state_no[i] << ", " << actual_state_no[i + 1]
            << "] ";
     }
-    os << std::endl << "\n";
+    os << std::endl << std::endl;
 }
 
-/*
- * If an action is 's' or 'g', change its target state number
- * from virtual to actual.
- */
+/// If an action is 's' or 'g', change its target state number
+/// from virtual to actual.
 void
-print_condensed_final_parsing_table(const Grammar& grammar)
+YAlgorithm::print_condensed_final_parsing_table() const noexcept
 {
     // value assigned at the end of generate_parsing_table().
 
-    grammar.fp_v << std::endl
-                 << "--F" << std::endl
-                 << "al Pars" << std::endl
-                 << "g Table--\n";
-    grammar.fp_v << "State\t";
-    write_final_parsing_table_col_header(grammar.fp_v);
+    this->grammar.fp_v << std::endl << "--Final Parsing Table--" << std::endl;
+    this->grammar.fp_v << "State\t";
+    write_final_parsing_table_col_header(this->grammar.fp_v);
 
     int i = 0;
     for (size_t row = 0; row < ParsingTblRows; row++) {
         if (is_reachable_state(row)) {
-            grammar.fp_v << i << "\t";
-            for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
-                std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
-                if (is_goal_symbol(grammar, n) == false &&
-                    is_parent_symbol(n) == false) {
+            this->grammar.fp_v << i << "\t";
+            for (size_t col = 0; col < this->ParsingTblColHdr.size(); col++) {
+                std::shared_ptr<SymbolTableNode> n =
+                  this->ParsingTblColHdr[col];
+                if (!is_goal_symbol(this->grammar, n) && !is_parent_symbol(n)) {
                     auto [action, state_no] = get_action(n->type, col, row);
                     if (action == Action::Shift || action == Action::Goto)
                         state_no = *get_actual_state(state_no);
@@ -538,18 +514,16 @@ print_condensed_final_parsing_table(const Grammar& grammar)
             }
 
             i++;
-            grammar.fp_v << std::endl;
+            this->grammar.fp_v << std::endl;
         }
     }
 
-    print_parsing_table_note(grammar.fp_v);
+    print_parsing_table_note(this->grammar.fp_v);
 }
 
-/*
- * This actually is not needed too (see step 3).
- * Because all we care in x -> a b c
- * is how many symbols we have on the RHS.
- */
+/// This actually is not needed too (see step 3).
+/// Because all we care in x -> a b c
+/// is how many symbols we have on the RHS.
 static void
 remove_unit_production_step5(const Grammar& grammar, const MRLeaves& mr_leaves)
 {
@@ -581,11 +555,8 @@ YAlgorithm::remove_unit_production_step1and2(const MRLeaves& mr_leaves)
 
     if (debug_remove_up_step_1_2) {
         grammar.fp_v << std::endl
-                     << "--remove_" << std::endl
-                     << "it_producti" << std::endl
-                     << "_step1" << std::endl
-                     << "d2--\n";
-        grammar.fp_v << "--writeUnitProdShift--" << std::endl;
+                     << "--remove_unit_production_step1and2--" << std::endl
+                     << "--writeUnitProdShift--" << std::endl;
     }
 
     // now, steps 1 and 2.
@@ -616,9 +587,10 @@ YAlgorithm::remove_unit_production_step1and2(const MRLeaves& mr_leaves)
                 }
 
                 // Update the link from src_state to leaf transition state
-                update_action(get_col(*leaf),
-                              state,
-                              ParsingAction::new_shift(*ups_state)); // shift.
+                this->update_action(
+                  get_col(*leaf),
+                  state,
+                  ParsingAction::new_shift(*ups_state)); // shift.
 
                 if (debug_remove_up_step_1_2) {
                     write_unit_prod_shift(grammar.fp_v,
@@ -631,8 +603,8 @@ YAlgorithm::remove_unit_production_step1and2(const MRLeaves& mr_leaves)
         }
     }
     if (debug_remove_up_step_1_2) {
-        grammar.fp_v << "--after remove_unit_production_step1and2(), ";
-        grammar.fp_v << "total states: " << ParsingTblRows << "--" << std::endl;
+        grammar.fp_v << "--after remove_unit_production_step1and2(), "
+                     << "total states: " << ParsingTblRows << "--" << std::endl;
     }
 }
 
@@ -645,8 +617,8 @@ YAlgorithm::remove_unit_production()
     MRLeaves mr_leaves = build_multirooted_tree(this->grammar);
 
     remove_unit_production_step1and2(mr_leaves);
-    remove_unit_production_step3(this->grammar);
-    remove_unit_production_step4(this->grammar);
+    this->remove_unit_production_step3();
+    this->remove_unit_production_step4();
     remove_unit_production_step5(this->grammar, mr_leaves);
 
     this->n_state_opt12 = states_reachable.size() + 1;
@@ -661,12 +633,14 @@ YAlgorithm::remove_unit_production()
 /////////////////////////////////////////////////////
 
 /// Determine if rows i and j in the parsing table are the same.
-static auto
-is_equal_row(const StateHandle i, const StateHandle j) -> bool
+auto
+YAlgorithm::is_equal_row(const StateHandle i, const StateHandle j) const -> bool
 {
-    for (const auto& n : ParsingTblColHdr) {
-        auto [action_i, state_dest_i] = get_action(n->type, get_col(*n), i);
-        auto [action_j, state_dest_j] = get_action(n->type, get_col(*n), j);
+    for (const auto& n : this->ParsingTblColHdr) {
+        auto [action_i, state_dest_i] =
+          this->get_action(n->type, get_col(*n), i);
+        auto [action_j, state_dest_j] =
+          this->get_action(n->type, get_col(*n), j);
         if (action_i != action_j || state_dest_i != state_dest_j)
             return false;
     }
@@ -676,12 +650,10 @@ is_equal_row(const StateHandle i, const StateHandle j) -> bool
 
 /// In parsing table row, replace entries whose
 /// target state is old_state by new_state.
-static void
-update_repeated_row(const Grammar& grammar,
-                    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-                    const StateHandle new_state,
-                    const StateHandle old_state,
-                    const StateHandle row)
+void
+YAlgorithm::update_repeated_row(const StateHandle new_state,
+                                const StateHandle old_state,
+                                const StateHandle row) noexcept
 {
     // std::cout << "In row " << row << ", replace " << old_state << " by "
     //           << new_state << std::endl;
@@ -690,92 +662,80 @@ update_repeated_row(const Grammar& grammar,
     std::shared_ptr<SymbolTableNode> n = hash_tbl_find(STR_END);
     auto [action, state_dest] = get_action(n->type, get_col(*n), row);
     if (state_dest == old_state)
-        update_action(get_col(*hash_tbl_find(STR_END)),
-                      row,
-                      ParsingAction::new_shift(new_state));
+        this->update_action(get_col(*hash_tbl_find(STR_END)),
+                            row,
+                            ParsingAction::new_shift(new_state));
 
     // for terminal columns
-    for (const auto& a : grammar.terminal_list) {
+    for (const auto& a : this->grammar.terminal_list) {
         n = a.snode;
         auto [action, state_dest] = get_action(n->type, get_col(*n), row);
         if (state_dest == old_state)
-            update_action(
+            this->update_action(
               get_col(*a.snode), row, ParsingAction::new_shift(new_state));
     }
 
     // for non-terminal columns
-    for (const auto& a : grammar.non_terminal_list) {
+    for (const auto& a : this->grammar.non_terminal_list) {
         n = a.snode;
         auto [action, state_dest] = get_action(n->type, get_col(*n), row);
         if (state_dest == old_state)
-            update_action(
+            this->update_action(
               get_col(*a.snode), row, ParsingAction::new_shift(new_state));
     }
 }
 
-/*
- * Go through the entire parsing table (only those reachable
- * states, to save time), replace those entries
- * whose target state is old_state by new_state.
- */
-static void
-update_repeated_rows(const Grammar& grammar,
-                     const StateHandle new_state,
-                     const StateHandle old_state)
+/// Go through the entire parsing table (only those reachable
+/// states, to save time), replace those entries
+/// whose target state is old_state by new_state.
+void
+YAlgorithm::update_repeated_rows(const StateHandle new_state,
+                                 const StateHandle old_state) noexcept
 {
-    update_repeated_row(grammar, new_state, old_state, 0); // row 0.
+    this->update_repeated_row(new_state, old_state, 0); // row 0.
 
     for (const auto& state_reachable : states_reachable)
-        update_repeated_row(grammar, new_state, old_state, state_reachable);
+        this->update_repeated_row(new_state, old_state, state_reachable);
 }
 
-/*
- * Remove state i from the array of reachable states.
- */
+/// Remove state i from the array of reachable states.
 void
 remove_reachable_state(int i)
 {
     states_reachable.erase(states_reachable.begin() + i);
 }
 
-/*
- * Remove the repeated states in the parsing table.
- * It seems that repeated states are always adjacent to each other.
- * The algorithm is:
- *   for each state,
- *     find all successive states that are the same as it,
- *     go through the entire parsing table to update link to
- *     those repeated states to the first such state.
- *     remove the repeated states from the reachable states.
- *
- * Note:
- * It seems that all equal rows are adjacent to each other,
- * Using this observation, it's faster to go through the cycle.
- * But this is just an observation though.
- * Maybe should use the safer way, to use a double loop.
- * It's O(n^2) anyway.
- */
+/// Remove the repeated states in the parsing table.
+/// It seems that repeated states are always adjacent to each other.
+/// The algorithm is:
+///   for each state,
+///     find all successive states that are the same as it,
+///     go through the entire parsing table to update link to
+///     those repeated states to the first such state.
+///     remove the repeated states from the reachable states.
+///
+/// Note:
+/// It seems that all equal rows are adjacent to each other,
+/// Using this observation, it's faster to go through the cycle.
+/// But this is just an observation though.
+/// Maybe should use the safer way, to use a double loop.
+/// It's O(n^2) anyway.
 void
 YAlgorithm::further_optimization()
 {
     for (size_t k = 0; k < states_reachable.size() - 1; k++) {
         StateHandle i = states_reachable[k];
         StateHandle j = states_reachable[k + 1];
-        // std::cout << "furtherOpt: i = " <<  i<< ", j = " <<  j << std::endl;
         do {
-            if (is_equal_row(i, j) == false)
+            if (!this->is_equal_row(i, j))
                 break;
 
-            update_repeated_rows(grammar, i, j);
-            // std::cout << "state " <<  states_reachable[k + 1]<< " removed" <<
-            // std::endl;
+            this->update_repeated_rows(i, j);
             states_reachable.erase(states_reachable.begin() +
                                    static_cast<ptrdiff_t>(k) + 1);
             if ((k + 1) == states_reachable.size())
                 break;
             j = states_reachable[k + 1];
-            // std::cout << "- furtherOpt: i = " <<  i<< ", j = " <<  j <<
-            // std::endl;
         } while (true);
     }
 
@@ -783,8 +743,8 @@ YAlgorithm::further_optimization()
 
     if (this->options.show_parsing_tbl &&
         (this->n_state_opt12 > this->n_state_opt123)) {
-        this->grammar.fp_v << "After further optimization, ";
-        this->grammar.fp_v << "total states reduced from "
+        this->grammar.fp_v << "After further optimization, "
+                           << "total states reduced from "
                            << this->n_state_opt12 << " to "
                            << this->n_state_opt123 << std::endl;
     }

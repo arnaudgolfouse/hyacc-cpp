@@ -86,9 +86,10 @@ insert_cfg_ctxt_to_set(const std::shared_ptr<CfgCtxt> cc,
 /// for each token in token_list (context list).
 /// @param lrk_pt_array LR(k) parsing table array.
 static void
-insert_lrk_pt(LRkPTArray& lrk_pt_array,
+insert_lrk_pt(LRkPTArray& lrk_pt_array, // so many args, help 😭
               const StateHandle state_no,
-              const SymbolList token_list,
+              const SymbolList& token_list,
+              const size_t parsing_tbl_col_hdr_size,
               const std::shared_ptr<SymbolTableNode> col,
               Configuration* c,
               Configuration* c_tail,
@@ -107,7 +108,8 @@ insert_lrk_pt(LRkPTArray& lrk_pt_array,
         std::optional<ConfigPairNode> c0 =
           pt->get_entry(state_no, token.snode, col, &exist);
         if (exist == false || !c0.has_value()) { // no conflict.
-            pt->add_reduction(state_no, token.snode, col, c, c_tail);
+            pt->add_reduction(
+              state_no, token.snode, parsing_tbl_col_hdr_size, col, c, c_tail);
         } else { // exist is true, and c0 != nullptr.
             SymbolList list;
             list.emplace_back(col);
@@ -117,7 +119,12 @@ insert_lrk_pt(LRkPTArray& lrk_pt_array,
                 cc = std::make_shared<CfgCtxt>(c0->start, list, *c0->end);
                 insert_cfg_ctxt_to_set(cc, set_c2);
                 // set this entry to nullopt.
-                pt->add_reduction(state_no, token.snode, col, c, c_tail);
+                pt->add_reduction(state_no,
+                                  token.snode,
+                                  parsing_tbl_col_hdr_size,
+                                  col,
+                                  c,
+                                  c_tail);
             }
         }
     }
@@ -144,9 +151,7 @@ LaneTracing::lrk_config_lane_tracing(Configuration& c) noexcept
     // note that the value of cur_red_config does not need recovery.
 }
 
-/*
- * @Return: the conflict symbol list of configuration c in INC order.
- */
+/// @Return: the conflict symbol list of configuration c in INC order.
 static auto
 get_config_conflict_context(Configuration* c,
                             const StateArray& states_new_array) -> SymbolList
@@ -175,9 +180,10 @@ get_config_conflict_context(Configuration* c,
 }
 
 static void
-fill_set_c2(SymbolList edge_pushing_context_generated,
+fill_set_c2(const SymbolList& edge_pushing_context_generated,
             LRkPTArray& lrk_pt_array,
             ConfigPairNode& n,
+            const size_t parsing_tbl_col_hdr_size,
             const Configuration* c,
             Configuration* c_tail,
             const int k1,
@@ -191,14 +197,18 @@ fill_set_c2(SymbolList edge_pushing_context_generated,
               << n.start->ruleID << ". z = " << c->z << " + " << k1
               << " - 1 = " << n.start->z << std::endl;
     for (const auto& sn : edge_pushing_context_generated) {
-        insert_lrk_pt(
-          lrk_pt_array, state_no, cc->ctxt, sn.snode, n.start, c_tail, set_c2);
+        insert_lrk_pt(lrk_pt_array,
+                      state_no,
+                      cc->ctxt,
+                      parsing_tbl_col_hdr_size,
+                      sn.snode,
+                      n.start,
+                      c_tail,
+                      set_c2);
     }
 }
 
-/*
- * @Input: inadequate state no.: state_no.
- */
+/// @Input: inadequate state no.: state_no.
 void
 LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, StateHandle state_no)
 {
@@ -262,6 +272,7 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, StateHandle state_no)
                     insert_lrk_pt(lrk_pt_array,
                                   state_no,
                                   cc->ctxt,
+                                  this->ParsingTblColHdr.size(),
                                   x_str.back().snode,
                                   c,
                                   c_tail,
@@ -278,6 +289,7 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, StateHandle state_no)
                             fill_set_c2(this->edge_pushing_context_generated,
                                         lrk_pt_array,
                                         *n,
+                                        this->ParsingTblColHdr.size(),
                                         c,
                                         c_tail,
                                         k1,
@@ -293,6 +305,7 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, StateHandle state_no)
                             fill_set_c2(this->edge_pushing_context_generated,
                                         lrk_pt_array,
                                         n,
+                                        this->ParsingTblColHdr.size(),
                                         c,
                                         c_tail,
                                         k1,
@@ -355,18 +368,18 @@ remove_rr_conflict_from_list(size_t state_no, NewStates& new_states)
 /// 1) set entry to -10000010.
 /// 2) remove this conflict from conflict list.
 static void
-update_lr1_parsing_table(size_t state_no, NewStates& new_states)
+update_lr1_parsing_table(size_t state_no, LR0& lr0)
 {
     for (std::shared_ptr<Conflict> c =
-           new_states.states_new_array[state_no].conflict;
+           lr0.new_states.states_new_array[state_no].conflict;
          c != nullptr;
          c = c->next) {
-        update_action(
+        lr0.update_action(
           get_col(*c->lookahead), state_no, ParsingAction::new_error());
     }
 
     // remove r/r conflict node from list.
-    remove_rr_conflict_from_list(state_no, new_states);
+    remove_rr_conflict_from_list(state_no, lr0.new_states);
 }
 
 auto
@@ -387,7 +400,7 @@ LaneTracing::lane_tracing_lrk() -> std::optional<LRkPTArray>
         if (state_no >= 0 && ct_rr > 0) {
             this->edge_pushing(lrk_pt_array, state_no);
             // update corresonding entry in LR(1) parsing table.
-            update_lr1_parsing_table(state_no, new_states);
+            update_lr1_parsing_table(state_no, *this);
         }
     }
     return lrk_pt_array;

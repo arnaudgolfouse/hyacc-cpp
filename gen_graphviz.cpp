@@ -178,9 +178,7 @@ update_r_list(GvNodeList& r_list,
 /// Has the same logic as printParsingTable() in y.c.
 /// For O0, O1.
 void
-gen_graphviz_input(const Grammar& grammar,
-                   const std::string& y_gviz,
-                   const Options& options)
+YAlgorithm::gen_graphviz_input(const std::string& y_gviz) const noexcept
 {
     std::ofstream fp_gviz;
     fp_gviz.open(y_gviz);
@@ -194,9 +192,9 @@ gen_graphviz_input(const Grammar& grammar,
         GvNodeList r_list{};
         GvNodeList s_list{};
 
-        for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
-            std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
-            if (!is_goal_symbol(grammar, n)) {
+        for (size_t col = 0; col < this->ParsingTblColHdr.size(); col++) {
+            std::shared_ptr<SymbolTableNode> n = this->ParsingTblColHdr[col];
+            if (!is_goal_symbol(this->grammar, n)) {
                 auto [action, state] = get_action(n->type, col, row);
                 // std::cout  <<  action <<  state<< "\t";
                 if (!action.has_value()) {
@@ -212,7 +210,7 @@ gen_graphviz_input(const Grammar& grammar,
             }
         }
 
-        update_r_list(r_list, s_list, options);
+        update_r_list(r_list, s_list, this->options);
 
         dump_gv_node_list_r(r_list, row, fp_gviz);
         dump_gv_node_list_s(s_list, row, fp_gviz);
@@ -225,9 +223,7 @@ gen_graphviz_input(const Grammar& grammar,
 /// Has the same logic as printCondensedFinalParsingTable() in y.c.
 /// For O2, O3.
 void
-gen_graphviz_input2(const Grammar& grammar,
-                    const std::string& y_gviz,
-                    const Options& options)
+YAlgorithm::gen_graphviz_input2(const std::string& y_gviz) const noexcept
 {
     std::ofstream fp_gviz;
     fp_gviz.open(y_gviz);
@@ -242,9 +238,10 @@ gen_graphviz_input2(const Grammar& grammar,
         GvNodeList r_list{};
         GvNodeList s_list{};
         if (is_reachable_state(row)) {
-            for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
-                std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
-                if (!is_goal_symbol(grammar, n) && !is_parent_symbol(n)) {
+            for (size_t col = 0; col < this->ParsingTblColHdr.size(); col++) {
+                std::shared_ptr<SymbolTableNode> n =
+                  this->ParsingTblColHdr[col];
+                if (!is_goal_symbol(this->grammar, n) && !is_parent_symbol(n)) {
                     auto [action, state] = get_action(n->type, col, row);
                     if (action == Action::Shift || action == Action::Goto)
                         state = *get_actual_state(state);
@@ -264,7 +261,7 @@ gen_graphviz_input2(const Grammar& grammar,
             }
             i++;
 
-            update_r_list(r_list, s_list, options);
+            update_r_list(r_list, s_list, this->options);
 
             StateHandle src_state = *get_actual_state(row);
             dump_gv_node_list_r(r_list, src_state, fp_gviz);

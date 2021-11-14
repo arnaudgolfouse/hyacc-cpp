@@ -211,8 +211,7 @@ LRkPT::dump() const noexcept
 
     for (const LRkPTRow* r = this->rows; r != nullptr; r = r->next) {
         std::cout << "[" << r->state << ", " << r->token->snode->symbol << "] ";
-        for (size_t i = 0; i < ParsingTblColHdr.size(); i++) {
-            const std::optional<ConfigPairNode>& n = r->row.at(i);
+        for (const auto& n : r->row) {
             if (!n.has_value()) {
                 std::cout << "0 ";
             } else {
@@ -245,8 +244,7 @@ lrk_pt_dump_file(const LRkPT* t, std::ofstream& fp)
 
     for (const LRkPTRow* r = t->rows; r != nullptr; r = r->next) {
         fp << "[" << r->state << ", " << r->token->snode->symbol << "] ";
-        for (size_t i = 0; i < ParsingTblColHdr.size(); i++) {
-            const std::optional<ConfigPairNode>& n = r->row.at(i);
+        for (const auto& n : r->row) {
             if (!n.has_value()) {
                 fp << "0 ";
             } else {
@@ -302,6 +300,7 @@ LRkPT::find(StateHandle state,
 static auto
 lrk_pt_add_row(LRkPT* t,
                LRkPTRow* r_prev,
+               const size_t parsing_tbl_col_hdr_size,
                StateHandle state,
                std::shared_ptr<SymbolTableNode> token) -> LRkPTRow*
 {
@@ -309,7 +308,7 @@ lrk_pt_add_row(LRkPT* t,
     r->state = state;
     r->token = std::make_shared<SymbolNode>(token);
 
-    for (size_t i = 0; i < ParsingTblColHdr.size(); i++) {
+    for (size_t i = 0; i < parsing_tbl_col_hdr_size; i++) {
         r->row.emplace_back(std::nullopt); // initialize to nullopt.
     }
 
@@ -341,7 +340,7 @@ LRkPT::get_entry(StateHandle state,
         return std::nullopt; // row not exist in t.
 
     *exist = true; // this entry exists.
-    int index = get_col(*col_token);
+    size_t index = get_col(*col_token);
 
     return r->row.at(index);
 }
@@ -355,6 +354,7 @@ LRkPT::get_entry(StateHandle state,
 auto
 LRkPT::add_reduction(StateHandle state,
                      std::shared_ptr<SymbolTableNode> token,
+                     const size_t parsing_tbl_col_hdr_size,
                      const std::shared_ptr<const SymbolTableNode> s,
                      Configuration* c,
                      Configuration* c_tail) noexcept -> bool
@@ -363,7 +363,7 @@ LRkPT::add_reduction(StateHandle state,
     LRkPTRow* r = this->find(state, token, &found);
 
     if (found == false) { // insert new entry
-        r = lrk_pt_add_row(this, r, state, token);
+        r = lrk_pt_add_row(this, r, parsing_tbl_col_hdr_size, state, token);
     }
 
     // now add the reduce action on token s.
@@ -437,31 +437,35 @@ LRkPTArray::get(size_t k) const noexcept -> LRkPT*
 }
 
 static void
-write_parsing_tbl_col_hdr()
+write_parsing_tbl_col_hdr(
+  const std::vector<std::shared_ptr<SymbolTableNode>>& parsing_tbl_col_hdr)
 {
     std::cout << "--Parsing Table Column Header [Total: "
-              << ParsingTblColHdr.size() << "]--" << std::endl;
-    for (const auto& i : ParsingTblColHdr) {
+              << parsing_tbl_col_hdr.size() << "]--" << std::endl;
+    for (const auto& i : parsing_tbl_col_hdr) {
         std::cout << i->symbol << " ";
     }
     std::cout << std::endl;
 }
 
 static void
-write_parsing_tbl_col_hdr_file(std::ostream& fp)
+write_parsing_tbl_col_hdr_file(
+  std::ostream& fp,
+  const std::vector<std::shared_ptr<SymbolTableNode>>& parsing_tbl_col_hdr)
 {
-    fp << "--Parsing Table Column Header [Total: " << ParsingTblColHdr.size()
+    fp << "--Parsing Table Column Header [Total: " << parsing_tbl_col_hdr.size()
        << "]--" << std::endl;
-    for (const auto& i : ParsingTblColHdr) {
+    for (const auto& i : parsing_tbl_col_hdr) {
         fp << i->symbol << " ";
     }
     fp << std::endl;
 }
 
 void
-LRkPTArray::dump() const noexcept
+LRkPTArray::dump(const std::vector<std::shared_ptr<SymbolTableNode>>&
+                   parsing_tbl_col_hdr) const noexcept
 {
-    write_parsing_tbl_col_hdr();
+    write_parsing_tbl_col_hdr(parsing_tbl_col_hdr);
     std::cout << "===LRkPTArray_dump [max_k = " << this->max_k()
               << "]===" << std::endl;
 
@@ -476,11 +480,10 @@ LRkPTArray::dump() const noexcept
     std::cout << "====================================" << std::endl;
 }
 
-/*
- * Dump to disk.
- */
+/// Dump to disk.
 void
-LRkPTArray::dump_file() const noexcept
+LRkPTArray::dump_file(const std::vector<std::shared_ptr<SymbolTableNode>>&
+                        parsing_tbl_col_hdr) const noexcept
 {
     std::ofstream fp2;
     fp2.open("y.lrk");
@@ -489,7 +492,7 @@ LRkPTArray::dump_file() const noexcept
         return;
     }
 
-    write_parsing_tbl_col_hdr_file(fp2);
+    write_parsing_tbl_col_hdr_file(fp2, parsing_tbl_col_hdr);
     fp2 << "===LRkPTArray_dump [max_k = " << this->max_k()
         << "]===" << std::endl;
 

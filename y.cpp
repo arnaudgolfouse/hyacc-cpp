@@ -56,13 +56,11 @@ std::atomic_int MAX_K;
 std::array<HashTblNode, HT_SIZE> HashTbl;
 // Grammar grammar;
 std::atomic_size_t PARSING_TABLE_SIZE;
-std::vector<std::optional<ParsingAction>> ParsingTable;
 size_t ParsingTblRows;
-std::vector<std::shared_ptr<SymbolTableNode>> ParsingTblColHdr;
 SymbolList F_ParsingTblColHdr;
 std::vector<StateHandle> states_reachable;
 std::vector<StateHandle> actual_state_no;
-int n_symbol;
+size_t n_symbol;
 size_t n_rule;
 size_t n_rule_opt;
 std::vector<StateHandle> final_state_list;
@@ -70,15 +68,9 @@ StateNoArray states_inadequate{};
 
 /* Declaration of functions. */
 static void
-init_parsing_table();
-static void
 free_config(Configuration* c);
 static auto
 is_compatible_config(const Configuration* c1, const Configuration* c2) -> bool;
-static void
-write_state_transition_list(std::ostream& os,
-                            const Grammar& grammar,
-                            const NewStates& new_states);
 
 std::string hyacc_filename;
 
@@ -361,7 +353,6 @@ YAlgorithm::init()
     // for finding same/compatible states fast.
     this->state_hash_table.init();
     this->init_start_state();
-    init_parsing_table();
 }
 
 auto
@@ -1109,7 +1100,7 @@ get_config_successors(const Grammar& grammar,
 // This is much slower, and is used for testing only.
 //////////////////////////////////////////////////////
 
-static void
+[[maybe_unused]] static void
 get_successor_for_config(const Grammar& grammar,
                          std::shared_ptr<State> s,
                          const Configuration& config)
@@ -1335,7 +1326,6 @@ find_state_for_scanned_symbol(
 
 auto
 create_config(const Grammar& grammar,
-              // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
               const size_t rule_id,
               const size_t marker,
               const uint is_core_config) -> Configuration*
@@ -1958,31 +1948,14 @@ YAlgorithm::generate_parsing_machine()
  * 1) updateDestState, 2) getAction, 3) insertAction.
  */
 
-/// Use a one-dimension array to store the matrix and
-/// calculate the row and column number myself:
-/// row i, col j is ParsingTable.at(col_no * i + j);
-///
-/// Here we have:
-/// 0 <= i < total states count
-/// 0 <= j < col_no
-void
-init_parsing_table()
-{
-    PARSING_TABLE_SIZE = PARSING_TABLE_INIT_SIZE;
-    size_t total_cells = PARSING_TABLE_SIZE * ParsingTblColHdr.size();
-    ParsingTable.clear();
-    ParsingTable.reserve(4 * total_cells);
-    for (size_t i = 0; i < 4 * total_cells; i++) {
-        ParsingTable.emplace_back(std::nullopt);
-    }
-}
-
 auto
-get_action(symbol_type symbol_type, size_t col, StateHandle row)
+LR0::get_action(const symbol_type symbol_type,
+                const size_t col,
+                const StateHandle row) const
   -> std::pair<std::optional<Action>, StateHandle>
 {
     const std::optional<ParsingAction> x_opt =
-      ParsingTable.at(row * ParsingTblColHdr.size() + col);
+      this->ParsingTable.at(row * this->ParsingTblColHdr.size() + col);
 
     if (!x_opt.has_value()) {
         return { std::nullopt, 0 };
@@ -2009,26 +1982,24 @@ get_action(symbol_type symbol_type, size_t col, StateHandle row)
     return { Action::Reduce, 1 }; // TODO: ???
 }
 
-/*
- * Inserts an action into the parsing table.
- * Input variables include:
- *   state_src - given state.
- *   symbol - transition symbol.
- *   action - action on this symbol at this state.
- *   state_dest - destination state of the action.
- *
- * Actions can be:
- *   r - reduce, state_dest < 0
- *   s - shift,  state_dest > 0
- *   a - accept, state_dest == CONST_ACC
- *   g - goto.   state_dest > 0
- *
- * This is one of the 3 places updating the ParsingTable
- * array directly. The 2nd place is function updateAction().
- * The 3rd place is in the macro
- *   clearStateTerminalTransitions(state_no)
- * in lane_tracing.c.
- */
+/// Inserts an action into the parsing table.
+/// Input variables include:
+///   state_src - given state.
+///   symbol - transition symbol.
+///   action - action on this symbol at this state.
+///   state_dest - destination state of the action.
+///
+/// Actions can be:
+///   r - reduce, state_dest < 0
+///   s - shift,  state_dest > 0
+///   a - accept, state_dest == CONST_ACC
+///   g - goto.   state_dest > 0
+///
+/// This is one of the 3 places updating the ParsingTable
+/// array directly. The 2nd place is function updateAction().
+/// The 3rd place is in the macro
+///   clearStateTerminalTransitions(state_no)
+/// in lane_tracing.c.
 void
 LR0::insert_action(std::shared_ptr<SymbolTableNode> lookahead,
                    StateHandle row,
@@ -2036,9 +2007,10 @@ LR0::insert_action(std::shared_ptr<SymbolTableNode> lookahead,
 {
     struct TerminalProperty *tp_s = nullptr, *tp_r = nullptr;
 
-    const size_t cell = row * ParsingTblColHdr.size() + get_col(*lookahead);
+    const size_t cell =
+      row * this->ParsingTblColHdr.size() + get_col(*lookahead);
 
-    auto& previous_action_opt = ParsingTable.at(cell);
+    auto& previous_action_opt = this->ParsingTable.at(cell);
     if (!previous_action_opt.has_value()) {
         previous_action_opt = action;
         return;
@@ -2048,7 +2020,7 @@ LR0::insert_action(std::shared_ptr<SymbolTableNode> lookahead,
     if (action.is_shift() && action == previous_action)
         return;
 
-    // ParsingTable.at(cell) != 0 && ParsingTable.at(cell) !=
+    // this->ParsingTable.at(cell) != 0 && this->ParsingTable.at(cell) !=
     // state_dest. The following code process shift/reduce and
     // reduce/reduce conflicts.
 
@@ -2188,18 +2160,17 @@ print_parsing_table_note(std::ostream& os)
 ///
 /// Parsing table: Ref. Aho&Ullman p219.
 void
-print_parsing_table(std::ostream& os, const Grammar& grammar)
+YAlgorithm::print_parsing_table(std::ostream& os) const
 {
-    os << std::endl << "--Pars" << std::endl << "g Table--\n";
-    os << "State\t";
-    write_parsing_table_col_header(os, grammar);
+    os << std::endl << "--Parsing Table--" << std::endl << "State\t";
+    this->write_parsing_table_col_header(os);
 
     for (size_t row = 0; row < ParsingTblRows; row++) {
         os << row << "\t";
-        for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
+        for (size_t col = 0; col < this->ParsingTblColHdr.size(); col++) {
             const std::shared_ptr<const SymbolTableNode> n =
-              ParsingTblColHdr.at(col);
-            if (!is_goal_symbol(grammar, n)) {
+              this->ParsingTblColHdr.at(col);
+            if (!is_goal_symbol(this->grammar, n)) {
                 auto [action, state] = get_action(n->type, col, row);
                 os << action << state << "\t";
             }
@@ -2247,8 +2218,8 @@ YAlgorithm::init_start_state()
 /// get the new lookahead token to proceed parsing. Array
 /// final_state_list is used in gen_compiler.c, and function
 /// writeParsingTblRow() of y.c.
-static void
-get_final_state_list(const Grammar& grammar)
+void
+YAlgorithm::get_final_state_list() const noexcept
 {
     std::shared_ptr<SymbolTableNode> n = nullptr;
 
@@ -2259,21 +2230,21 @@ get_final_state_list(const Grammar& grammar)
     }
 
     if constexpr (USE_REM_FINAL_STATE) {
-        if (Options::get().use_remove_unit_production) {
+        if (this->options.use_remove_unit_production) {
             for (size_t i = 0; i < ParsingTblRows; i++) {
                 if (!is_reachable_state(i))
                     continue;
 
-                size_t row_start = i * ParsingTblColHdr.size();
+                size_t row_start = i * this->ParsingTblColHdr.size();
                 std::optional<StateHandle> action = std::nullopt;
                 size_t j = 0;
-                for (; j < ParsingTblColHdr.size(); j++) {
-                    n = ParsingTblColHdr.at(j);
+                for (; j < this->ParsingTblColHdr.size(); j++) {
+                    n = this->ParsingTblColHdr.at(j);
 
-                    if (is_goal_symbol(grammar, n) || is_parent_symbol(n))
+                    if (is_goal_symbol(this->grammar, n) || is_parent_symbol(n))
                         continue;
 
-                    auto new_action_opt = ParsingTable.at(row_start + j);
+                    auto new_action_opt = this->ParsingTable.at(row_start + j);
                     if (!new_action_opt.has_value()) {
                         continue;
                     }
@@ -2285,17 +2256,17 @@ get_final_state_list(const Grammar& grammar)
                     if (action != new_action.reduce_value())
                         break;
                 }
-                if (j == ParsingTblColHdr.size())
+                if (j == this->ParsingTblColHdr.size())
                     final_state_list.at(i) = *action;
             }
 
         } else {
             for (size_t i = 0; i < ParsingTblRows; i++) {
-                size_t row_start = i * ParsingTblColHdr.size();
+                size_t row_start = i * this->ParsingTblColHdr.size();
                 std::optional<StateHandle> action = std::nullopt;
                 size_t j = 0;
-                for (; j < ParsingTblColHdr.size(); j++) {
-                    auto new_action_opt = ParsingTable.at(row_start + j);
+                for (; j < this->ParsingTblColHdr.size(); j++) {
+                    auto new_action_opt = this->ParsingTable.at(row_start + j);
                     if (!new_action_opt.has_value()) {
                         continue;
                     }
@@ -2307,7 +2278,7 @@ get_final_state_list(const Grammar& grammar)
                     if (action != new_action.reduce_value())
                         break;
                 }
-                if (j == ParsingTblColHdr.size())
+                if (j == this->ParsingTblColHdr.size())
                     final_state_list.at(i) = *action;
             }
         }
@@ -2401,7 +2372,7 @@ YAlgorithm::show_stat(std::ostream& os) const noexcept
     if (!this->options.use_verbose)
         return;
 
-    write_state_transition_list(os, this->grammar, this->new_states);
+    this->write_state_transition_list(os);
     if (this->options.show_state_config_count)
         this->show_state_config_info(os);
     if (this->options.show_actual_state_array)
@@ -2455,36 +2426,33 @@ YAlgorithm::show_stat(std::ostream& os) const noexcept
 // Functions to write state transition list
 /////////////////////////////////////////////
 
-/*
- * Used when --lr0 or --lalr is used.
- * Under such situation use_lr0 or use_lalr is true.
- */
-static void
-write_parsing_tbl_row_lalr(std::ostream& os, StateHandle state)
+/// Used when --lr0 or --lalr is used.
+/// Under such situation use_lr0 or use_lalr is true.
+void
+YAlgorithm::write_parsing_tbl_row_lalr(std::ostream& os,
+                                       const StateHandle state) const noexcept
 {
-    size_t row_start = state * ParsingTblColHdr.size();
+    size_t row_start = state * this->ParsingTblColHdr.size();
     std::optional<StateHandle> reduction = std::nullopt;
-    int only_one_reduction = true;
-
-    auto& options = Options::get();
+    bool only_one_reduction = true;
 
     // write shift/acc actions.
     // note if a state has acc action, then that's the only
     // action. so don't have to put acc in a separate loop.
-    for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
+    for (size_t col = 0; col < this->ParsingTblColHdr.size(); col++) {
         std::optional<ParsingAction> v_opt = ParsingTable.at(row_start + col);
         if (!v_opt.has_value()) {
             continue;
         }
         auto v = *v_opt;
         const std::shared_ptr<const SymbolTableNode> s =
-          ParsingTblColHdr.at(col);
+          this->ParsingTblColHdr.at(col);
         if (v.is_shift()) {
-            if (options.use_remove_unit_production)
+            if (this->options.use_remove_unit_production)
                 v =
                   ParsingAction::new_shift(*get_actual_state(v.shift_value()));
 
-            if (ParsingTblColHdr.at(col)->type == symbol_type::TERMINAL) {
+            if (this->ParsingTblColHdr.at(col)->type == symbol_type::TERMINAL) {
                 os << "  " << *s->symbol << " [" << s->value << "] " << v
                    << std::endl;
             }
@@ -2511,15 +2479,15 @@ write_parsing_tbl_row_lalr(std::ostream& os, StateHandle state)
             os << "  . error " << std::endl;
         } // no reduction.
     } else {
-        for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
+        for (size_t col = 0; col < this->ParsingTblColHdr.size(); col++) {
             std::optional<ParsingAction> v_opt =
-              ParsingTable.at(row_start + col);
+              this->ParsingTable.at(row_start + col);
             if (!v_opt.has_value()) {
                 continue;
             }
             auto v = *v_opt;
             const std::shared_ptr<const SymbolTableNode> s =
-              ParsingTblColHdr.at(col);
+              this->ParsingTblColHdr.at(col);
             if (v.is_reduce()) {
                 os << "  " << *s->symbol << " [" << s->value << "] " << v
                    << std::endl;
@@ -2529,20 +2497,22 @@ write_parsing_tbl_row_lalr(std::ostream& os, StateHandle state)
 
     // write goto action.
     os << std::endl;
-    for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
-        std::optional<ParsingAction> v_opt = ParsingTable.at(row_start + col);
+    for (size_t col = 0; col < this->ParsingTblColHdr.size(); col++) {
+        std::optional<ParsingAction> v_opt =
+          this->ParsingTable.at(row_start + col);
         if (!v_opt.has_value()) {
             continue;
         }
         auto v = *v_opt;
         const std::shared_ptr<const SymbolTableNode> s =
-          ParsingTblColHdr.at(col);
+          this->ParsingTblColHdr.at(col);
         if (v.is_shift()) {
-            if (options.use_remove_unit_production)
+            if (this->options.use_remove_unit_production)
                 v =
                   ParsingAction::new_shift(*get_actual_state(v.shift_value()));
 
-            if (ParsingTblColHdr.at(col)->type == symbol_type::NONTERMINAL) {
+            if (this->ParsingTblColHdr.at(col)->type ==
+                symbol_type::NONTERMINAL) {
                 os << "  " << *s->symbol << " [" << s->value << "] goto "
                    << v.shift_value() << std::endl;
             }
@@ -2550,11 +2520,11 @@ write_parsing_tbl_row_lalr(std::ostream& os, StateHandle state)
     }
 }
 
-static void
-write_parsing_tbl_row(std::ostream& os, StateHandle state)
+void
+YAlgorithm::write_parsing_tbl_row(std::ostream& os,
+                                  const StateHandle state) const noexcept
 {
-    const auto& options = Options::get();
-    size_t row_start = state * ParsingTblColHdr.size();
+    size_t row_start = state * this->ParsingTblColHdr.size();
 
     os << std::endl;
 
@@ -2564,25 +2534,27 @@ write_parsing_tbl_row(std::ostream& os, StateHandle state)
         return;
     }
 
-    if (options.use_lr0 || options.use_lalr) {
-        write_parsing_tbl_row_lalr(os, state);
+    if (this->options.use_lr0 || this->options.use_lalr) {
+        this->write_parsing_tbl_row_lalr(os, state);
         return;
     }
 
-    for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
-        std::optional<ParsingAction> v_opt = ParsingTable.at(row_start + col);
+    for (size_t col = 0; col < this->ParsingTblColHdr.size(); col++) {
+        std::optional<ParsingAction> v_opt =
+          this->ParsingTable.at(row_start + col);
         if (!v_opt.has_value()) {
             continue;
         }
         auto v = *v_opt;
         const std::shared_ptr<const SymbolTableNode> s =
-          ParsingTblColHdr.at(col);
+          this->ParsingTblColHdr.at(col);
         if (v.is_shift()) {
-            if (options.use_remove_unit_production)
+            if (this->options.use_remove_unit_production)
                 v =
                   ParsingAction::new_shift(*get_actual_state(v.shift_value()));
 
-            if (ParsingTblColHdr.at(col)->type == symbol_type::NONTERMINAL) {
+            if (this->ParsingTblColHdr.at(col)->type ==
+                symbol_type::NONTERMINAL) {
                 os << "  " << *s->symbol << " [" << s->value << "] goto "
                    << v.shift_value() << std::endl;
             } else {
@@ -2599,14 +2571,11 @@ write_parsing_tbl_row(std::ostream& os, StateHandle state)
     }
 }
 
-static void
-write_state_info(std::ostream& os,
-                 const Grammar& grammar,
-                 const StateArray& states_array,
-                 const State& s)
+void
+YAlgorithm::write_state_info(std::ostream& os, const State& s) const noexcept
 {
-    const auto& options = Options::get();
-    write_state_conflict_list(os, s.state_no, states_array);
+    write_state_conflict_list(
+      os, s.state_no, this->new_states.states_new_array);
 
     if (s.PASS_THRU == 1u) {
         os << "[PASS_THRU]" << std::endl;
@@ -2619,76 +2588,68 @@ write_state_info(std::ostream& os,
 
     for (const auto& i : s.config) {
         os << "  (" << i->ruleID << ") ";
-        write_configuration(os, grammar, *i);
+        write_configuration(os, this->grammar, *i);
     }
 
     // writeSuccessorList(s);
-    if (options.use_lalr && options.show_originators) {
+    if (this->options.use_lalr && this->options.show_originators) {
         os << *s.parents_list;
     }
 
-    write_parsing_tbl_row(os, s.state_no);
+    this->write_parsing_tbl_row(os, s.state_no);
 
     // writeCoreConfiguration(s);
     os << std::endl << "\n";
 }
 
-static void
-write_state_collection_info(std::ostream& os,
-                            const Grammar& grammar,
-                            const NewStates& new_states)
+void
+YAlgorithm::write_state_collection_info(std::ostream& os) const noexcept
 {
     os << std::endl << "\n";
-    const State* s = new_states.states_new->states_head.get();
+    const State* s = this->new_states.states_new->states_head.get();
     while (s != nullptr) {
-        write_state_info(os, grammar, new_states.states_new_array, *s);
+        this->write_state_info(os, *s);
         s = s->next.get();
     }
 
-    if (new_states.states_new->state_count == 0)
+    if (this->new_states.states_new->state_count == 0)
         os << "(empty)" << std::endl;
     os << std::endl;
 }
 
-static void
-write_state_info_from_parsing_tbl(std::ostream& os)
+void
+YAlgorithm::write_state_info_from_parsing_tbl(std::ostream& os) const noexcept
 {
     for (size_t row = 0; row < ParsingTblRows; row++) {
         if (is_reachable_state(row)) {
             os << std::endl
                << "\nstate " << *get_actual_state(row) << std::endl;
-            write_parsing_tbl_row(os, row);
+            this->write_parsing_tbl_row(os, row);
         }
     }
     os << std::endl << "\n";
 }
 
-/*
- * A list like the list in AT&T yacc and Bison's y.output
- * file.
- */
+/// A list like the list in AT&T yacc and Bison's y.output
+/// file.
 void
-write_state_transition_list(std::ostream& os,
-                            const Grammar& grammar,
-                            const NewStates& new_states)
+YAlgorithm::write_state_transition_list(std::ostream& os) const noexcept
 {
-    if (!Options::get().show_state_transition_list)
+    if (!this->options.show_state_transition_list)
         return;
 
-    if (Options::get().use_remove_unit_production) {
+    if (this->options.use_remove_unit_production) {
         // write from the parsing table.
-        write_state_info_from_parsing_tbl(os);
-        new_states.write_grammar_conflict_list2(os);
+        this->write_state_info_from_parsing_tbl(os);
+        this->new_states.write_grammar_conflict_list2(os);
     } else {
         // write from the state objects.
-        write_state_collection_info(os, grammar, new_states);
-        new_states.write_grammar_conflict_list(os);
+        this->write_state_collection_info(os);
+        this->new_states.write_grammar_conflict_list(os);
     }
 }
 
-/*
- * LR1 function.
- */
+/// LR1 function.
 auto
 lr1(const FileNames& files, const Options& options, NewStates& new_states)
   -> int
@@ -2712,8 +2673,12 @@ lr1(const FileNames& files, const Options& options, NewStates& new_states)
       GetYaccGrammarOutput::get_yacc_grammar(
         hyacc_filename, fp_v, new_states.conflicts_count.expected_sr_conflict);
 
+    std::string yystype_definition =
+      std::move(yacc_grammar_output.yystype_definition);
+    YSymbol ysymbol = std::move(yacc_grammar_output.ysymbol);
+
     YAlgorithm y_algorithm(
-      yacc_grammar_output.grammar, options, fp_v, new_states, config_queue);
+      std::move(yacc_grammar_output), options, fp_v, new_states, config_queue);
 
     if (options.debug_hash_tbl) {
         hash_tbl_dump(fp_v);
@@ -2728,10 +2693,10 @@ lr1(const FileNames& files, const Options& options, NewStates& new_states)
     y_algorithm.generate_parsing_machine();
 
     if (options.show_parsing_tbl)
-        print_parsing_table(fp_v, y_algorithm.grammar);
+        y_algorithm.print_parsing_table(fp_v);
 
     if (options.use_graphviz && !options.use_remove_unit_production) {
-        gen_graphviz_input(y_algorithm.grammar, files.y_gviz, options);
+        y_algorithm.gen_graphviz_input(files.y_gviz);
     } /*O0,O1*/
 
     if (options.use_remove_unit_production) {
@@ -2744,22 +2709,22 @@ lr1(const FileNames& files, const Options& options, NewStates& new_states)
                  << "tire pars" << std::endl
                  << "g table ";
             fp_v << "after removing unit productions--" << std::endl;
-            print_parsing_table(fp_v, y_algorithm.grammar);
+            y_algorithm.print_parsing_table(fp_v);
         }
 
         if (options.show_parsing_tbl)
-            print_final_parsing_table(y_algorithm.grammar);
+            y_algorithm.print_final_parsing_table();
         if (options.use_remove_repeated_states) {
             y_algorithm.further_optimization();
             if (options.show_parsing_tbl) {
                 fp_v << std::endl << "AFTER REMOVING REPEATED STATES:\n";
-                print_final_parsing_table(y_algorithm.grammar);
+                y_algorithm.print_final_parsing_table();
             }
         }
-        get_actual_state_no(); /* update actual_state_no[].
-                                */
+        y_algorithm.get_actual_state_no(); /* update actual_state_no[].
+                                            */
         if (options.show_parsing_tbl)
-            print_condensed_final_parsing_table(y_algorithm.grammar);
+            y_algorithm.print_condensed_final_parsing_table();
         if (options.show_grammar) {
             fp_v << std::endl
                  << "--Grammar after remov" << std::endl
@@ -2769,14 +2734,14 @@ lr1(const FileNames& files, const Options& options, NewStates& new_states)
               fp_v, false, options.use_remove_unit_production);
         }
         if (options.use_graphviz) {
-            gen_graphviz_input2(y_algorithm.grammar, files.y_gviz, options);
+            y_algorithm.gen_graphviz_input2(files.y_gviz);
         } /*O2,O3*/
     }
-    get_final_state_list(y_algorithm.grammar);
+    y_algorithm.get_final_state_list();
 
     if (options.use_generate_compiler)
-        generate_compiler(
-          yacc_grammar_output, lrk_pt_array, hyacc_filename, files);
+        y_algorithm.generate_compiler(
+          ysymbol, yystype_definition, lrk_pt_array, hyacc_filename, files);
 
     y_algorithm.show_stat(fp_v);
     show_conflict_count(new_states.conflicts_count);
@@ -2812,8 +2777,11 @@ lr0(const FileNames& files, const Options& options, NewStates& new_states)
         hash_tbl_dump(fp_v);
     }
 
+    std::string yystype_definition =
+      std::move(yacc_grammar_output.yystype_definition);
+    YSymbol ysymbol = std::move(yacc_grammar_output.ysymbol);
     LaneTracing lane_tracing_algorithm(
-      yacc_grammar_output.grammar, options, fp_v, new_states, config_queue);
+      std::move(yacc_grammar_output), options, fp_v, new_states, config_queue);
     lane_tracing_algorithm.init();
     if (options.show_grammar) {
         lane_tracing_algorithm.grammar.write(
@@ -2828,11 +2796,10 @@ lr0(const FileNames& files, const Options& options, NewStates& new_states)
     }
 
     if (options.show_parsing_tbl)
-        print_parsing_table(fp_v, lane_tracing_algorithm.grammar);
+        lane_tracing_algorithm.print_parsing_table(fp_v);
 
     if (options.use_graphviz && !options.use_remove_unit_production) {
-        gen_graphviz_input(
-          lane_tracing_algorithm.grammar, files.y_gviz, options);
+        lane_tracing_algorithm.gen_graphviz_input(files.y_gviz);
     } /*O0,O1*/
 
     if (options.use_remove_unit_production) {
@@ -2845,22 +2812,23 @@ lr0(const FileNames& files, const Options& options, NewStates& new_states)
                  << "tire pars" << std::endl
                  << "g table ";
             fp_v << "after removing unit productions--" << std::endl;
-            print_parsing_table(fp_v, lane_tracing_algorithm.grammar);
+            lane_tracing_algorithm.print_parsing_table(fp_v);
         }
 
         if (options.show_parsing_tbl)
-            print_final_parsing_table(lane_tracing_algorithm.grammar);
+            lane_tracing_algorithm.print_final_parsing_table();
         if (options.use_remove_repeated_states) {
             lane_tracing_algorithm.further_optimization();
             if (options.show_parsing_tbl) {
                 fp_v << std::endl << "AFTER REMOVING REPEATED STATES:\n";
-                print_final_parsing_table(lane_tracing_algorithm.grammar);
+                lane_tracing_algorithm.print_final_parsing_table();
             }
         }
-        get_actual_state_no(); // update actual_state_no[].
+        lane_tracing_algorithm
+          .get_actual_state_no(); // update actual_state_no[].
 
         if (options.show_parsing_tbl)
-            print_condensed_final_parsing_table(lane_tracing_algorithm.grammar);
+            lane_tracing_algorithm.print_condensed_final_parsing_table();
         if (options.show_grammar) {
             fp_v << std::endl
                  << "--Grammar after remov" << std::endl
@@ -2870,15 +2838,14 @@ lr0(const FileNames& files, const Options& options, NewStates& new_states)
               fp_v, false, options.use_remove_unit_production);
         }
         if (options.use_graphviz) {
-            gen_graphviz_input2(
-              lane_tracing_algorithm.grammar, files.y_gviz, options);
+            lane_tracing_algorithm.gen_graphviz_input2(files.y_gviz);
         } /*O2,O3*/
     }
-    get_final_state_list(lane_tracing_algorithm.grammar);
+    lane_tracing_algorithm.get_final_state_list();
 
     if (options.use_generate_compiler)
-        generate_compiler(
-          yacc_grammar_output, lrk_pt_array, hyacc_filename, files);
+        lane_tracing_algorithm.generate_compiler(
+          ysymbol, yystype_definition, lrk_pt_array, hyacc_filename, files);
 
     lane_tracing_algorithm.show_stat(fp_v);
     show_conflict_count(new_states.conflicts_count);

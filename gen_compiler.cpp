@@ -41,7 +41,7 @@
 
 constexpr size_t MAX_RULE_LENGTH = 0xfffff;
 constexpr int INTEGER_PADDING = 6;
-constexpr int ITEM_PER_LINE = 10;
+constexpr size_t ITEM_PER_LINE = 10;
 /// Index at which the `#define <TOKEN> <NUMBER>` begins.
 constexpr uint32_t TOKEN_START_INDEX = 257;
 /// Used when converting a string to a base ten number.
@@ -53,12 +53,12 @@ struct GenCompiler
     std::ofstream fp{};
     std::ofstream fp_h{};
     const Options& options;
-    const std::string& yystype_definition;
+    const std::string yystype_definition;
 
     explicit GenCompiler(const Options& options,
-                         const std::string& yystype_definition)
+                         const std::string yystype_definition)
       : options(options)
-      , yystype_definition(yystype_definition)
+      , yystype_definition(std::move(yystype_definition))
     {}
 
     void prepare_outfile(const FileNames& files, const bool use_header_file);
@@ -75,7 +75,8 @@ struct GenCompiler
     ///
     /// The purpose here is to extract the code for semantic
     /// actions of rules.
-    void process_yacc_file_section2(GetYaccGrammarOutput& yacc_grammar_output,
+    void process_yacc_file_section2(YSymbol& y_symbol,
+                                    const Grammar& grammar,
                                     const std::string_view filename,
                                     Position position);
     static void my_perror(const std::string_view msg,
@@ -93,7 +94,7 @@ struct GenCompiler
     /// used by the driver code.
     void write_parsing_table_arrays(
       const std::optional<LRkPTArray>& lrk_pt_array,
-      const Grammar& grammar);
+      const YAlgorithm& y_algorithm);
 
   private:
     /// Prints `"break;"` into `this->fp`.
@@ -113,7 +114,7 @@ struct GenCompiler
     /// if it's 256, it's 'error';
     /// if it's > 256, it's a token;
     /// if it's < 0, it's a non-terminal.
-    void print_parsing_tbl_col(const Grammar& grammar);
+    void print_parsing_tbl_col(const YAlgorithm& y_algorithm);
     static void print_parsing_tbl_col_entry(std::ofstream& fp,
                                             const std::optional<Action> action,
                                             const int token_value,
@@ -122,7 +123,7 @@ struct GenCompiler
     /// if an action yyptblact[i] is positive, it's a shift/goto;
     /// if it is negative, it's a reduce;
     /// if it's zero, it's accept.
-    void print_parsing_tbl(const Grammar& grammar);
+    void print_parsing_tbl(const YAlgorithm& y_algorithm);
 };
 
 /// rewind to section 2.
@@ -396,8 +397,10 @@ use_lrk(const std::optional<LRkPTArray>& lrk_pt_array) -> bool
 }
 
 static void
-write_lrk_table_arrays(std::ofstream& fp,
-                       const std::optional<LRkPTArray>& lrk_pt_array)
+write_lrk_table_arrays(
+  std::ofstream& fp,
+  const std::optional<LRkPTArray>& lrk_pt_array,
+  const std::vector<std::shared_ptr<SymbolTableNode>>& parsing_tbl_col_hdr)
 {
     fp << std::endl
        << "/* * For LR(k) parsing tables." << std::endl
@@ -423,7 +426,7 @@ write_lrk_table_arrays(std::ofstream& fp,
     // yy_lrk_cols
     fp << std::endl << "/* yyPTC_count + 2 */" << std::endl;
     fp << "static YYCONST yytabelem yy_lrk_cols = "
-       << ParsingTblColHdr.size() + 2 << ';' << std::endl;
+       << parsing_tbl_col_hdr.size() + 2 << ';' << std::endl;
 
     // yy_lrk_r[].
     fp << std::endl << "/* Values in each LR(k) parsing table. */" << std::endl;
@@ -432,7 +435,7 @@ write_lrk_table_arrays(std::ofstream& fp,
     for (const LRkPT* t : lrk_pt_array->array) {
         for (const LRkPTRow* r = t->rows; r != nullptr; r = r->next) {
             fp << "  " << r->state << ", " << r->token->snode->value << ", ";
-            for (size_t j = 0; j < ParsingTblColHdr.size(); j++) {
+            for (size_t j = 0; j < parsing_tbl_col_hdr.size(); j++) {
                 if (r->row.at(j).has_value()) {
                     if (r->row.at(j)->end.has_value()) {
                         fp << j << ", " << r->row.at(j)->end.value()->ruleID
@@ -463,7 +466,7 @@ write_lrk_table_arrays(std::ofstream& fp,
     fp << std::endl
        << "/* Values of parsing table column tokens. */" << std::endl;
     fp << "static YYCONST yytabelem yyPTC[] = {" << std::endl;
-    for (size_t i = 0; i < ParsingTblColHdr.size(); i++) {
+    for (size_t i = 0; i < parsing_tbl_col_hdr.size(); i++) {
         if (i > 0)
             fp << ", ";
         if (i % ITEM_PER_LINE == 0) {
@@ -471,12 +474,12 @@ write_lrk_table_arrays(std::ofstream& fp,
                 fp << std::endl;
             fp << "  ";
         }
-        if (*ParsingTblColHdr[i]->symbol == "$accept") {
+        if (*parsing_tbl_col_hdr[i]->symbol == "$accept") {
             fp << "CONST_ACC";
-        } else if (*ParsingTblColHdr[i]->symbol == "$end") {
+        } else if (*parsing_tbl_col_hdr[i]->symbol == "$end") {
             fp << 0;
         } else {
-            fp << ParsingTblColHdr[i]->value;
+            fp << parsing_tbl_col_hdr[i]->value;
         }
     }
     fp << std::endl << "};" << std::endl;
@@ -609,9 +612,9 @@ GenCompiler::process_yacc_file_section3()
 }
 
 auto
-GenCompiler::find_mid_prod_index(
-  const Production& rule, // NOLINT(bugprone-easily-swappable-parameters)
-  const Production& mid_prod_rule) -> std::optional<size_t>
+GenCompiler::find_mid_prod_index(const Production& rule,
+                                 const Production& mid_prod_rule)
+  -> std::optional<size_t>
 {
     const SymbolNode* lnode = mid_prod_rule.nLHS.get();
     std::shared_ptr<const SymbolTableNode> lsym = lnode->snode;
@@ -677,7 +680,7 @@ GenCompiler::get_final_states()
 }
 
 void
-GenCompiler::print_parsing_tbl_col(const Grammar& grammar)
+GenCompiler::print_parsing_tbl_col(const YAlgorithm& y_algorithm)
 {
     // labels a final state's col entry
     constexpr int FINAL_STATE_COL_ENTRY = -10000001;
@@ -700,12 +703,14 @@ GenCompiler::print_parsing_tbl_col(const Grammar& grammar)
                         continue;
                     }
                 }
-                for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
+                for (size_t col = 0; col < y_algorithm.ParsingTblColHdr.size();
+                     col++) {
                     std::shared_ptr<SymbolTableNode> n =
-                      ParsingTblColHdr.at(col);
-                    if (is_goal_symbol(grammar, n) == false &&
+                      y_algorithm.ParsingTblColHdr.at(col);
+                    if (is_goal_symbol(y_algorithm.grammar, n) == false &&
                         is_parent_symbol(n) == false) {
-                        auto [action, state] = get_action(n->type, col, row);
+                        auto [action, state] =
+                          y_algorithm.get_action(n->type, col, row);
                         GenCompiler::print_parsing_tbl_col_entry(
                           this->fp, action, n->value, count);
                     }
@@ -722,9 +727,10 @@ GenCompiler::print_parsing_tbl_col(const Grammar& grammar)
                     continue;
                 }
             }
-            for (size_t j = 0; j < ParsingTblColHdr.size(); j++) {
-                std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr.at(j);
-                auto [action, state] = get_action(n->type, j, i);
+            for (size_t j = 0; j < y_algorithm.ParsingTblColHdr.size(); j++) {
+                std::shared_ptr<SymbolTableNode> n =
+                  y_algorithm.ParsingTblColHdr.at(j);
+                auto [action, state] = y_algorithm.get_action(n->type, j, i);
                 GenCompiler::print_parsing_tbl_col_entry(
                   this->fp, action, n->value, count);
             }
@@ -736,10 +742,10 @@ GenCompiler::print_parsing_tbl_col(const Grammar& grammar)
 }
 
 void
-GenCompiler::process_yacc_file_section2(
-  GetYaccGrammarOutput& yacc_grammar_output,
-  const std::string_view filename,
-  Position position)
+GenCompiler::process_yacc_file_section2(YSymbol& y_symbol,
+                                        const Grammar& grammar,
+                                        const std::string_view filename,
+                                        Position position)
 {
     YACC_STATE state = LHS;
     int code_level = 0;
@@ -872,13 +878,13 @@ GenCompiler::process_yacc_file_section2(
                     if (c == '>') {
                         reading_type = false;
                         c = '$';
-                        yacc_grammar_output.add_char_to_symbol('\0');
-                        explicit_type = yacc_grammar_output.get_symbol();
+                        y_symbol.add_char_to_symbol('\0');
+                        explicit_type = y_symbol.get_symbol();
                     } else {
-                        yacc_grammar_output.add_char_to_symbol(c);
+                        y_symbol.add_char_to_symbol(c);
                     }
                 } else if (last_c == '$' && c == '<') {
-                    yacc_grammar_output.reset_symbol();
+                    y_symbol.reset_symbol();
                     reading_type = true;
                 } else if (last_c != '$' && c == '$') {
                     // do nothing, this may be a special character.
@@ -888,8 +894,8 @@ GenCompiler::process_yacc_file_section2(
                         token_type = explicit_type;
                         explicit_type = std::nullopt;
                     } else {
-                        const Production* rule = GenCompiler::find_full_rule(
-                          yacc_grammar_output.grammar, rule_count);
+                        const Production* rule =
+                          GenCompiler::find_full_rule(grammar, rule_count);
                         token_type = rule->nLHS->snode->token_type;
                     }
                     if (token_type)
@@ -903,12 +909,11 @@ GenCompiler::process_yacc_file_section2(
                 } else if (reading_number && isdigit(c)) {
                     dollar_number = (c - '0') + BASE_TEN * dollar_number;
                 } else if (reading_number && !isdigit(c)) {
-                    Production* start_rule =
-                      yacc_grammar_output.grammar.rules.at(rule_count);
+                    Production* start_rule = grammar.rules.at(rule_count);
                     std::optional<size_t> rhs_index = 0;
 
-                    const Production* rule = GenCompiler::find_full_rule(
-                      yacc_grammar_output.grammar, rule_count);
+                    const Production* rule =
+                      GenCompiler::find_full_rule(grammar, rule_count);
                     if (rule != start_rule) {
                         rhs_index =
                           GenCompiler::find_mid_prod_index(*rule, *start_rule);
@@ -1010,39 +1015,41 @@ GenCompiler::process_yacc_file_section2(
 void
 GenCompiler::write_parsing_table_arrays(
   const std::optional<LRkPTArray>& lrk_pt_array,
-  const Grammar& grammar)
+  const YAlgorithm& y_algorithm)
 {
     this->get_final_states();
 
-    this->print_parsing_tbl_col(grammar); // yytbltok[]
-    this->print_parsing_tbl(grammar);     // yytblact[], yyrowoffset[]
+    this->print_parsing_tbl_col(y_algorithm); // yytbltok[]
+    this->print_parsing_tbl(y_algorithm);     // yytblact[], yyrowoffset[]
 
-    print_yyr1(this->fp, grammar); // yyr1[]
-    print_yyr2(this->fp, grammar); // yyr2[]
+    print_yyr1(this->fp, y_algorithm.grammar); // yyr1[]
+    print_yyr2(this->fp, y_algorithm.grammar); // yyr2[]
 
     if (!use_lrk(lrk_pt_array)) {
         fp << std::endl << "#ifdef YYDEBUG" << std::endl << std::endl;
         fp << "typedef struct {char *t_name; int t_val;} yytoktype;"
            << std::endl
            << std::endl;
-        print_yynonterminals(fp, grammar); // yynts[]. nonterminals.
+        print_yynonterminals(fp, y_algorithm.grammar); // yynts[]. nonterminals.
 
-        print_yytoks(fp, grammar.tokens); // yytoks[]. tokens.
-        print_yyreds(fp, grammar);        // yyreds[]. Productions of grammar.
+        print_yytoks(fp, y_algorithm.grammar.tokens); // yytoks[]. tokens.
+        print_yyreds(fp,
+                     y_algorithm.grammar); // yyreds[]. Productions of grammar.
         fp << "#endif /* YYDEBUG */" << std::endl << std::endl;
 
     } else { // use LR(k).
         fp << "typedef struct {char *t_name; int t_val;} yytoktype;"
            << std::endl
            << std::endl;
-        print_yynonterminals(fp, grammar); // yynts[]. nonterminals.
-        print_yytoks(fp, grammar.tokens);  // yytoks[]. tokens.
+        print_yynonterminals(fp, y_algorithm.grammar); // yynts[]. nonterminals.
+        print_yytoks(fp, y_algorithm.grammar.tokens);  // yytoks[]. tokens.
 
         fp << std::endl << "#ifdef YYDEBUG" << std::endl << std::endl;
-        print_yyreds(fp, grammar); // yyreds[]. Productions of grammar.
+        print_yyreds(fp,
+                     y_algorithm.grammar); // yyreds[]. Productions of grammar.
         fp << "#endif /* YYDEBUG */" << std::endl << std::endl;
 
-        write_lrk_table_arrays(fp, lrk_pt_array);
+        write_lrk_table_arrays(fp, lrk_pt_array, y_algorithm.ParsingTblColHdr);
     }
 }
 
@@ -1066,7 +1073,7 @@ GenCompiler::print_parsing_tbl_col_entry(std::ofstream& fp,
 }
 
 void
-GenCompiler::print_parsing_tbl(const Grammar& grammar)
+GenCompiler::print_parsing_tbl(const YAlgorithm& y_algorithm)
 {
     std::vector<uint32_t> rowoffset;
     rowoffset.reserve(ParsingTblRows);
@@ -1074,7 +1081,7 @@ GenCompiler::print_parsing_tbl(const Grammar& grammar)
 
     this->fp << "static YYCONST yytabelem yyptblact[] = {" << std::endl;
 
-    if (this->options.use_remove_unit_production) {
+    if (y_algorithm.options.use_remove_unit_production) {
         for (size_t row = 0; row < ParsingTblRows; row++) {
             if (is_reachable_state(row)) {
 
@@ -1088,12 +1095,14 @@ GenCompiler::print_parsing_tbl(const Grammar& grammar)
                         continue;
                     }
                 }
-                for (size_t col = 0; col < ParsingTblColHdr.size(); col++) {
+                for (size_t col = 0; col < y_algorithm.ParsingTblColHdr.size();
+                     col++) {
                     std::shared_ptr<const SymbolTableNode> n =
-                      ParsingTblColHdr.at(col);
-                    if (is_goal_symbol(grammar, n) == false &&
+                      y_algorithm.ParsingTblColHdr.at(col);
+                    if (is_goal_symbol(y_algorithm.grammar, n) == false &&
                         is_parent_symbol(n) == false) {
-                        auto [action, state_no] = get_action(n->type, col, row);
+                        auto [action, state_no] =
+                          y_algorithm.get_action(n->type, col, row);
                         if (action == Action::Shift || action == Action::Goto)
                             state_no = *get_actual_state(state_no);
                         // std::cout  <<  action <<  state_no<< "\t";
@@ -1118,9 +1127,9 @@ GenCompiler::print_parsing_tbl(const Grammar& grammar)
                 }
             }
 
-            for (size_t j = 0; j < ParsingTblColHdr.size(); j++) {
-                auto [action, state_no] =
-                  get_action(ParsingTblColHdr.at(j)->type, j, i);
+            for (size_t j = 0; j < y_algorithm.ParsingTblColHdr.size(); j++) {
+                auto [action, state_no] = y_algorithm.get_action(
+                  y_algorithm.ParsingTblColHdr.at(j)->type, j, i);
                 // std::cout  <<  action <<  state_no<< ", ";
                 print_parsing_tbl_entry(this->fp, action, state_no, count);
             }
@@ -1170,15 +1179,15 @@ get_lrk_hyacc_path(const std::optional<LRkPTArray>& lrk_pt_array)
 }
 
 void
-generate_compiler(GetYaccGrammarOutput& yacc_grammar_output,
-                  const std::optional<LRkPTArray>& lrk_pt_array,
-                  const std::string& infile,
-                  const FileNames& files)
+YAlgorithm::generate_compiler(YSymbol& y_symbol,
+                              std::string yystype_definition,
+                              const std::optional<LRkPTArray>& lrk_pt_array,
+                              const std::string& infile,
+                              const FileNames& files)
 {
     // count number of lines in yacc input file.
-    auto& options = Options::get();
-    auto gen_compiler =
-      GenCompiler(options, yacc_grammar_output.yystype_definition);
+    auto& options = this->options;
+    auto gen_compiler = GenCompiler(options, yystype_definition);
 
     gen_compiler.fp_yacc.open(infile);
     if (!gen_compiler.fp_yacc.is_open()) {
@@ -1193,7 +1202,7 @@ generate_compiler(GetYaccGrammarOutput& yacc_grammar_output,
         gen_compiler.fp << std::endl
                         << "# line 1 \"" << infile << '\"' << std::endl;
     Position position = gen_compiler.process_yacc_file_section1(
-      yacc_grammar_output.grammar.tokens); // declaration section.
+      this->grammar.tokens); // declaration section.
 
     write_special_info(gen_compiler.fp);
 
@@ -1208,14 +1217,14 @@ generate_compiler(GetYaccGrammarOutput& yacc_grammar_output,
 
     gen_compiler.fp << std::endl << "#define YYCONST const" << std::endl;
     gen_compiler.fp << "typedef int yytabelem;" << std::endl << std::endl;
-    gen_compiler.write_parsing_table_arrays(lrk_pt_array,
-                                            yacc_grammar_output.grammar);
+    gen_compiler.write_parsing_table_arrays(lrk_pt_array, *this);
 
     get_lrk_hyacc_path(lrk_pt_array); // do this if LR(k) is used
 
     copy_yaccpar_file_1(gen_compiler.fp, HYACC_PATH);
     goto_section2(gen_compiler.fp_yacc, position.line);
-    gen_compiler.process_yacc_file_section2(yacc_grammar_output,
+    gen_compiler.process_yacc_file_section2(y_symbol,
+                                            this->grammar,
                                             infile,
                                             position); // get reduction code.
     copy_yaccpar_file_2(gen_compiler.fp, HYACC_PATH);

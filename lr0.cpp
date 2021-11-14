@@ -43,8 +43,7 @@ add_successor_config_to_state_lr0(const Grammar& grammar,
     s->config.push_back(c);
 }
 
-/// Assumption: public variable config_queue contains
-/// the configurations to be processed.
+/// Assumption: config_queue contains the configurations to be processed.
 static void
 get_config_successors_lr0(const Grammar& grammar,
                           Queue& config_queue,
@@ -107,7 +106,7 @@ LR0::insert_reduction_to_parsing_table_lr0(const Configuration& c,
           hash_tbl_find(STR_END), state_no, ParsingAction::new_accept());
     } else { // reduct, action = "r";
         for (size_t col = 0; col < max_col; col++) {
-            std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr.at(col);
+            std::shared_ptr<SymbolTableNode> n = this->ParsingTblColHdr.at(col);
             this->insert_action(
               n, state_no, ParsingAction::new_reduce(c.ruleID));
         }
@@ -135,7 +134,8 @@ LR0::insert_reduction_to_parsing_table_lalr(const Configuration& c,
             }
         } else {
             for (size_t col = 0; col < max_col; col++) {
-                std::shared_ptr<SymbolTableNode> n = ParsingTblColHdr[col];
+                std::shared_ptr<SymbolTableNode> n =
+                  this->ParsingTblColHdr[col];
                 this->insert_action(
                   n, state_no, ParsingAction::new_reduce(c.ruleID));
             }
@@ -286,13 +286,13 @@ LR0::output_parsing_table() noexcept
     int cols = n_symbol + 1;
 
     // expand size of parsing table array if needed.
-    if (rows * ParsingTblColHdr.size() >= PARSING_TABLE_SIZE) {
+    if (rows * this->ParsingTblColHdr.size() >= PARSING_TABLE_SIZE) {
         // TODO
         // expand_parsing_table(this->new_states.states_new_array);
     }
 
     for (size_t i = 0; i < cols * rows; ++i) {
-        ParsingTable.at(i) = std::nullopt;
+        this->ParsingTable.at(i) = std::nullopt;
     }
 
     for (size_t i = 0; i < rows; i++) {
@@ -315,7 +315,7 @@ LR0::output_parsing_table_lalr()
     }
 
     for (size_t i = 0; i < cols * rows; ++i) {
-        ParsingTable.at(i) = std::nullopt;
+        this->ParsingTable.at(i) = std::nullopt;
     }
 
     for (size_t i = 0; i < rows; i++) {

@@ -394,6 +394,7 @@ struct LRkPT
                    bool* exist) noexcept -> std::optional<ConfigPairNode>;
     auto add_reduction(StateHandle state,
                        std::shared_ptr<SymbolTableNode> token,
+                       const size_t parsing_tbl_col_hdr_size,
                        std::shared_ptr<const SymbolTableNode> s,
                        Configuration* c,
                        Configuration* c_tail) noexcept -> bool;
@@ -415,8 +416,10 @@ struct LRkPTArray
     }
     void add(LRkPT* t) noexcept;
     [[nodiscard]] auto get(size_t k) const noexcept -> LRkPT*;
-    void dump() const noexcept;
-    void dump_file() const noexcept;
+    void dump(const std::vector<std::shared_ptr<SymbolTableNode>>&
+                parsing_tbl_col_hdr) const noexcept;
+    void dump_file(const std::vector<std::shared_ptr<SymbolTableNode>>&
+                     parsing_tbl_col_hdr) const noexcept;
 
   private:
     constexpr static size_t INIT_SIZE = 10;
@@ -453,12 +456,16 @@ lrk_theads(const Grammar& grammar, SymbolList& alpha, size_t k)
 class LaneTracing : public YAlgorithm
 {
   public:
-    explicit LaneTracing(const Grammar& grammar,
+    explicit LaneTracing(GetYaccGrammarOutput yacc_grammar_output,
                          const Options& options,
                          std::ofstream& fp_v,
                          NewStates& new_states,
                          std::optional<Queue>& config_queue)
-      : YAlgorithm(grammar, options, fp_v, new_states, config_queue)
+      : YAlgorithm(std::move(yacc_grammar_output),
+                   options,
+                   fp_v,
+                   new_states,
+                   config_queue)
     {}
     [[nodiscard]] auto lane_tracing() -> std::optional<LRkPTArray>;
 

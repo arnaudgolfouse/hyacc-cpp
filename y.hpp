@@ -668,6 +668,11 @@ struct Grammar
     explicit Grammar(std::ofstream& fp_v)
       : fp_v(fp_v)
     {}
+    ~Grammar() noexcept = default;
+    Grammar(const Grammar&) = delete;
+    Grammar(Grammar&&) = default;
+    auto operator=(const Grammar&) -> Grammar& = delete;
+    auto operator=(Grammar&&) -> Grammar& = delete;
 
     std::vector<Production*> rules{};
     std::shared_ptr<SymbolNode> goal_symbol{ nullptr };
@@ -745,23 +750,21 @@ enum YACC_STATE
     COMMENT2
 };
 
-/// Output of `get_yacc_grammar`.
-struct GetYaccGrammarOutput
+class YSymbol : std::string
 {
-  public:
-    /// Final position.
-    Position
-      position{}; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
-    /// Parsed grammar.
-    Grammar
-      grammar; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
-    std::string
-      yystype_definition; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
-
+  private:
     constexpr static size_t SYMBOL_MAX_SIZE = 512;
+    Position position = { 0, 0 };
 
-    explicit GetYaccGrammarOutput(std::ofstream& fp_v);
-    /// @brief Push `c` into `ysymbol`.
+  public:
+    YSymbol()
+    {
+        this->reserve(SYMBOL_INIT_SIZE);
+        // for (size_t i = 0; i < SYMBOL_INIT_SIZE; i++) {
+        //     this->push_back(-1); // TODO: is this still needed...
+        // }
+    }
+    /// @brief Push `c` into `this`.
     ///
     /// This will write `c` at position `ysymbol_pt` in `ysymbol`, expanding
     /// ysymbol` if necessary.
@@ -773,8 +776,32 @@ struct GetYaccGrammarOutput
     /// symbol should be a letter.
     void add_char_to_symbol(char c);
     [[nodiscard]] auto get_symbol() const noexcept -> std::string_view;
-    /// Clear `ysymbol`.
+    /// Clear `this`.
     void reset_symbol() noexcept;
+};
+
+/// Output of `get_yacc_grammar`.
+class GetYaccGrammarOutput
+{
+  public:
+    /// Final position.
+    Position position{};
+    /// Parsed grammar.
+    Grammar grammar;
+    std::string yystype_definition;
+    std::vector<std::shared_ptr<SymbolTableNode>> parsing_tbl_col_hdr;
+    /// token symbol.
+    YSymbol ysymbol{};
+
+    constexpr static size_t SYMBOL_MAX_SIZE = 512;
+
+    explicit GetYaccGrammarOutput(std::ofstream& fp_v);
+    ~GetYaccGrammarOutput() = default;
+    GetYaccGrammarOutput(const GetYaccGrammarOutput&) = delete;
+    GetYaccGrammarOutput(GetYaccGrammarOutput&&) = default;
+    auto operator=(const GetYaccGrammarOutput&)
+      -> GetYaccGrammarOutput& = delete;
+    auto operator=(GetYaccGrammarOutput&&) -> GetYaccGrammarOutput& = delete;
 
     static auto get_yacc_grammar(const std::string& infile,
                                  std::ofstream& fp_v,
@@ -782,9 +809,6 @@ struct GetYaccGrammarOutput
       -> GetYaccGrammarOutput;
 
   private:
-    /// token symbol.
-    std::string ysymbol{};
-
     /// Output of `process_yacc_file_input_section1`.
     struct Section1Output
     {
@@ -896,13 +920,27 @@ class StateHashTable
 class LR0
 {
   public:
-    explicit LR0(const Grammar& grammar,
+    explicit LR0(GetYaccGrammarOutput yacc_grammar_output,
                  const Options& options,
                  NewStates& new_states) noexcept
-      : grammar(grammar)
+      : grammar(std::move(yacc_grammar_output.grammar))
       , options(options)
       , new_states(new_states)
-    {}
+      , ParsingTblColHdr(std::move(yacc_grammar_output.parsing_tbl_col_hdr))
+    {
+        // Use a one-dimension array to store the matrix and
+        // calculate the row and column number myself:
+        // row i, col j is ParsingTable.at(col_no * i + j);
+        //
+        // Here we have:
+        // 0 <= i < total states count
+        // 0 <= j < col_no
+        size_t total_cells = PARSING_TABLE_INIT_SIZE * ParsingTblColHdr.size();
+        this->ParsingTable.reserve(4 * total_cells);
+        for (size_t i = 0; i < 4 * total_cells; i++) {
+            this->ParsingTable.emplace_back(std::nullopt);
+        }
+    }
     void update_parsing_table() noexcept;
     void output_parsing_table_lalr();
     void generate_lr0_parsing_machine(Queue& config_queue);
@@ -910,20 +948,49 @@ class LR0
                        StateHandle row,
                        ParsingAction action);
 
-    const Grammar&
-      grammar; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
-    const Options&
-      options; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
-    NewStates&
-      new_states; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
-                  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-    size_t n_state_opt1 = 0;
+    /// Update the destination state of a entry in the parsing table.
+    /// Used by updateRepeatedRow(), remove_unit_production_step3() and
+    /// remove_unit_production_step1and2().
+    /// Type of symbol is SymbolTableNode *.
+    /// Just copy the value of state_dest.
+    ///
+    /// Used in y.c and upe.c.
+    inline void update_action(const size_t col,
+                              const size_t row,
+                              const ParsingAction state_dest)
+    {
+        ParsingTable.at(row * ParsingTblColHdr.size() + col) = state_dest;
+    }
+    /// Given a state and a transition symbol, find the
+    /// action and the destination state.
+    ///
+    /// row - source state.
+    ///
+    /// Results are stored in variable state_dest.
+    ///
+    /// @return The found action, and the destination state.
+    ///
+    /// @example
+    /// ```cpp
+    /// auto [action, state_dest] = get_action(SymbolType::TERMINAL, 1, 1);
+    /// ```
+    [[nodiscard]] auto get_action(symbol_type symbol_type,
+                                  size_t col,
+                                  StateHandle row) const
+      -> std::pair<std::optional<Action>, StateHandle>;
+
+    const Grammar grammar;
+    const Options& options;
+    NewStates& new_states;
+    std::vector<std::optional<ParsingAction>> ParsingTable{};
+    /// For parsing table column header names.
+    /// Value = terminal_count + non_terminal_count + 1 columns.
+    std::vector<std::shared_ptr<SymbolTableNode>> ParsingTblColHdr{};
+    size_t n_state_opt1{};
 
   protected:
-    StateHashTable
-      state_hash_table{}; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+    StateHashTable state_hash_table{};
 
-  private:
     void add_transition_states2_new_lr0(const StateCollection& coll,
                                         std::shared_ptr<State> src_state);
     void transition_lr0(std::shared_ptr<State> s) noexcept;
@@ -939,31 +1006,50 @@ class LR0
 class YAlgorithm : public LR0
 {
   public:
-    YAlgorithm(const Grammar& grammar,
+    YAlgorithm(GetYaccGrammarOutput yacc_grammar_output,
                const Options& options,
                std::ofstream& fp_v,
                NewStates& new_states,
                std::optional<Queue>& config_queue) noexcept
-      : LR0(grammar, options, new_states)
+      : LR0(std::move(yacc_grammar_output), options, new_states)
       , config_queue(config_queue)
       , fp_v(fp_v)
     {}
-    /// In `y.cpp`
+    /// in `y.cpp`
     void init();
     void generate_parsing_machine();
-    /// In `upe.cpp`
+    /// for DEBUG use.
+    void print_parsing_table(std::ostream& os) const;
+    void get_final_state_list() const noexcept;
+
+    /// in `upe.cpp`
+
+    void get_actual_state_no();
     void remove_unit_production();
     void further_optimization();
     void show_stat(std::ostream& os) const noexcept;
     auto combine_compatible_states(std::shared_ptr<State> s_dest,
                                    const State& s_src) -> bool;
+    void print_final_parsing_table() const noexcept;
+    void print_condensed_final_parsing_table() const noexcept;
+
+    // in `gen_compiler.cpp`
+
+    void generate_compiler(YSymbol& y_symbol,
+                           std::string yystype_definition,
+                           const std::optional<struct LRkPTArray>& lrk_pt_array,
+                           const std::string& infile,
+                           const FileNames& files);
+
+    // in `gen_graphviz.cpp`
+    void gen_graphviz_input(
+      const std::string& y_gviz) const noexcept; /* For O0, O1 */
+    void gen_graphviz_input2(
+      const std::string& y_gviz) const noexcept; /* For O2, O3 */
 
   protected:
-    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     std::optional<Queue>& config_queue;
-    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     size_t n_state_opt12 = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     size_t n_state_opt123 = 0;
 
     void get_state_closure(std::shared_ptr<State> state);
@@ -972,7 +1058,7 @@ class YAlgorithm : public LR0
   private:
     std::ofstream& fp_v;
 
-    /// In `y.cpp`
+    // in `y.cpp`
     void init_start_state();
     void update_state_parsing_tbl_entry(const State& s);
     void insert_reduction_to_parsing_table(const Configuration* c,
@@ -980,10 +1066,22 @@ class YAlgorithm : public LR0
     void propagate_context_change(const State& s);
     auto add_transition_states2_new(StateCollection* coll,
                                     std::shared_ptr<State> rc_state) -> bool;
+    void write_parsing_tbl_row_lalr(std::ostream& os,
+                                    const StateHandle state) const noexcept;
+    void write_parsing_tbl_row(std::ostream& os,
+                               const StateHandle state) const noexcept;
+    void write_state_info(std::ostream& os, const State& s) const noexcept;
+    void write_state_collection_info(std::ostream& os) const noexcept;
+    void write_state_info_from_parsing_tbl(std::ostream& os) const noexcept;
+    void write_state_transition_list(std::ostream& os) const noexcept;
 
-    /// In `upe.cpp`
-    void remove_unit_production_step1and2(
-      const std::vector<std::shared_ptr<struct MRTreeNode>>& mr_leaves);
+    // in `upe.cpp`
+
+    void get_unit_prod_shift(
+      StateHandle state,
+      std::shared_ptr<SymbolTableNode> leaf,
+      const std::vector<std::shared_ptr<SymbolNode>>& parents,
+      std::vector<StateHandle>& unit_prod_dest_states) const;
     void insert_action_of_symbol(std::shared_ptr<SymbolTableNode> symbol,
                                  StateHandle new_state,
                                  size_t old_state_index,
@@ -992,6 +1090,24 @@ class YAlgorithm : public LR0
       StateHandle new_state,
       const std::vector<StateHandle>& old_states);
     void show_state_config_info(std::ostream& os) const noexcept;
+    void update_repeated_row(const StateHandle new_state,
+                             const StateHandle old_state,
+                             const StateHandle row) noexcept;
+    void update_repeated_rows(const StateHandle new_state,
+                              const StateHandle old_state) noexcept;
+    void remove_unit_production_step1and2(
+      const std::vector<std::shared_ptr<struct MRTreeNode>>& mr_leaves);
+    void remove_unit_production_step3();
+    void remove_unit_production_step4() const;
+    void write_parsing_table_col_header(std::ostream& os) const noexcept;
+    [[nodiscard]] auto is_equal_row(const StateHandle i,
+                                    const StateHandle j) const -> bool;
+    void get_reachable_states_for_symbol(
+      const std::string_view symbol,
+      const size_t cur_state,
+      std::vector<size_t>& states_reachable) const;
+    void get_reachable_states(const size_t cur_state,
+                              std::vector<size_t>& states_reachable) const;
 };
 
 /* Variables for parsing table. */
@@ -999,13 +1115,7 @@ class YAlgorithm : public LR0
 constexpr int CONST_ACC = -10000000; /* for ACC in parsing table */
 
 extern std::atomic_size_t PARSING_TABLE_SIZE;
-extern std::vector<std::optional<ParsingAction>> ParsingTable;
 extern size_t ParsingTblRows;
-/*
- * For parsing table column header names.
- * Value = terminal_count + non_terminal_count + 1 columns.
- */
-extern std::vector<std::shared_ptr<SymbolTableNode>> ParsingTblColHdr;
 /*
  * For final parsing table.
  */
@@ -1022,7 +1132,7 @@ extern std::vector<size_t> states_reachable;
 extern std::vector<StateHandle> actual_state_no;
 
 /* Statistical values. */
-extern int n_symbol;
+extern size_t n_symbol;
 extern size_t n_rule;
 extern size_t n_rule_opt;
 
@@ -1045,22 +1155,6 @@ is_goal_symbol(const Grammar& grammar,
                std::shared_ptr<const SymbolTableNode> snode) -> bool;
 extern auto
 get_actual_state(StateHandle virtual_state) -> std::optional<StateHandle>;
-/// Given a state and a transition symbol, find the
-/// action and the destination state.
-///
-/// row - source state.
-///
-/// Results are stored in variable state_dest.
-///
-/// @return The found action, and the destination state.
-///
-/// @example
-/// ```cpp
-/// auto [action, state_dest] = get_action(SymbolType::TERMINAL, 1, 1);
-/// ```
-extern auto
-get_action(symbol_type symbol_type, size_t col, StateHandle row)
-  -> std::pair<std::optional<Action>, StateHandle>;
 // extern bool isVanishSymbol(SymbolTableNode * n);
 extern auto
 is_parent_symbol(std::shared_ptr<const SymbolTableNode> s) -> bool;
@@ -1113,16 +1207,11 @@ print_parsing_table_note(std::ostream& os);
 extern auto
 insert_symbol_list_unique_inc(SymbolList& list,
                               std::shared_ptr<SymbolTableNode> snode) -> bool;
-extern void
-print_parsing_table(std::ostream& os,
-                    const Grammar& grammar); // for DEBUG use.
 
 extern auto
 has_common_core(std::shared_ptr<State> s1, std::shared_ptr<State> s2) -> bool;
 extern auto
 combine_context(Context& c_dest, const Context& c_src) -> bool;
-extern void
-write_parsing_table_col_header(std::ostream& os, const Grammar& grammar);
 
 /// Given a symbol, returns which column it locates in
 /// the parsing table.
@@ -1140,42 +1229,19 @@ get_col(const SymbolTableNode& n) -> size_t
     return n.seq.value();
 }
 
-/*
- * Update the destination state of a entry in the parsing table.
- * Used by updateRepeatedRow(), remove_unit_production_step3() and
- * remove_unit_production_step1and2().
- * Type of symbol is SymbolTableNode *.
- * Just copy the value of state_dest.
- *
- * Used in y.c and upe.c.
- */
-inline void
-update_action(const size_t col,
-              const size_t row,
-              const ParsingAction state_dest)
-{
-    ParsingTable.at(row * ParsingTblColHdr.size() + col) = state_dest;
-}
-
 /* Defined in upe.c */
 extern void
 write_actual_state_array(std::ostream& os);
-extern void
-print_final_parsing_table(const Grammar& grammar);
-extern void
-get_actual_state_no();
-extern void
-print_condensed_final_parsing_table(const Grammar& grammar);
 
-/* Defined in version.c */
+/* Defined in version.cpp */
 extern void
 print_version();
 
-/* Defined in hyacc_path.c */
+/* Defined in hyacc_path.cpp */
 extern void
 show_manpage();
 
-/* Defined in get_options.c */
+/* Defined in get_options.cpp */
 extern auto
 get_options(std::span<const std::string_view> args,
             Options& options,
@@ -1184,13 +1250,8 @@ get_options(std::span<const std::string_view> args,
 /* Defined in gen_compiler.cpp */
 // Length is ParsingTblRows (?)
 extern std::vector<StateHandle> final_state_list; // for final states.
-extern void
-generate_compiler(GetYaccGrammarOutput& yacc_grammar_output,
-                  const std::optional<struct LRkPTArray>& lrk_pt_array,
-                  const std::string& infile,
-                  const FileNames& files);
 
-/* functions in symbol_table.c */
+/* functions in symbol_table.cpp */
 extern void
 hash_tbl_init();
 extern auto
@@ -1235,17 +1296,7 @@ extern const std::string_view STR_END;
 extern const std::string_view STR_EMPTY;
 extern const std::string_view STR_ERROR;
 
-/* function in gen_graphviz.c */
-extern void
-gen_graphviz_input(const Grammar& grammar,
-                   const std::string& y_gviz,
-                   const Options& options); /* For O0, O1 */
-extern void
-gen_graphviz_input2(const Grammar& grammar,
-                    const std::string& y_gviz,
-                    const Options& options); /* For O2, O3 */
-
-/* functions in lr0.c */
+/* functions in lr0.cpp */
 
 /// Get the scanned symbol of configuration c.
 /// The scanned symbol can be obtained by nMarker pointer

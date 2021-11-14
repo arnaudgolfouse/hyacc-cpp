@@ -1503,13 +1503,14 @@ find_successor_state_no(const StateHandle state_no,
 
 /// Clear a parsing table row where lookahead is terminal.
 inline void
-clear_state_terminal_transitions(const Grammar& grammar, StateHandle state_no)
+clear_state_terminal_transitions(LaneTracing& lane_tracing,
+                                 StateHandle state_no)
 {
-    size_t start = state_no * ParsingTblColHdr.size();
-    size_t end =
-      (state_no * ParsingTblColHdr.size()) + (grammar.terminal_list.size() + 1);
+    size_t start = state_no * lane_tracing.ParsingTblColHdr.size();
+    size_t end = (state_no * lane_tracing.ParsingTblColHdr.size()) +
+                 (lane_tracing.grammar.terminal_list.size() + 1);
     for (size_t i = start; i < end; ++i) {
-        ParsingTable.at(i) = std::nullopt;
+        lane_tracing.ParsingTable.at(i) = std::nullopt;
     }
 }
 
@@ -1533,7 +1534,7 @@ void
 LaneTracing::resolve_lalr1_conflicts()
 {
     if constexpr (DEBUG_RESOLVE_CONFLICT) {
-        print_parsing_table(this->grammar.fp_v, this->grammar);
+        this->print_parsing_table(this->grammar.fp_v);
     }
 
     states_inadequate.count_unresolved = states_inadequate.states.size();
@@ -1552,7 +1553,7 @@ LaneTracing::resolve_lalr1_conflicts()
             std::cout << "-----clear state[" << i << "] = " << state_no
                       << ". len=" << ct << std::endl;
         }
-        clear_state_terminal_transitions(this->grammar, state_no);
+        clear_state_terminal_transitions(*this, state_no);
 
         // clear all the conflicts associated with S.
         clear_state_conflicts(state_no, this->new_states.states_new_array);
@@ -1592,7 +1593,7 @@ LaneTracing::resolve_lalr1_conflicts()
     }
 
     if constexpr (DEBUG_RESOLVE_CONFLICT) {
-        print_parsing_table(this->grammar.fp_v, this->grammar);
+        this->print_parsing_table(this->grammar.fp_v);
     }
 }
 
