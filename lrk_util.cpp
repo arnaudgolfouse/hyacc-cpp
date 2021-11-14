@@ -559,22 +559,19 @@ constexpr bool DEBUG_LRK_THEADS = false;
 /// @note k >= 2.
 /// @return a COPY of the head of the original string is returned.
 static auto
-get_string_with_k_non_vanish_symbol(SymbolList& alpha, size_t k) -> SymbolList
+get_string_with_k_non_vanish_symbol(const SymbolList& alpha,
+                                    SymbolList::const_iterator alpha_it,
+                                    size_t k) -> SymbolList
 {
-    if (alpha.empty() || k <= 0)
+    if (alpha_it == alpha.end() || k <= 0)
         return SymbolList{};
 
-    auto it = alpha.begin();
     SymbolList cpy_tail{};
-    cpy_tail.emplace_back(it->snode);
-    size_t i = (it->snode->is_vanish_symbol()) ? 0 : 1;
-    if (i == k)
-        return cpy_tail;
+    size_t i = 0;
 
-    ++it;
-    for (; it != alpha.end(); ++it) {
-        cpy_tail.emplace_back(it->snode);
-        if (!it->snode->is_vanish_symbol())
+    for (; alpha_it != alpha.end(); alpha_it++) {
+        cpy_tail.emplace_back(alpha_it->snode);
+        if (!alpha_it->snode->is_vanish_symbol())
             i++;
         if (i == k)
             break;
@@ -808,13 +805,15 @@ List::lrk_theads_rm_theads(size_t k, List& t_heads)
 /// Find theads of length k for string alpha.
 /// This is a set of strings.
 auto
-lrk_theads(const Grammar& grammar, SymbolList& alpha, const size_t k)
-  -> std::shared_ptr<List>
+lrk_theads(const Grammar& grammar,
+           const SymbolList& alpha,
+           SymbolList::const_iterator alpha_it,
+           const size_t k) -> std::shared_ptr<List>
 {
     if (alpha.empty())
         return nullptr;
 
-    SymbolList s = get_string_with_k_non_vanish_symbol(alpha, k);
+    SymbolList s = get_string_with_k_non_vanish_symbol(alpha, alpha_it, k);
 
     std::shared_ptr<List> t_heads =
       std::make_shared<List>(); // set of LR(k) theads.

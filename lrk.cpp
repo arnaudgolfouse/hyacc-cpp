@@ -218,7 +218,7 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, StateHandle state_no)
     if (s == nullptr)
         return;
 
-    std::cout << "\nedge_pushing on state " << state_no << std::endl;
+    std::cout << std::endl << "edge_pushing on state " << state_no << std::endl;
 
     Set<std::shared_ptr<CfgCtxt>> set_c{};
     Set<std::shared_ptr<CfgCtxt>> set_c2{};
@@ -255,12 +255,13 @@ LaneTracing::edge_pushing(LRkPTArray& lrk_pt_array, StateHandle state_no)
             int k1 = k - c->z; ///////////!!!!!!!!
 
             if (c->nMarker.empty()) {
-                std::cout << "Error: c->nMarker is empty. " << std::endl;
+                std::cout << "Error: c->nMarker is empty." << std::endl;
                 continue;
             }
-            // TODO: lrk_theads takes c->nMarker.next...
+            auto c_marker_it = c->nMarker.begin();
+            c_marker_it++;
             std::shared_ptr<List> phi =
-              lrk_theads(this->grammar, c->nMarker, k1);
+              lrk_theads(this->grammar, c->nMarker, c_marker_it, k1);
             if (phi == nullptr) {
                 // std::cout << "phi is nullptr. should not!" << std::endl;
                 continue;

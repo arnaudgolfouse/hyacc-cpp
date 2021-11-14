@@ -446,8 +446,10 @@ struct CfgCtxt
 
 // for LR(k) theads.
 extern auto
-lrk_theads(const Grammar& grammar, SymbolList& alpha, size_t k)
-  -> std::shared_ptr<List>;
+lrk_theads(const Grammar& grammar,
+           const SymbolList& alpha,
+           SymbolList::const_iterator alpha_it,
+           size_t k) -> std::shared_ptr<List>;
 
 /// @brief Holds the information passed to the lane-tracing algorithm.
 class LaneTracing : public YAlgorithm
