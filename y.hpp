@@ -665,9 +665,7 @@ struct StateCollection
  */
 struct Grammar
 {
-    explicit Grammar(std::ofstream& fp_v)
-      : fp_v(fp_v)
-    {}
+    explicit Grammar() = default;
     ~Grammar() noexcept = default;
     Grammar(const Grammar&) = delete;
     Grammar(Grammar&&) = default;
@@ -679,7 +677,6 @@ struct Grammar
     SymbolList terminal_list{};
     SymbolList non_terminal_list{};
     SymbolList vanish_symbol_list{};
-    std::ofstream& fp_v;
     SymbolList tokens{};
 
     /*
@@ -795,7 +792,7 @@ class GetYaccGrammarOutput
 
     constexpr static size_t SYMBOL_MAX_SIZE = 512;
 
-    explicit GetYaccGrammarOutput(std::ofstream& fp_v);
+    explicit GetYaccGrammarOutput();
     ~GetYaccGrammarOutput() = default;
     GetYaccGrammarOutput(const GetYaccGrammarOutput&) = delete;
     GetYaccGrammarOutput(GetYaccGrammarOutput&&) = default;
@@ -804,7 +801,6 @@ class GetYaccGrammarOutput
     auto operator=(GetYaccGrammarOutput&&) -> GetYaccGrammarOutput& = delete;
 
     static auto get_yacc_grammar(const std::string& infile,
-                                 std::ofstream& fp_v,
                                  uint32_t& expected_sr_conflict)
       -> GetYaccGrammarOutput;
 
@@ -922,9 +918,11 @@ class LR0
   public:
     explicit LR0(GetYaccGrammarOutput yacc_grammar_output,
                  const Options& options,
+                 std::ofstream fp_v,
                  NewStates& new_states) noexcept
       : grammar(std::move(yacc_grammar_output.grammar))
       , options(options)
+      , fp_v(std::move(fp_v))
       , new_states(new_states)
       , ParsingTblColHdr(std::move(yacc_grammar_output.parsing_tbl_col_hdr))
     {
@@ -981,6 +979,7 @@ class LR0
 
     const Grammar grammar;
     const Options& options;
+    std::ofstream fp_v;
     NewStates& new_states;
     std::vector<std::optional<ParsingAction>> ParsingTable{};
     /// For parsing table column header names.
@@ -1008,30 +1007,52 @@ class YAlgorithm : public LR0
   public:
     YAlgorithm(GetYaccGrammarOutput yacc_grammar_output,
                const Options& options,
-               std::ofstream& fp_v,
+               std::ofstream fp_v,
                NewStates& new_states,
                std::optional<Queue>& config_queue) noexcept
-      : LR0(std::move(yacc_grammar_output), options, new_states)
+      : LR0(std::move(yacc_grammar_output),
+            options,
+            std::move(fp_v),
+            new_states)
       , config_queue(config_queue)
-      , fp_v(fp_v)
     {}
     /// in `y.cpp`
     void init();
     void generate_parsing_machine();
     /// for DEBUG use.
-    void print_parsing_table(std::ostream& os) const;
+    void print_parsing_table();
     void get_final_state_list() const noexcept;
+    /// Algorithm:
+    ///
+    /// insert each symbol S in alpha to heads until S is NOT vanishable.
+    /// if S is a terminal, then insert S to theads; else insert to heads.
+    /// if all symbols are N.T., insert empty string to theads.
+    ///
+    /// for each symbol A in heads {
+    ///   for each grammar rule r where A is the LHS {
+    ///     for each symbol B in r's RHS until NOT vanishable {
+    ///       if B is NT, insert B to heads's tail;
+    ///       else B is T, insert (like insertion sort) to theads.
+    ///     }
+    ///   }
+    /// }
+    ///
+    /// @added to replace the old one on: 3/9/2008
+    ///
+    /// @note This will skip alpha's first element.
+    auto get_theads(const SymbolList& alpha,
+                    SymbolList::const_iterator alpha_it) -> SymbolList;
 
     /// in `upe.cpp`
 
     void get_actual_state_no();
     void remove_unit_production();
     void further_optimization();
-    void show_stat(std::ostream& os) const noexcept;
+    void show_stat() noexcept;
     auto combine_compatible_states(std::shared_ptr<State> s_dest,
                                    const State& s_src) -> bool;
-    void print_final_parsing_table() const noexcept;
-    void print_condensed_final_parsing_table() const noexcept;
+    void print_final_parsing_table() noexcept;
+    void print_condensed_final_parsing_table() noexcept;
 
     // in `gen_compiler.cpp`
 
@@ -1056,8 +1077,6 @@ class YAlgorithm : public LR0
     void state_transition(std::shared_ptr<State> state);
 
   private:
-    std::ofstream& fp_v;
-
     // in `y.cpp`
     void init_start_state();
     void update_state_parsing_tbl_entry(const State& s);
@@ -1074,6 +1093,15 @@ class YAlgorithm : public LR0
     void write_state_collection_info(std::ostream& os) const noexcept;
     void write_state_info_from_parsing_tbl(std::ostream& os) const noexcept;
     void write_state_transition_list(std::ostream& os) const noexcept;
+    void get_context(const Configuration& cfg, Context& context);
+    void get_config_successors(std::shared_ptr<State> s);
+    void get_successor_for_config(std::shared_ptr<State> s,
+                                  const Configuration& config);
+
+    // in `mrt.cpp`
+
+    auto build_multirooted_tree()
+      -> std::vector<std::shared_ptr<struct MRTreeNode>>;
 
     // in `upe.cpp`
 
@@ -1098,7 +1126,7 @@ class YAlgorithm : public LR0
     void remove_unit_production_step1and2(
       const std::vector<std::shared_ptr<struct MRTreeNode>>& mr_leaves);
     void remove_unit_production_step3();
-    void remove_unit_production_step4() const;
+    void remove_unit_production_step4();
     void write_parsing_table_col_header(std::ostream& os) const noexcept;
     [[nodiscard]] auto is_equal_row(const StateHandle i,
                                     const StateHandle j) const -> bool;

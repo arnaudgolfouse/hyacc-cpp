@@ -457,12 +457,12 @@ class LaneTracing : public YAlgorithm
   public:
     explicit LaneTracing(GetYaccGrammarOutput yacc_grammar_output,
                          const Options& options,
-                         std::ofstream& fp_v,
+                         std::ofstream fp_v,
                          NewStates& new_states,
                          std::optional<Queue>& config_queue)
       : YAlgorithm(std::move(yacc_grammar_output),
                    options,
-                   fp_v,
+                   std::move(fp_v),
                    new_states,
                    config_queue)
     {}

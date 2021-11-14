@@ -1478,8 +1478,7 @@ post_modification(Grammar& grammar)
     }
 }
 
-GetYaccGrammarOutput::GetYaccGrammarOutput(std::ofstream& fp_v)
-  : grammar(fp_v)
+GetYaccGrammarOutput::GetYaccGrammarOutput()
 {
     // insert special symbols to hash table.
     std::shared_ptr<SymbolTableNode> n =
@@ -1501,7 +1500,6 @@ GetYaccGrammarOutput::GetYaccGrammarOutput(std::ofstream& fp_v)
 /// Called by function main() in y.cpp.
 auto
 GetYaccGrammarOutput::get_yacc_grammar(const std::string& infile,
-                                       std::ofstream& fp_v,
                                        uint32_t& expected_sr_conflict)
   -> GetYaccGrammarOutput
 {
@@ -1515,7 +1513,7 @@ GetYaccGrammarOutput::get_yacc_grammar(const std::string& infile,
         throw std::runtime_error(std::string("can't open file ") + infile);
     }
 
-    GetYaccGrammarOutput output = GetYaccGrammarOutput(fp_v);
+    GetYaccGrammarOutput output = GetYaccGrammarOutput();
     expected_sr_conflict = 0;
 
     // Add a `$accept -> ...` rule.

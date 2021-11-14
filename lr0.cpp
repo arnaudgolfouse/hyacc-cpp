@@ -341,14 +341,14 @@ LR0::generate_lr0_parsing_machine(Queue& config_queue)
     std::shared_ptr<State> new_state = this->new_states.states_new->states_head;
 
     if (this->options.debug_gen_parsing_machine) {
-        this->grammar.fp_v << std::endl
+        this->fp_v << std::endl
                            << std::endl
                            << "--generate parsing machine--" << std::endl;
     }
 
     while (new_state != nullptr) {
         if (this->options.debug_gen_parsing_machine) {
-            this->grammar.fp_v << this->new_states.states_new->state_count
+            this->fp_v << this->new_states.states_new->state_count
                                << " states, current state is "
                                << new_state->state_no << std::endl;
         }

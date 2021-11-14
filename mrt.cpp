@@ -295,7 +295,7 @@ MRTreeNode::insert_parent_child_relation(
 }
 
 auto
-build_multirooted_tree(const Grammar& grammar) -> MRLeaves
+YAlgorithm::build_multirooted_tree() -> MRLeaves
 {
     // initialization.
     all_parents = create_mr_parents();
@@ -303,24 +303,24 @@ build_multirooted_tree(const Grammar& grammar) -> MRLeaves
     MRLeaves mr_leaves;
     mr_leaves.reserve(MR_LEAVES_INIT_MAX_COUNT);
 
-    for (size_t i = 1; i < grammar.rules.size(); i++) {
-        if (grammar.is_unit_production(i)) {
-            std::shared_ptr<MRTreeNode> lhs =
-              find_node_in_forest(mr_leaves, grammar.rules[i]->nLHS->snode);
+    for (size_t i = 1; i < this->grammar.rules.size(); i++) {
+        if (this->grammar.is_unit_production(i)) {
+            std::shared_ptr<MRTreeNode> lhs = find_node_in_forest(
+              mr_leaves, this->grammar.rules[i]->nLHS->snode);
             std::shared_ptr<MRTreeNode> rhs = find_node_in_forest(
-              mr_leaves, grammar.rules[i]->nRHS.front().snode);
+              mr_leaves, this->grammar.rules[i]->nRHS.front().snode);
             if (lhs != nullptr && rhs == nullptr) {
                 // insert rhs as child of lhs.
                 MRTreeNode::insert_child(
-                  lhs, mr_leaves, grammar.rules[i]->nRHS.front().snode);
+                  lhs, mr_leaves, this->grammar.rules[i]->nRHS.front().snode);
             } else if (lhs == nullptr && rhs != nullptr) {
                 // insert lhs as parent of rhs.
-                rhs->insert_parent(grammar.rules[i]->nLHS->snode);
+                rhs->insert_parent(this->grammar.rules[i]->nLHS->snode);
             } else if (lhs == nullptr && rhs == nullptr) {
                 // insert as new tree.
                 insert_new_tree(mr_leaves,
-                                grammar.rules[i]->nLHS->snode,
-                                grammar.rules[i]->nRHS.front().snode);
+                                this->grammar.rules[i]->nLHS->snode,
+                                this->grammar.rules[i]->nRHS.front().snode);
             } else { // just add this relationship.
                 MRTreeNode::insert_parent_child_relation(
                   lhs, rhs.get(), mr_leaves);
@@ -331,8 +331,8 @@ build_multirooted_tree(const Grammar& grammar) -> MRLeaves
     get_all_mr_parents(mr_leaves);
 
     if (Options::get().debug_build_multirooted_tree) {
-        write_mr_forest(grammar.fp_v, mr_leaves);
-        write_all_mr_parents(grammar.fp_v, mr_leaves);
+        write_mr_forest(this->fp_v, mr_leaves);
+        write_all_mr_parents(this->fp_v, mr_leaves);
     }
     return mr_leaves;
 }

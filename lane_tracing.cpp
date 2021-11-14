@@ -1537,7 +1537,7 @@ void
 LaneTracing::resolve_lalr1_conflicts()
 {
     if constexpr (DEBUG_RESOLVE_CONFLICT) {
-        this->print_parsing_table(this->grammar.fp_v);
+        this->print_parsing_table();
     }
 
     states_inadequate.count_unresolved = states_inadequate.states.size();
@@ -1596,7 +1596,7 @@ LaneTracing::resolve_lalr1_conflicts()
     }
 
     if constexpr (DEBUG_RESOLVE_CONFLICT) {
-        this->print_parsing_table(this->grammar.fp_v);
+        this->print_parsing_table();
     }
 }
 
@@ -1636,9 +1636,9 @@ LaneTracing::gpm(std::shared_ptr<State> new_state)
 
     while (new_state != nullptr) {
         if (this->options.debug_gen_parsing_machine) {
-            this->grammar.fp_v << this->new_states.states_new->state_count
-                               << " states, current state is "
-                               << new_state->state_no << std::endl;
+            this->fp_v << this->new_states.states_new->state_count
+                       << " states, current state is " << new_state->state_no
+                       << std::endl;
         }
 
         this->get_state_closure(new_state); // get closure of this state.
@@ -1974,9 +1974,8 @@ LaneTracing::get_the_context(const Configuration* o) noexcept(false)
     auto n_marker_it = o->nMarker.begin();
     n_marker_it++;
     SymbolList gamma_theads =
-      get_theads(this->grammar,
-                 o->nMarker,
-                 n_marker_it); // Note nullptr is a valid terminal.
+      this->get_theads(o->nMarker,
+                       n_marker_it); // Note nullptr is a valid terminal.
 
     // note that "" will be the first node in the INC list,
     // so it's not so inefficient.
@@ -2796,8 +2795,7 @@ LaneTracing::do_loop() noexcept(false)
             if constexpr (DEBUG_PHASE_1) {
                 std::cout << "gamma not nullptr, get theads." << std::endl;
             }
-            gamma_theads =
-              get_theads(this->grammar, o.nMarker, gamma); // get Heads.
+            gamma_theads = this->get_theads(o.nMarker, gamma); // get Heads.
             if constexpr (DEBUG_PHASE_1) {
                 my_show_t_heads(o.nMarker, gamma, gamma_theads);
             }
