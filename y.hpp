@@ -844,10 +844,10 @@ class GetYaccGrammarOutput
 
 struct StateArrayElement
 {
-    std::shared_ptr<State> state;
-    std::shared_ptr<Conflict> conflict;
-    size_t rs_count;
-    size_t rr_count;
+    std::shared_ptr<State> state = nullptr;
+    std::shared_ptr<Conflict> conflict = nullptr;
+    size_t rs_count = 0;
+    size_t rr_count = 0;
 };
 
 /// for indexed access of states_new states
@@ -957,7 +957,11 @@ class LR0
                               const size_t row,
                               const ParsingAction state_dest)
     {
-        ParsingTable.at(row * ParsingTblColHdr.size() + col) = state_dest;
+        while ((row * ParsingTblColHdr.size() + col) >=
+               this->ParsingTable.size()) {
+            this->ParsingTable.emplace_back(std::nullopt);
+        }
+        ParsingTable[row * ParsingTblColHdr.size() + col] = state_dest;
     }
     /// Given a state and a transition symbol, find the
     /// action and the destination state.
@@ -1173,6 +1177,9 @@ extern std::string HYACC_PATH;
 
 /* functions in y.c */
 // extern Configuration * createConfig();
+extern void
+expand_parsing_table(StateArray& states_new_array,
+                     const size_t parsing_table_size);
 extern auto
 create_config(const Grammar& grammar,
               size_t rule_id,

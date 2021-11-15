@@ -1932,6 +1932,16 @@ YAlgorithm::generate_parsing_machine()
     this->n_state_opt1 = this->new_states.states_new->state_count;
 }
 
+void
+expand_parsing_table(StateArray& states_new_array,
+                     const size_t parsing_table_size)
+{
+    const size_t size = states_new_array.size();
+    for (size_t i = size; i < parsing_table_size; i++) {
+        states_new_array.push_back(StateArrayElement{});
+    }
+}
+
 /////////////////////////////////////////////////////////////////
 // Parsing table functions.
 /////////////////////////////////////////////////////////////////

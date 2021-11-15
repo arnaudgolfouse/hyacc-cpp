@@ -30,6 +30,7 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 
 /// Add a new `Configuration` to `s.config`.
 static void
@@ -283,12 +284,17 @@ void
 LR0::output_parsing_table() noexcept
 {
     size_t rows = this->new_states.states_new_array.size();
-    int cols = n_symbol + 1;
+    size_t cols = n_symbol + 1;
 
     // expand size of parsing table array if needed.
-    if (rows * this->ParsingTblColHdr.size() >= PARSING_TABLE_SIZE) {
-        // TODO
-        // expand_parsing_table(this->new_states.states_new_array);
+    if (rows * this->ParsingTblColHdr.size() >= this->ParsingTable.size()) {
+        for (size_t i = this->ParsingTable.size();
+             i < rows * this->ParsingTblColHdr.size();
+             i++) {
+            this->ParsingTable.emplace_back(std::nullopt);
+        }
+        expand_parsing_table(this->new_states.states_new_array,
+                             this->ParsingTable.size());
     }
 
     for (size_t i = 0; i < cols * rows; ++i) {
@@ -297,7 +303,7 @@ LR0::output_parsing_table() noexcept
 
     for (size_t i = 0; i < rows; i++) {
         const std::shared_ptr<State> s =
-          this->new_states.states_new_array[i].state;
+          this->new_states.states_new_array.at(i).state;
         this->output_parsing_table_row(s);
     }
 }
@@ -306,21 +312,25 @@ void
 LR0::output_parsing_table_lalr()
 {
     size_t rows = this->new_states.states_new_array.size();
-    int cols = n_symbol + 1;
+    size_t cols = n_symbol + 1;
 
     // expand size of parsing table array if needed.
-    while (rows >= PARSING_TABLE_SIZE) {
-        // TODO
-        // expand_parsing_table(*this->new_states.states_new_array);
+    if (this->ParsingTable.size() <= rows) {
+        for (size_t i = this->ParsingTable.size(); i < rows; i++) {
+            this->ParsingTable.emplace_back(std::nullopt);
+        }
+        expand_parsing_table(this->new_states.states_new_array,
+                             this->ParsingTable.size());
     }
 
+	// TODO: why is this not the same as the size we just expanded to ?
     for (size_t i = 0; i < cols * rows; ++i) {
         this->ParsingTable.at(i) = std::nullopt;
     }
 
     for (size_t i = 0; i < rows; i++) {
         const std::shared_ptr<State> s =
-          this->new_states.states_new_array[i].state;
+          this->new_states.states_new_array.at(i).state;
         this->output_parsing_table_row_lalr(s);
     }
 }
@@ -342,15 +352,15 @@ LR0::generate_lr0_parsing_machine(Queue& config_queue)
 
     if (this->options.debug_gen_parsing_machine) {
         this->fp_v << std::endl
-                           << std::endl
-                           << "--generate parsing machine--" << std::endl;
+                   << std::endl
+                   << "--generate parsing machine--" << std::endl;
     }
 
     while (new_state != nullptr) {
         if (this->options.debug_gen_parsing_machine) {
             this->fp_v << this->new_states.states_new->state_count
-                               << " states, current state is "
-                               << new_state->state_no << std::endl;
+                       << " states, current state is " << new_state->state_no
+                       << std::endl;
         }
 
         get_closure_lr0(
