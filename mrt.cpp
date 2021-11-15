@@ -208,10 +208,12 @@ MRTreeNode::is_mr_leaf(const MRLeaves& mr_leaves) const noexcept
 }
 
 static void
-write_branch(std::ostream& os, const SymbolList& branch)
+write_branch(std::ostream& os,
+             const SymbolList& branch,
+             SymbolList::const_iterator branch_it)
 {
-    for (const auto& a : branch) {
-        os << a.snode->symbol << ", ";
+    for (; branch_it != branch.end(); branch_it++) {
+        os << branch_it->snode->symbol << ", ";
     }
 }
 
@@ -238,8 +240,11 @@ MRTreeNode::write_leaf_branch(std::ostream& os,
     }
 
     for (size_t i = 0; i < this->parent.size(); i++) {
-        if (i > 0)
-            write_branch(os, branch); // TODO: should be branch.next !
+        if (i > 0) {
+            auto branch_it = branch.begin();
+            branch_it++;
+            write_branch(os, branch, branch_it);
+        }
         this->parent[i]->write_leaf_branch(os, branch, branch_tail);
     }
 }
